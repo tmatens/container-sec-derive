@@ -78,9 +78,9 @@ func TestRun_OutFlagWritesSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v (stderr: %s)", err, stderr.String())
 	}
-	// Stdout cap list is unaffected by --out: machines read the sidecar,
-	// humans read stdout, they don't compete.
-	wantStdout := "CHOWN\nDAC_OVERRIDE\nFOWNER\nSETGID\nSETUID\n"
+	// Stdout compose stanza is unaffected by --out: machines read the
+	// sidecar JSON, humans paste the compose block, they don't compete.
+	wantStdout := "cap_drop:\n  - ALL\ncap_add:\n  - CHOWN\n  - DAC_OVERRIDE\n  - FOWNER\n  - SETGID\n  - SETUID\n"
 	if stdout.String() != wantStdout {
 		t.Errorf("stdout changed under --out:\ngot:\n%s\nwant:\n%s", stdout.String(), wantStdout)
 	}

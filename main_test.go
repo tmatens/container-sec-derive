@@ -143,6 +143,49 @@ func TestRun_FixtureMode(t *testing.T) {
 	}
 }
 
+func TestAggregate_TraceHealthPopulated(t *testing.T) {
+	input := `{"timestamp":1000,"capName":"CAP_CHOWN","container":{"id":"a"}}
+{"timestamp":1600,"capName":"CAP_SETUID","container":{"id":"a"}}
+{"type":"trace_health","events_recorded":200,"events_dropped":2}
+`
+	s, err := aggregate(strings.NewReader(input), "a", 500)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if s.TraceHealth.EventsRecorded != 200 || s.TraceHealth.EventsDropped != 2 {
+		t.Errorf("trace_health not captured: %+v", s.TraceHealth)
+	}
+	if s.TraceHealth.DropRate != 0.01 {
+		t.Errorf("DropRate = %v, want 0.01", s.TraceHealth.DropRate)
+	}
+}
+
+func TestAggregate_TraceHealthLastWins(t *testing.T) {
+	input := `{"type":"trace_health","events_recorded":100,"events_dropped":0}
+{"type":"trace_health","events_recorded":250,"events_dropped":5}
+`
+	s, err := aggregate(strings.NewReader(input), "", 0)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if s.TraceHealth.EventsRecorded != 250 || s.TraceHealth.EventsDropped != 5 {
+		t.Errorf("expected last trace_health to win, got %+v", s.TraceHealth)
+	}
+}
+
+func TestAggregate_TraceHealthLinesDoNotFeedCaps(t *testing.T) {
+	// A trace_health line must never be misread as a cap event.
+	input := `{"type":"trace_health","events_recorded":10,"events_dropped":0}
+`
+	s, err := aggregate(strings.NewReader(input), "", 0)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if len(s.Capabilities) != 0 {
+		t.Errorf("trace_health leaked into caps: %v", s.CapNames())
+	}
+}
+
 func TestRun_RequiresContainerOrFixture(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	err := run([]string{}, &out, &errBuf)

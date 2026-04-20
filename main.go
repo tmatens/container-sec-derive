@@ -39,6 +39,16 @@ type capEvent struct {
 	} `json:"container"`
 }
 
+// traceHealthEvent is IG's periodic ringbuf-health message. PLAN.md
+// §Event-loss reporting requires these counters be surfaced on every
+// run. Schema here is our best-effort; Step 11's IG version pin will
+// lock it against an upstream release.
+type traceHealthEvent struct {
+	Type           string `json:"type"`
+	EventsRecorded int    `json:"events_recorded"`
+	EventsDropped  int    `json:"events_dropped"`
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "csd:", err)
@@ -136,15 +146,30 @@ func observe(ctx context.Context, igBin, container string, initWindowMs int) (*S
 func aggregate(r io.Reader, container string, initWindowMs int) (*Sidecar, error) {
 	seen := map[string]struct{}{}
 	var (
-		firstTsMs   int64
-		firstSeen   bool
-		suppressed  int
+		firstTsMs      int64
+		firstSeen      bool
+		suppressed     int
+		latestHealth   *traceHealthEvent
 	)
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scan.Scan() {
 		line := scan.Bytes()
 		if len(line) == 0 {
+			continue
+		}
+		// Type-discriminate: trace_health / diagnostic lines are decoded
+		// first and never flow into the capability aggregator. Untagged
+		// lines fall through to the capEvent path (IG emits cap events
+		// without a "type" field at the pinned release).
+		var env struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(line, &env); err == nil && env.Type == "trace_health" {
+			var th traceHealthEvent
+			if err := json.Unmarshal(line, &th); err == nil {
+				latestHealth = &th
+			}
 			continue
 		}
 		var ev capEvent
@@ -181,6 +206,13 @@ func aggregate(r io.Reader, container string, initWindowMs int) (*Sidecar, error
 	sort.Strings(names)
 	s := NewSidecar()
 	s.Target.InitWindowSuppressed = suppressed
+	if latestHealth != nil {
+		s.TraceHealth.EventsRecorded = latestHealth.EventsRecorded
+		s.TraceHealth.EventsDropped = latestHealth.EventsDropped
+		if latestHealth.EventsRecorded > 0 {
+			s.TraceHealth.DropRate = float64(latestHealth.EventsDropped) / float64(latestHealth.EventsRecorded)
+		}
+	}
 	for _, n := range names {
 		s.Capabilities = append(s.Capabilities, Capability{Name: n})
 	}

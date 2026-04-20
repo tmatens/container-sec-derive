@@ -9,3 +9,4 @@
 {"timestamp":1700000000800,"comm":"postgres","pid":4012,"syscall":"chown","cap":0,"capName":"CAP_CHOWN","container":{"id":"abc123def456789","name":"postgres-1","image":"postgres:16"}}
 {"timestamp":1700000000900,"comm":"postgres","pid":4015,"syscall":"setuid","cap":7,"capName":"CAP_SETUID","container":{"id":"abc123def456789","name":"postgres-1","image":"postgres:16"}}
 {"timestamp":1700000001000,"comm":"curl","pid":9001,"syscall":"socket","cap":13,"capName":"CAP_NET_RAW","container":{"id":"ffff000011112222","name":"unrelated","image":"alpine:3"}}
+{"type":"trace_health","timestamp":1700000001100,"events_recorded":11,"events_dropped":0}

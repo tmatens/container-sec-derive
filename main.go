@@ -339,12 +339,16 @@ func finaliseTraceHealth(th *TraceHealth) {
 	}
 }
 
-// checkIGVersion runs `ig version --output json` and warns if the
-// detected release is outside [MinIGVersion, MaxTestedIGVersion].
+// checkIGVersion runs `ig version` and warns if the detected release
+// is not PinnedIGVersion. ig v0.51.0 does not support --output json
+// on `version`; the subcommand emits a single plain-text line like
+// "v0.51.0". We take the first whitespace-delimited token so future
+// ig releases that add trailing metadata still parse.
+//
 // v0.1-rc is warn-and-continue; PLAN.md §IG version pinning specifies
 // v1 promotes this to a hard SchemaMismatch exit.
 func checkIGVersion(igBin string, stderr io.Writer) {
-	out, err := exec.Command(igBin, "version", "--output", "json").Output()
+	out, err := exec.Command(igBin, "version").Output()
 	if err != nil {
 		// ig may be absent; observe() will surface the proper exit
 		// code. Only note it here if stderr is writable.
@@ -354,14 +358,11 @@ func checkIGVersion(igBin string, stderr io.Writer) {
 		return
 	}
 	var v struct {
-		Version string `json:"version"`
+		Version string
 	}
-	if err := json.Unmarshal(out, &v); err != nil || v.Version == "" {
-		// Older ig emitted plain text; first word is the version.
-		fields := strings.Fields(string(out))
-		if len(fields) > 0 {
-			v.Version = fields[0]
-		}
+	fields := strings.Fields(string(out))
+	if len(fields) > 0 {
+		v.Version = fields[0]
 	}
 	if v.Version == "" {
 		return

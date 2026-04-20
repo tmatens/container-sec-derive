@@ -150,6 +150,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		// Fixture mode: duration is unknown, so leave DurationSeconds=0
+		// (computeConfidence treats 0 as "not measured" and skips the
+		// soft-floor check).
+		computeConfidence(s)
 		printCaps(stdout, s.CapNames())
 		return nil
 	}
@@ -163,6 +167,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	s.DurationSeconds = int(duration.Seconds())
+	computeConfidence(s)
 	printCaps(stdout, s.CapNames())
 	return nil
 }
@@ -201,6 +207,7 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts) (*Sidecar, e
 // its own startup phase.
 type replicaState struct {
 	seen       map[string]struct{}
+	comms      map[string]struct{} // post-init-window comms; feeds confidence rubric
 	firstTsMs  int64
 	firstSeen  bool
 	suppressed int
@@ -264,7 +271,11 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		}
 		st, ok := replicas[rid]
 		if !ok {
-			st = &replicaState{seen: map[string]struct{}{}, sampleName: ev.Container.Name}
+			st = &replicaState{
+				seen:       map[string]struct{}{},
+				comms:      map[string]struct{}{},
+				sampleName: ev.Container.Name,
+			}
 			replicas[rid] = st
 		}
 		st.eventCount++
@@ -281,6 +292,9 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			continue
 		}
 		st.seen[name] = struct{}{}
+		if c := strings.TrimSpace(ev.Comm); c != "" {
+			st.comms[c] = struct{}{}
+		}
 	}
 	if err := scan.Err(); err != nil {
 		return nil, err
@@ -309,6 +323,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	s.Target.ReplicasObserved = len(replicas)
 
 	union := map[string]struct{}{}
+	commUnion := map[string]struct{}{}
 	var totalSuppressed int
 	for rid, st := range replicas {
 		totalSuppressed += st.suppressed
@@ -317,8 +332,12 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		for n := range st.seen {
 			union[n] = struct{}{}
 		}
+		for c := range st.comms {
+			commUnion[c] = struct{}{}
+		}
 	}
 	s.Target.InitWindowSuppressed = totalSuppressed
+	s.Target.DistinctComms = len(commUnion)
 
 	allNames := sortedStringSet(union)
 	for _, n := range allNames {
@@ -349,6 +368,10 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			s.TraceHealth.DropRate = float64(latestHealth.EventsDropped) / float64(latestHealth.EventsRecorded)
 		}
 	}
+	// Confidence scoring is a separate, callable-from-tests step. Callers
+	// (run/observe) populate DurationSeconds and any other late-arriving
+	// inputs before invoking computeConfidence so the rubric sees the
+	// final sidecar.
 	return s, nil
 }
 

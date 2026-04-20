@@ -66,6 +66,12 @@ type Target struct {
 	// dropped. Exposed so reviewers can tell whether a sparse derived
 	// cap set is genuine workload behavior or a window-too-wide artifact.
 	InitWindowSuppressed int `json:"init_window_suppressed"`
+	// DistinctComms is the count of distinct `comm` values observed across
+	// all replicas after the init-window filter. Feeds the comm-diversity
+	// factor in PLAN.md §Confidence scoring. Tracked here (rather than in
+	// a private aggregator field) so reviewers can audit the rubric input
+	// from the sidecar alone.
+	DistinctComms int `json:"distinct_comms"`
 }
 
 // Restart records a single exit-during-observation event. Attribution is

@@ -9,7 +9,7 @@ import "time"
 // majors. See PLAN.md §Output schema.
 const (
 	SchemaVersion = "1.0"
-	ToolVersion   = "0.1.0-alpha"
+	ToolVersion   = "0.1.0-beta"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."

@@ -1,0 +1,135 @@
+# Roadmap
+
+The architecture in [PLAN.md](PLAN.md) anticipates a multi-observer future. v1 ships exactly one observer (capabilities); each subsequent phase adds an observer to the same framework — same attribution layer, same output schema, additional formatters as needed.
+
+Phases are ordered by *leverage per unit of work*, not by chronology. Real ordering will adapt to user demand and prototype findings.
+
+---
+
+## v0.1 — Capability profiles [planning]
+
+See [PLAN.md](PLAN.md). Observes `cap_capable()`, emits minimum `cap_drop` / `cap_add`. Compose-lint rule: **CL-0006**.
+
+---
+
+## v0.2 — Read-only filesystem + tmpfs paths
+
+The single highest-value future observer. `read_only: true` is borderline-impossible to derive statically; users currently iterate by hand.
+
+- **Signal:** eBPF on `openat()` with `O_WRONLY` / `O_CREAT`, plus `unlink`, `rename`, paths outside bind-mounted volumes.
+- **Aggregation:** group writes by directory prefix; emit `tmpfs:` entries with size hints (peak observed bytes per path).
+- **Output:** `read_only: true` + `tmpfs:` list in compose format; equivalent in other formatters.
+- **Compose-lint rule:** **CL-0007**.
+- **Foot-gun:** distinguishing intentional volume writes (database files) from incidental writes (cache, runtime state). Requires correlating with the container's volume config.
+
+---
+
+## v0.3 — Privileged-mode decomposition
+
+`privileged: true` conflates many things: all caps + all device access + masked-path bypass + AppArmor unconfined + seccomp unconfined. Most containers tagged `privileged` actually need only a subset.
+
+- **Signal:** combine cap observer (v0.1) + device-open observer (`openat()` on `/dev/*`) + AppArmor denial observer + seccomp denial observer.
+- **Aggregation:** synthesize the minimum non-privileged equivalent: `cap_add: [...]` + `devices: [...]` + `security_opt: [...]`.
+- **Output:** drop `privileged: true`, emit the decomposed config.
+- **Compose-lint rule:** **CL-0002**.
+- **High value:** turns "your container needs privileged" into "actually it just needs `--device /dev/dri` + `CAP_SYS_NICE`".
+
+---
+
+## v0.4 — Docker socket API usage
+
+When a container mounts `/var/run/docker.sock`, *which* API endpoints does it actually call? Most socket-mount cases (Traefik, Portainer, Watchtower) only need a small subset; a properly scoped socket-proxy is safer than full socket access.
+
+- **Signal:** eBPF on `connect()` to the docker.sock path + observe HTTP requests on the resulting fd (or trace `read`/`write` and parse the request line).
+- **Aggregation:** distinct `(method, path-prefix)` tuples observed.
+- **Output:** suggested socket-proxy ACL config (e.g., for `tecnativa/docker-socket-proxy`), or confirms suppression is the only path forward.
+- **Compose-lint rule:** **CL-0001**.
+
+---
+
+## v0.5 — Dangerous cap_add validator
+
+Inverse of v0.1. When `cap_add: [SYS_ADMIN]` (or another dangerous cap) is set, observe which syscalls actually invoked it. Often the dangerous cap was a shotgun fix for a problem solvable with a finer-grained cap.
+
+- **Signal:** correlate `cap_capable` events for the dangerous cap with the calling syscall.
+- **Output:** "your SYS_ADMIN was only used for `mount()` — switch to user namespaces and a more specific cap" (with reference docs).
+- **Compose-lint rule:** **CL-0011**.
+
+---
+
+## v0.6 — Host network necessity
+
+Validate or refute the choice of `network_mode: host`. Most legitimate cases involve DHCP, multicast, or raw sockets — observable behaviors, not opaque needs.
+
+- **Signal:** detect DHCP client packets, multicast joins, raw socket creation.
+- **Output:** confirm legitimate host-network need with evidence, or suggest switching to a user-defined bridge.
+- **Compose-lint rule:** **CL-0008**.
+
+---
+
+## v0.7 — Device profile
+
+Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/dev/dri`), audio (`/dev/snd`), GPU (`/dev/nvidia*`), USB devices — none of these are derivable statically.
+
+- **Signal:** `openat()` on `/dev/*`.
+- **Output:** minimum `devices:` list.
+- **Adjacent to v0.3** but useful standalone.
+
+---
+
+## v0.8 — Network egress allowlist
+
+For users running iptables/nftables egress filtering or Cilium-style network policies, observed outbound destinations form a minimum allowlist.
+
+- **Signal:** eBPF on `connect()` for outbound TCP/UDP; aggregate per `(image, destination_host, port)`.
+- **Output:** allowlist in iptables/nftables/k8s NetworkPolicy/Cilium CNP format.
+- **Not a compose-lint rule today** but adjacent — could justify a new rule (`CL-XXXX: no egress restrictions`) using this tool as the data source.
+
+---
+
+## Stretch — beyond the named rules
+
+- **Resource baselines.** Observe peak memory / CPU usage; emit `mem_limit:` / `cpus:` recommendations. Could justify a new compose-lint rule.
+- **Seccomp profile generation.** Same shape as caps but for syscalls. **Explicitly defer** — this is solved by `oci-seccomp-bpf-hook` and Inspektor Gadget's `advise seccomp-profile`. We integrate or link, we don't reinvent.
+- **Process tree audit.** What binaries actually exec inside the container? Useful for catching multi-process containers and entrypoint surprises.
+- **File-read profiles.** Paths the container reads from (vs writes — covered by v0.2). Useful for designing volume mounts.
+- **LSM-BPF migration for capability observation.** Replace IG's kprobe + kretprobe pair with a single `SEC("lsm/capable")` BPF-LSM hook. One hook, native verdict semantic (LSM hooks return the access decision directly), no per-pid scratch map. Kernel ≥ 5.7 with `CONFIG_BPF_LSM=y`. No OSS tool currently ships this for capability observability — would be a clean upstream contribution to IG when distro support justifies dropping the kretprobe path. Tracking issue / target kernel floor TBD.
+
+---
+
+## Upstream contribution opportunities
+
+Independent of our own roadmap — places where work we'd do for ourselves also benefits the wider OSS ecosystem.
+
+- **Tracee `CapCapableRet` event** — Tracee's `cap_capable` event is entry-only (kprobe), while the same repo wires kretprobe pairs for `vfs_write` and other events. Adding a `CapCapableRet` sibling would expose the granted/denied verdict and make Tracee a viable runtime for tools like ours. Estimated as a small, idiomatic upstream PR (~80 lines BPF + Go event registration, mirroring existing kretprobe patterns). Worth contributing even though we don't use Tracee — broadens the ecosystem.
+- **IG `advise capabilities` gadget** — IG has `advise seccomp-profile` but no `advise capabilities` sibling. A narrow upstream PR modeled on the seccomp gadget — aggregate `trace_capabilities` events, emit a cap list, support a k8s-resource output mode — is a plausible contribution *once v1 ships*. Not the full `csd` aggregator (seven formatters, `verify` with self-consistency semantics, confidence rubric, compose-lint contract — all product, not infrastructure) and not a v1 path. See PLAN.md Decisions item 7 for the locked framing: `csd` ships against pinned IG releases and does not block on upstream. Pattern could repeat for v0.2+ (`advise tmpfs-paths`, `advise device-list`) — same split.
+- **bcc `libbpf-tools/capable` userspace surfacing** — the BPF object already captures the kretprobe verdict; the userspace `capable.c` doesn't print it. Small UX patch to surface "granted" vs "denied" in the existing tool.
+
+---
+
+## Out of scope
+
+- **Enforcement.** This tool only observes and recommends. Use AppArmor / seccomp / Pod Security Standards for runtime enforcement. We may *generate* enforcement artifacts (k8s SecurityContext, AppArmor profiles) but do not apply them.
+- **Static analysis of images or compose files.** That's compose-lint's job. We assume the container is running.
+- **Build-time / Dockerfile analysis.** Different problem class — best handled by `hadolint`, `dockerfile-utils`, etc.
+- **Long-running daemon as v1.** The "leave it on the host for a week" service shape is desirable but doubles the surface area (persistence, restart handling, metrics endpoint, security review of the always-on agent). v1 ships as a one-shot CLI; daemon shape is revisited in v2 if there's pull.
+- **Cross-host aggregation.** Multi-host observation, fleet-wide profile derivation, central policy generation — all interesting, all out of scope until there's evidence of demand.
+
+---
+
+## Cross-reference: compose-lint rule coverage
+
+| compose-lint rule | container-sec-derive observer | Phase |
+|---|---|---|
+| CL-0001 (docker socket mount) | Socket API usage | v0.4 |
+| CL-0002 (privileged) | Privileged decomposition | v0.3 |
+| CL-0003 (no-new-privileges) | — universal, no observation needed | n/a |
+| CL-0005 (unbound port) | — network policy decision, not observable | n/a |
+| CL-0006 (cap_drop) | Capability profile | **v0.1** |
+| CL-0007 (read_only) | Writable path detection | v0.2 |
+| CL-0008 (host network) | Host network necessity | v0.6 |
+| CL-0010 (host namespace) | (covered partially by v0.3) | v0.3 |
+| CL-0011 (dangerous cap_add) | Dangerous cap validator | v0.5 |
+| CL-0016 (secrets) | — static catches it | n/a |
+
+A profile contributed by container-sec-derive should cite its observer version + observed image digest + workload script in the compose-lint catalog entry. The contribution flow itself is part of v0.1 success criteria.

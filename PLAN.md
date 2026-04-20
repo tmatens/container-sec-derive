@@ -1,0 +1,544 @@
+# v1 Plan — Capability Profile Derivation
+
+## Goal
+
+Given a running container, observe every Linux capability check it makes, and emit the minimum `cap_drop` / `cap_add` configuration that would have satisfied the observed behavior. Output is reviewable, format-flexible, and confidence-tagged.
+
+## v1 user-facing UX
+
+**One-shot CLI**, not a long-running daemon. Daemon shape is a v2 question; one-shot proves the concept with half the surface area.
+
+```
+csd observe --image postgres:16 \
+            --duration 10m \
+            --format compose \
+            --workload ./exercises/postgres.sh
+```
+
+The `--workload` script is a user-supplied exercise: connect/CREATE/INSERT/SELECT/DROP/restart for postgres, GET/POST + SIGHUP reload for caddy, etc. Without a workload script, the tool only observes what the container does on its own (startup + steady idle), which is rarely sufficient.
+
+Output: a compose-format stanza (default) or a chosen alternative format, plus a JSON evidence sidecar (which capability, which PID, which syscall, when, how often).
+
+### Exit codes
+
+One table so CI integrators don't have to reverse-engineer the behavior:
+
+| Code | Meaning | Source |
+|---|---|---|
+| 0 | Observation completed; window fully elapsed; drop rate < 1% | `csd observe` normal path |
+| 0 | Verify outcome `consistent` | `csd verify` PASS |
+| 10 | Verify outcome `insufficient` (new denial) | `csd verify` FAIL |
+| 11 | Verify outcome `over_permissioned` (unused caps) | `csd verify` WARN — surfaced as nonzero so CI catches it |
+| 20 | Target exited early | `csd observe` |
+| 21 | Drop rate ≥ 10% | `csd observe` — profile not trustworthy |
+| 30 | IG schema/version mismatch (`SchemaMismatch`) | startup guard |
+| 31 | IG binary missing / not executable | startup guard |
+| 40 | Target-selection ambiguity (multiple replicas, no `--all-matching`) | startup guard |
+| 64 | Usage error (bad flags, missing args) | standard `EX_USAGE` |
+
+Codes 20/21 produce an artifact-with-caveat rather than no artifact: the sidecar still writes, confidence is auto-downgraded or forced to `low`, and the exit reason is captured in the sidecar's `target` or `trace_health` block.
+
+## Architecture
+
+The architecture must accommodate future observers (read_only paths, devices, socket use, etc.) without rewrites. v1 implements only the cap observer; the framework is shaped for the future.
+
+### Layers (bottom-up)
+
+1. **Observer** — eBPF program + userspace handler for one specific kernel signal. v1 ships exactly one: the `cap_capable` observer. Future observers (`writable_path`, `device_open`, `socket_connect`, etc.) plug into this same interface.
+2. **Container attribution** — shared layer that maps `(cgroup_id, pid)` → `(container_id, image, image_digest)`. Uses cgroup-ID-keyed metadata cache fed by the runtime's events stream. Docker first (`/var/run/docker.sock` + `/events`); Podman compatibility is a low-cost follow-up.
+3. **Aggregator** — per-observer logic that collapses raw events into a policy artifact. For caps: the set of distinct capabilities observed per image, with per-cap event counts and timing.
+4. **Formatter** — emits the policy artifact in a target syntax. v1 ships seven:
+   - `compose` — `cap_drop:` / `cap_add:` stanza (default)
+   - `compose-patch` — unified diff against a user-supplied compose file
+   - `docker-run` — `--cap-drop=ALL --cap-add=...` flag string
+   - `oci` — OCI runtime spec snippet
+   - `k8s` — `securityContext.capabilities`
+   - `json` — the evidence sidecar itself, machine-readable
+   - `compose-lint-profile` — YAML entry for contribution to the compose-lint catalog (see "Contribution loop with compose-lint" for the acceptance contract)
+5. **Validator (Phase 3)** — re-runs the container with the proposed config and the *same* workload, watches for new `cap_capable` denials, and reports consistency — not general sufficiency. See "Verify semantics" below.
+
+### Three-phase workflow
+
+Borrowed from AppArmor's complain → enforce pattern (and SELinux audit2allow):
+
+1. **Record** — run with no `cap_drop`, observe everything.
+2. **Suggest** — emit policy artifact + evidence sidecar. Optionally interactive (per-cap allow/deny prompts with evidence shown — aa-logprof style).
+3. **Verify** — re-run with the proposed config and the same workload; confirm no new denials and report which proposed caps went unused.
+
+v1 implements 1 and 2 fully; phase 3 ships in v1 as a separate `csd verify` subcommand.
+
+### Verify semantics
+
+`csd verify` is a self-consistency check, not a correctness proof. It answers one question: **"Under the same workload that produced this profile, does the proposed config work?"** It does not — and cannot — answer "is this profile sufficient for all future runs of this image." Workload coverage is the ceiling on both `observe` and `verify`.
+
+Output must reflect this framing. Results have three outcomes, each with explicit language:
+
+- **Consistent (PASS).** "No new capability denials observed under workload `X` (duration `Ns`). Profile is consistent with this workload's observed behavior. Paths not exercised by the workload are untested."
+- **Insufficient (FAIL).** "New denial: `CAP_SYS_PTRACE` (syscall `ptrace`, pid `1234`, comm `strace`, t=3.2s). Proposed profile is insufficient for this workload."
+- **Over-permissioned (WARN).** "Profile grants `CAP_X` but no check for `CAP_X` fired during verify. Either trim the profile or extend the workload to exercise the path that needed it."
+
+The WARN case is the quiet-but-important one: a trace may have captured a cap during `observe` that does not re-appear under the proposed config (because the denied path was short-circuited, because observation included init-process noise that got filtered differently on re-run, or because the path is genuinely flaky). Surfacing unused caps gives the reviewer something concrete to act on.
+
+Verify result schema (emitted alongside the evidence sidecar):
+
+```json
+{
+  "verify_of": "<path to evidence sidecar>",
+  "image_digest": "sha256:...",
+  "workload": "exercises/postgres.sh",
+  "duration_seconds": 600,
+  "outcome": "consistent | insufficient | over_permissioned",
+  "new_denials": [
+    { "cap": "SYS_PTRACE", "syscall": "ptrace", "pid": 1234, "comm": "strace", "offset_ms": 3200 }
+  ],
+  "unused_caps": ["FOWNER"],
+  "caveat": "Validates self-consistency under the recorded workload only. Paths not exercised by the workload are untested."
+}
+```
+
+The `caveat` field is hard-coded in the tool and always emitted. It exists precisely so downstream consumers (CI pipelines, compose-lint contribution flow, humans skimming) cannot accidentally promote "verify passed" to "profile is correct."
+
+### Workload coverage
+
+Workload coverage is the ceiling on correctness for both observation and bisection. A cap check that the workload never triggers is invisible to both methods — they are not independent measurements. v1 addresses this directly rather than treating it as a disclaimer.
+
+**Three mechanisms, all shipping in v1:**
+
+1. **Entrypoint cross-check (automatic).** At observation start, `csd` inspects the image's config (`docker inspect`) and the entrypoint / CMD script contents for capability-correlated signals. The heuristics are small and explicit:
+
+   | Signal | Expected caps |
+   |---|---|
+   | `chown` / `chmod` in entrypoint | CHOWN, FOWNER, DAC_OVERRIDE |
+   | `gosu` / `su-exec` / `setpriv` | SETUID, SETGID |
+   | `setcap cap_xxx=+ep` in Dockerfile history | the named cap, explicitly |
+   | `mount` / `umount` in entrypoint | SYS_ADMIN (flag for v0.5 dangerous-cap validator) |
+   | `ping` / ICMP tooling | NET_RAW |
+   | `bind()` to port < 1024 in entrypoint | NET_BIND_SERVICE |
+
+   The entrypoint-expected set is recorded in the sidecar as `expected_caps_from_entrypoint`. This is a **proxy**, not a coverage measurement — it catches the most common "workload didn't exercise initdb" class of gap without requiring per-image hand-written checklists.
+
+2. **Divergence surfacing.** If `observed ⊉ expected_caps_from_entrypoint`, confidence is forced to `low` and the sidecar records each missing cap as a `coverage_warning`:
+
+   ```
+   coverage_warning: entrypoint references `chown` but CHOWN was not observed.
+   Likely cause: workload did not exercise the initdb/first-boot path.
+   ```
+
+   This converts a silent coverage gap into a loud, actionable warning at the exact moment the user would otherwise commit the profile.
+
+3. **Steady-state detection (retained).** No new distinct capability in the final `max(60s, 25% of duration)` contributes one confidence factor. Kept as-is; it's a useful signal for "within the paths the workload exercised, we've converged."
+
+**What v1 explicitly does not do:** grade workload coverage itself. A probe-manifest (`probes.yaml`) that enumerates expected behaviors per reference image is v2 work and already has a forward-compat placeholder in `testdata/<image>/probes.yaml`. The entrypoint cross-check is the v1 proxy; the probe manifest is the v2 generalization.
+
+### Target selection and restart handling
+
+The relationship between a CLI invocation and the container(s) being observed is load-bearing for correctness. Get it wrong and events leak across containers, attribution drifts on restart, or the user silently observes the wrong workload. v1 rules:
+
+**Target selection.** Three mutually exclusive flags:
+
+- `--container <id-or-name>` — explicit, preferred. Unambiguous; no ambiguity if multiple replicas of the same image are running.
+- `--image <ref>` — convenience for the common case. Matches containers by image reference. If **zero** containers match, error and exit. If **more than one** container matches, error with a list of candidates and require the user to disambiguate with `--container` or opt in with `--all-matching`.
+- `--all-matching` — explicit opt-in to observe every running container of `--image <ref>`. Events are aggregated per `image_digest`, not per `container_id`. The evidence sidecar records the replica count and a per-replica event-count distribution so uneven coverage is visible ("replica A: 1,240 events, replica B: 8 events — workload likely did not exercise replica B").
+
+No "follow containers with this label" shape in v1. If it's needed, it lands as a flag, not as implicit behavior.
+
+**Restart handling.** A target container that exits during observation is not a bug but a data point. Default behavior:
+
+- Record the exit timestamp, exit code, and reason (signal / OOM / normal) in the evidence sidecar.
+- Retain all events captured up to the exit; do not discard.
+- Do **not** auto-follow a new container that happens to share the image ref. Attribution is cgroup-id-keyed; the new container is a different subject. Surface a confidence factor: "target exited at t=Xs; observation window was shorter than requested."
+- Exit code from `csd observe` reflects observation completeness: 0 if the full window elapsed without target exit; nonzero with a clear message if the target died early.
+
+Opt-in follow:
+
+- `--follow-restart` — re-attach when a new container with the matching image ref appears. Attribution keyed by `(image_ref, container_name)` across the gap. Gap duration and restart count are recorded in the sidecar. Explicitly opt-in because it changes the semantics of "what was observed" from "one container's behavior" to "a service's behavior across restarts."
+
+**For `csd verify`.** Verify starts a fresh container under the proposed config and runs the recorded workload against it. If that container crashes before the workload completes, verify reports `outcome: "insufficient"` with the exit reason and, if available, the denial that preceded the crash. A missing cap manifesting as "container died before it could do anything" is still insufficiency; the output should make the causal chain legible, not just report "container exited."
+
+**Verify runtime context.** "A fresh container under the proposed config" requires more than the image plus the proposed caps — non-trivial services need env vars, volumes, networks, healthchecks, and `depends_on` to start at all, and missing any of these will produce container-exit outcomes unrelated to capability sufficiency. v1 resolves this explicitly: `csd verify` accepts `--from-compose <path> --service <name>`, reads the service definition, overrides only the capability-related fields, and runs it. Images with no required runtime context (the tailscale reference image; a toy httpbin) can verify without a compose anchor. The constraint is surfaced in verify's `--help` and in its "insufficient" output when the cause is plausibly missing context rather than a missing cap. A `--from-inspect <container-id>` alternative that reconstructs context from `docker inspect` of the original observed container is v2 work and is not a v1 gap; users whose v1 workflow cannot produce a compose file for verify get the observe sidecar without self-verify, which is still a usable artifact.
+
+**Multi-replica verify.** Not in v1. Verify runs against a single fresh container. If `observe` used `--all-matching`, `verify` still emits a single profile and validates it against one replica; the user is responsible for deciding whether merged multi-replica observations apply uniformly to a single-replica verify run. Confidence language in the evidence sidecar surfaces this.
+
+### Output schema
+
+JSON evidence sidecar (canonical artifact; all formatters derive from this):
+
+```json
+{
+  "schema_version": "1.0",
+  "image": "postgres:16",
+  "image_digest": "sha256:...",
+  "observed_at": "2026-04-19T15:00:00Z",
+  "duration_seconds": 600,
+  "workload": "exercises/postgres.sh",
+  "tool_version": "0.1.0",
+  "kernel_version": "6.8.0-...",
+  "target": {
+    "mode": "container | image | all-matching",
+    "selector": "postgres:16",
+    "replicas_observed": 1,
+    "per_replica_event_counts": { "a1b2c3": 1240 },
+    "per_replica_caps": { "a1b2c3": ["CHOWN", "SETUID", "SETGID"] },
+    "replica_cap_disagreement": [],
+    "restarts": [],
+    "follow_restart": false,
+    "target_exited_early": false
+  },
+  "capabilities": [
+    {
+      "name": "CHOWN",
+      "event_count": 12,
+      "first_seen_offset_ms": 230,
+      "last_seen_offset_ms": 8420,
+      "comm_samples": ["postgres", "initdb"]
+    }
+  ],
+  "expected_caps_from_entrypoint": ["CHOWN", "FOWNER", "DAC_OVERRIDE", "SETUID", "SETGID"],
+  "coverage_warnings": [],
+  "trace_health": {
+    "events_recorded": 1240,
+    "events_dropped": 0,
+    "drop_rate": 0.0
+  },
+  "confidence": {
+    "level": "moderate",
+    "factors": [
+      "workload script provided",
+      "event count >= 1000 (1240)",
+      "comm diversity: 4 distinct non-init comms",
+      "observed set covers entrypoint-expected caps",
+      "no new caps observed in last 60s",
+      "ig kretprobe provided granted/denied verdict (no superset post-filtering needed)",
+      "init-process events filtered (first 500ms excluded)",
+      "single replica observed for full window; no restarts"
+    ]
+  },
+  "caveat": "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
+}
+```
+
+**Schema evolution policy.** `schema_version` follows semver-on-schema: additive, non-breaking field additions within a major (`1.x`); removals or semantic changes bump the major. Formatters accept any `1.x` and ignore unknown fields. Consumers (including the compose-lint contribution flow) must reject unknown majors. Every release ships a `schema_version` test fixture asserting the shape hasn't silently drifted.
+
+The schema is observer-agnostic-ish: future observers add their own top-level array (e.g., `"writable_paths"`) alongside `"capabilities"`. Formatters select the relevant section. Adding a new observer's top-level block is an additive change within the current major.
+
+**Per-replica disagreement.** `replica_cap_disagreement` lists any cap observed on fewer than all replicas under `--all-matching`. Non-empty disagreement forces confidence to at most `moderate`; a disagreement of > 1 cap forces `low` (see rubric). This prevents the tool from silently emitting the union of replica cap sets as if every replica needed every cap.
+
+## Tech stack — Inspektor Gadget
+
+**Selected:** wrap [Inspektor Gadget](https://github.com/inspektor-gadget/inspektor-gadget)'s `trace_capabilities` gadget via subprocess. `ig run trace_capabilities --output json` provides the event stream; our binary owns the aggregation, formatters, verifier, and CLI. Kernel floor 5.8 + cgroupv2.
+
+### Why IG over Tracee
+
+Both are Apache 2.0, both work on plain Docker, both populate container ID + image name + image digest. The decisive technical difference is the kernel hook:
+
+- **Tracee** attaches a **kprobe at `cap_capable` entry only**. Events fire for every capability *check* but carry no granted/denied verdict — the probe runs before the LSM resolves the access decision. This produces a *superset* of the caps actually held: every cap any LSM, runc init, or ld.so probe ever asked about. Verified in `pkg/ebpf/probes/event_probes.go` (`CapCapable: NewTraceProbe(KProbe, ...)`, no kretprobe sibling). Workable with aggressive userspace post-filtering, but the noise is real.
+- **Inspektor Gadget** attaches a **kprobe + kretprobe pair**. The kretprobe captures `event->capable = (PT_REGS_RC(ctx) == 0)` — `ret=0` means the capability was held, anything else means it was denied. Verified in `gadgets/trace_capabilities/program.bpf.c`. We get the verdict natively; no superset post-filtering needed.
+
+bcc's `libbpf-tools/capable.bpf.c` and Tetragon also implement the kretprobe approach. IG is the cleanest of the three for our use case because it ships with container/image enrichment, syscall context, and an `advise` framework already designed for emitting policy artifacts.
+
+### Why IG over building from scratch
+
+Cost of building a clean-room Go + cilium/ebpf daemon was estimated at ~3–5 weeks for v1 plus 1–2 weeks/quarter ongoing kernel-matrix maintenance. Cost of wrapping IG is ~1–2 weeks for v1 plus ~zero ongoing kernel maintenance (IG owns the BPF program and the kernel compatibility surface). The eBPF program is the hardest part to write and maintain; we don't gain anything by reimplementing it. Build-from-scratch only makes sense if (a) we need an output IG can't produce, (b) we need a daemon shape IG can't accommodate, (c) license incompatibility, or (d) IG governance turns adversely. None apply.
+
+### Why IG over Tracee for the multi-observer future
+
+The roadmap plans observers for read_only/tmpfs (v0.2), privileged decomposition (v0.3), Docker socket usage (v0.4), dangerous-cap validation (v0.5), host-network necessity (v0.6), device profiles (v0.7), and egress allowlists (v0.8). For each phase, IG's gadget catalog already covers most of the kernel-side work:
+
+| Phase | IG primitive | Fit |
+|---|---|---|
+| v0.1 caps | `trace_capabilities` | Direct |
+| v0.2 read_only / tmpfs | `trace_open` (path + attribution) | Direct |
+| v0.3 privileged decomp | `trace_capabilities` + `trace_open --filter /dev/*` + `trace_seccomp` | Composition |
+| v0.4 socket API usage | `trace_open` for socket fd + custom L7 parsing in userspace | Partial |
+| v0.5 dangerous cap validator | `trace_capabilities` (event already includes originating syscall) | Direct |
+| v0.6 host network necessity | `trace_tcp` + `trace_bind` + custom AF_PACKET gadget | Partial |
+| v0.7 device profile | `trace_open --filter /dev/*` | Direct |
+| v0.8 egress allowlist | `trace_tcpconnect` | Direct |
+
+IG's `advise` framework (`advise seccomp-profile` is the canonical precedent) is purpose-built for the observe → aggregate → emit-policy pattern. Every future observer becomes "one trace gadget + one advise gadget + our formatters." The shared cgroup→image attribution layer means we don't reimplement container enrichment per observer. Custom gadgets — needed for v0.4 L7 socket parsing and v0.6 DHCP semantics — distribute as OCI artifacts through IG's existing channel; no fork required.
+
+Tracee in contrast offers a 450-event firehose with no policy-emission framework. We'd build the `advise` layer ourselves six times over. Cross-event correlation is easier in Tracee's monolithic model, but extension is much rougher — adding a new observer means PRing into Tracee or running parallel infrastructure.
+
+### Integration shape
+
+```
+csd observe ──► subprocess: ig run trace_capabilities --output json --containername <id>
+                    │
+                    ▼
+              line-delimited JSON event stream (ringbuf-backed)
+                    │
+                    ▼
+            aggregator (in-process, Go) ──► canonical schema (see Output schema)
+                    │
+                    ▼
+            formatter (compose | docker-run | oci | k8s | json | compose-lint-profile)
+```
+
+`csd verify` runs the same loop a second time with the proposed `--cap-add` set applied to the container, watches for new denial events.
+
+### Runtime requirements
+
+**Supported:**
+- Linux kernel ≥ 5.8 with cgroupv2 unified hierarchy (or hybrid with cgroupv2 present)
+- Docker ≥ 20.10 or rootful Podman ≥ 4.0
+- BTF available at `/sys/kernel/btf/vmlinux` (CO-RE path; all mainstream distros since ~2022)
+- `ig` binary vendored in the release artifact (see "IG version pinning" below)
+
+**Privileges required by the `csd` container:** `CAP_BPF` + `CAP_PERFMON` + `--pid=host`, plus mounts of `/sys/kernel/btf/vmlinux:ro`, `/sys/fs/bpf`, and the runtime socket (`/var/run/docker.sock` for Docker; `/run/podman/podman.sock` for Podman).
+
+The `:ro` flag on a socket bind mount constrains the socket *file*, not the Docker/Podman API — any process with the socket has full container-create authority. `csd observe` is coded to issue only read calls; `csd verify` creates a fresh container under the proposed config and therefore exercises container-create deliberately. Both subcommands run with the same mount; the distinction is in the code path, not the permission grant. Downstream docs and README wording must not describe the socket mount as "read-only" without this qualification.
+
+Document `--privileged` as a fallback for distros where capability dropping breaks (some Docker Desktop / older containerd combos still demand it); note that this fallback suspends the tool's "no blast radius beyond what's strictly needed" posture, so it's a workaround, not a recommended configuration.
+
+**Explicit non-goals for v1:**
+- Kernels < 5.8 (RHEL 7, CentOS 7, Amazon Linux 1, Debian 10 stock). BCC-based approaches could cover these but are out of scope for a tool already dependent on IG. Not a "TODO" — a "won't."
+- Cgroupv1-only hosts. Unified or hybrid hierarchy required.
+- Rootless Podman. Cgroup path layout, user-namespace attribution, and non-root BPF privilege requirements differ enough that supporting it is separate work; tracked as a post-v1 item, not a v1 gap.
+- Kubernetes-in-cluster deployment as a DaemonSet. The `--format k8s` formatter is in scope; running `csd` itself inside k8s is not.
+
+**WSL2 / Docker Desktop:** nominally supported — kernel ≥ 5.8 and BTF are usually present on recent WSL2 kernel builds — but "usually" isn't a shippable claim. v1 ships a `make smoke-wsl2` target that runs the reference images inside WSL2 + Docker Desktop and reports pass/fail per image. If `/proc/version` matches `microsoft` / `WSL2`, `csd observe` surfaces a runtime note pointing at `docs/wsl2.md`, which lists known-good WSL2 kernel versions and where BTF has been observed absent.
+
+### IG version pinning and schema stability
+
+The tool wraps `ig`. Its event schema is stable across patch releases but has shifted across minors historically, and IG is mid-migration to image-based (WASM) gadgets — a large enough change that it deserves explicit handling, not a bullet.
+
+**Pinning policy.**
+- v1 pins a single IG release (target: latest stable `v0.x` line at v1 freeze). The pinned version is compiled in as `PINNED_IG_VERSION`.
+- `csd` calls `ig version --output json` at startup and compares against `MIN_IG_VERSION` and `MAX_TESTED_IG_VERSION`. Outside the window is a hard error with upgrade guidance, not a silent continue.
+- Schema parse failures at runtime exit with a `SchemaMismatch` error naming the detected IG version, the field that failed, and the expected schema. No partial results are emitted.
+
+**Compatibility test fixtures.** `testdata/ig-versions/<version>/trace_capabilities.ndjson` holds canned event samples per tested IG version. Unit tests parse each sample against the tool's schema. Bumping the pin is: add a new version directory, regenerate samples, re-run the v1 reference-image smoke, commit. CI refuses bumps that change sample output without an explicit parser update.
+
+**Contingency for gadget-format churn.** If IG deprecates `trace_capabilities` in favor of an image-based gadget equivalent during v1's life, we do not follow immediately. The tool's container image keeps the last-compatible `ig` pinned; we evaluate the new gadget on its own timeline and ship the migration as a minor release once the compatibility matrix is rebuilt. Users on the old version remain functional; new users get the upgrade when it's ready. This is a bounded, written-down fallback — not a scramble.
+
+### Confidence scoring
+
+The evidence sidecar emits `confidence.level` as `high` / `moderate` / `low`. The grade is mechanical — reviewers should be able to reproduce it from the `factors` list. Raw duration is a weak signal (a 10-minute idle container tells you nothing); the rubric uses event count and comm diversity instead, with duration as a soft floor only.
+
+**High — all of:**
+- Workload script provided and referenced by path in the sidecar.
+- Event count ≥ 1,000 `cap_capable` events (post-init-filter).
+- Comm diversity: ≥ 3 distinct `comm` values across events, excluding init-process filter window.
+- Observed cap set ⊇ `expected_caps_from_entrypoint` (no entrypoint-expected cap is missing).
+- Steady state reached: no new distinct capability observed in the final `max(60s, 25% of duration)`.
+- Event drop rate = 0.
+- Target did not exit early.
+- Observation duration ≥ 60 seconds (soft floor; prevents degenerate "one second, 1000 events" grades).
+- Single replica, or `--all-matching` with no replica below 10% of median event count and `replica_cap_disagreement` empty.
+
+**Moderate — High except exactly one of:**
+- No workload script provided (startup + idle only).
+- Event count 100–999.
+- Comm diversity = 2.
+- Event drop rate > 0 but < 1%.
+- Steady state not reached.
+- `replica_cap_disagreement` contains exactly 1 cap.
+
+**Low — any of:**
+- Observation duration < 60 seconds.
+- Event count < 100.
+- Comm diversity < 2.
+- Observed set missing a cap from `expected_caps_from_entrypoint` (`coverage_warnings` non-empty).
+- Event drop rate ≥ 1%.
+- Target exited early with a non-normal exit reason.
+- `replica_cap_disagreement` contains > 1 cap.
+- Two or more Moderate conditions simultaneously.
+
+Every condition that fires adds a factor to the sidecar's `factors` array. A user auditing a profile can trace the grade back to the evidence deterministically. New conditions are added to the rubric and applied uniformly — never special-cased per image.
+
+### Event-loss reporting
+
+IG is ringbuf-backed; bursty workloads can overrun the buffer. The tool must surface drops, not hide them:
+
+- At observation end, read IG's ringbuf drop counter (enable via `ig`'s verbose flag / perf buffer stats).
+- Always record `events_recorded`, `events_dropped`, and `drop_rate` in the evidence sidecar under a new `trace_health` block.
+- Drop rate > 0 adds a confidence factor naming the rate.
+- Drop rate ≥ 1% automatically downgrades confidence one level (see rubric above) and emits a stderr warning at observation end — not buried in the JSON, visible in the terminal.
+- If drop rate ≥ 10%, `csd observe` exits nonzero with guidance to shorten the observation window or filter the workload. A 10%-dropped profile is not trustworthy enough to quietly emit.
+
+### Future: LSM-BPF migration
+
+The cleanest long-term hook is `SEC("lsm/capable")` BPF-LSM — single hook, native verdict semantic (LSM hooks return the access decision directly), no entry/exit pair, no per-pid scratch map. Kernel ≥ 5.7 with `CONFIG_BPF_LSM=y`. Ubuntu enables it; RHEL only recently. No OSS tool currently ships this for capability observability — would be a clean upstream contribution to IG when distro support justifies dropping the kretprobe path. Tracked in ROADMAP.md as a stretch enhancement.
+
+## Validation methodology
+
+Ground truth for "did the tool produce the right answer?" is **bisection from `cap_drop=ALL`**, not comparison against a human-curated set. The kernel is the validator: if the workload runs cleanly under the bisected minimum, that set is — by definition — sufficient for that workload. Matching a compose-lint curated profile is a secondary cross-check, not the primary correctness signal.
+
+Layers in order of authority:
+
+1. **Bisection (ground truth).** Start the container with `--cap-drop=ALL`. Run the workload. When a `cap_capable` denial occurs (or the workload fails), add the denied cap and restart. Repeat until the workload completes with zero denials. The resulting set is the kernel's own answer for this workload + image digest.
+2. **BPF observation (this tool).** Should equal the bisected set. A subset indicates a trace gap (init filter too aggressive, event loss, timing); a superset indicates noisy userspace filtering. Either outcome is a bug to investigate.
+3. **Sufficiency smoke (`csd verify`).** Re-run the workload under the proposed config and confirm no new denials. Validates self-consistency, not general sufficiency — only as strong as the workload's coverage.
+4. **Static analysis of the entrypoint (smell check).** `gosu`/`su-exec` implies SETUID/SETGID; `chown` implies CHOWN/FOWNER/DAC_OVERRIDE; `setcap cap_xxx=+ep` in Dockerfile means that cap explicitly. Useful for flagging suspicious divergence (bisection says no CHOWN but the entrypoint does `chown` — did the workload exercise initdb?), never as primary derivation.
+
+Documentation is deliberately omitted from this list. Upstream docs are often absent and sometimes overly permissive (e.g., "needs SYS_ADMIN" when only `mount()` is used). They're fine as workload-design hints — "what behaviors should my exerciser trigger?" — but not as a correctness reference.
+
+**Bisection and observation are not independent measurements.** They share the workload: a cap path the workload never exercises is invisible to both. Agreement between them validates execution fidelity (the tool captured what the kernel saw), not coverage (the workload saw everything worth seeing). The independent signals that *do* exist are (a) the entrypoint cross-check (Architecture → Workload coverage), which flags the most common gap class automatically, and (b) the compose-lint curated-profile cross-check (v1 success criterion), which is a hand-curated reference — imperfect, but genuinely independent. v1 success criteria weight both explicitly so neither gets lost as "secondary."
+
+Reference-image selection matters for the same reason (below): small, exercisable surface areas give the workload a chance to hit every path.
+
+## Foot-guns to design around
+
+Documented up front because they're easy to miss in implementation:
+
+- **Init-process noise.** Capability checks from `runc:[*]` during container init are not part of the workload's true requirement set. Filter events by comm or by the first N ms of container life (configurable; default 500ms). IG's `--scope container` already drops host-side checks in-kernel; this is the additional userspace filter.
+- **Silent coverage gaps.** A cap check the workload doesn't trigger is invisible. Addressed by the entrypoint cross-check (Architecture → Workload coverage) and by steady-state detection; neither is a full coverage proof. "Verify passed" means "consistent with this workload," nothing more — the `caveat` field in the verify result is always-emitted and hard-coded so downstream consumers cannot strip it.
+- **Startup vs steady-state differ.** Users can scope recording windows (`--from-startup`, `--steady-state-only`, `--exclude-init-ms 500`).
+- **Digest, not tag, is the identity.** Profile entries derived under one digest are not transferable to the next bump without re-validation. Both are recorded in the sidecar; the compose-lint profile format pins the digest.
+- **Trace-derived profiles miss rare paths.** Docker's default seccomp profile was hand-curated, not auto-generated, for this reason. Output must encourage human review, not be applied blindly — which is why bisection is the correctness check rather than the curated reference (the curated reference can be wrong too, in either direction).
+- **Never emit binary artifacts.** Always reviewable YAML/JSON. Operators must be able to read and edit before applying.
+- **Multi-replica event bleed.** Default `--image` matching errors out on ambiguity. `--all-matching` records per-replica cap sets and surfaces disagreement explicitly — silently emitting the union of replica cap sets would pretend every replica needs every cap.
+- **Restart-driven attribution drift.** A container exiting mid-observation and a new one starting under the same image ref are two different subjects. v1 does not auto-follow; `--follow-restart` is opt-in and records the gap.
+- **Silent event loss.** Ringbuf overruns produce a shorter profile, not an error. The `trace_health` block + stderr warning + auto-confidence-downgrade + nonzero exit at ≥10% together ensure drops cannot silently yield an under-permissioned profile.
+- **Confidence grade drift.** The rubric is mechanical on purpose. Resist per-image exceptions — every one weakens the grade's meaning until it becomes decorative.
+- **Tool-posture vs tool-purpose tension.** `csd` requires the privileged mounts and caps it later helps users eliminate. That's fine for a one-shot observer with read-only socket access; it would not be fine for a long-running daemon with write access. Do not regress this in v2 daemon design without explicit security review.
+- **IG version churn.** Covered by `PINNED_IG_VERSION` / `MIN_IG_VERSION` / `MAX_TESTED_IG_VERSION` guards and per-version test fixtures; mentioned here only so nobody rediscovers it.
+
+## Decisions (locked)
+
+Locked calls. Reversible if evidence emerges, but the defaults stand.
+
+1. **Shape:** one-shot CLI for v1. Daemon revisited in v2.
+2. **Output formats shipped in v1:** `compose`, `compose-patch`, `docker-run`, `oci`, `k8s`, `json`, `compose-lint-profile`. `compose` is the default. `json` evidence sidecar is always emitted alongside whichever human-readable format is requested. k8s is in v1 (not deferred) because the derived-profile contribution loop must reach k8s-shaped consumers too.
+3. **License:** MIT. Matches compose-lint. `LICENSE` at repo root; README and module metadata reference it.
+4. **Repo home:** personal namespace (`github.com/tmatens/container-sec-derive`). Transfer to an org if the project grows beyond solo maintenance.
+5. **IG integration mechanism:** subprocess. IG's Go library API is not a stable user surface; subprocess isolation keeps our binary uncoupled from IG's internal refactors. Reconsider only if a v1 requirement needs access that the CLI doesn't expose.
+6. **IG binary shipping:** vendored in the release artifact, not fetched at runtime. Reproducibility and offline operation matter more than image size for this tool's use cases.
+7. **Relationship to IG upstream.** `csd` is a product wrapper around IG; it is not an IG fork and it is not an upstream `advise` gadget. IG's `advise seccomp-profile` is the template for how a capabilities analog could eventually land upstream, but the scope that belongs in `csd` — seven output formatters, `verify` with self-consistency semantics, deterministic confidence rubric, entrypoint cross-check, compose-lint contribution format — is product, not infrastructure. An `advise capabilities` gadget is tracked in ROADMAP as a post-v1 contribution opportunity. v1 ships `csd` against pinned IG releases; upstream contribution is decoupled from v1 delivery.
+8. **Scope lock:** v1 covers capabilities only. Read-only / tmpfs, privileged decomposition, device profiles, egress, and everything else live in ROADMAP and do not influence v1 architecture beyond "the observer/attribution/aggregator/formatter split must accept them later without rewrite." Scope creep into a second observer before v1 ships is explicitly off the table.
+9. **Compose-lint contribution contract lives here.** The acceptance bar for derived profiles (`validated_via`, digest, workload, duration, confidence floor) is defined in this repo as part of the `compose-lint-profile` formatter contract (see "Contribution loop with compose-lint"). A corresponding `compose-lint/CONTRIBUTING-PROFILES.md` is a *receiving-side* doc, nice-to-have, but `csd` v1 does not block on it. If compose-lint eventually tightens its bar, `csd`'s formatter updates in lockstep; the contract does not leak across repos in a way that makes v1 undeliverable.
+
+## Tool posture and distribution
+
+`csd` itself runs with `CAP_BPF` + `CAP_PERFMON` + `--pid=host` + read-only container-runtime socket access. A supply-chain compromise of the published binary would be high-blast-radius. Distribution decisions follow from that.
+
+**Release artifacts:**
+- Static Linux binary (`csd_linux_amd64`, `csd_linux_arm64`) for direct install.
+- Container image (`ghcr.io/tmatens/container-sec-derive:<tag>`) for "I already run compose-lint in Docker, give me the same shape."
+- Both artifacts per release. Users pick based on their workflow.
+
+**Supply-chain controls for v1:**
+- **Signing:** cosign signatures on both binary and image, keyless via Sigstore / GitHub OIDC. Verification command documented in README (`cosign verify ...`). Unsigned artifacts are not released.
+- **SBOM:** generated with `syft` at release time, published alongside artifacts in SPDX + CycloneDX JSON. Listed in the release checksums manifest.
+- **Checksums:** `SHA256SUMS` per release, itself cosign-signed.
+- **Vendored `ig` provenance:** the vendored IG binary is fetched at release time from IG's official release artifacts, verified against IG's own cosign signature, and pinned to a specific upstream release SHA. Both the IG version and its upstream digest are recorded in our SBOM and in the release's `SHA256SUMS` file. Release automation fails closed if IG's signature does not verify — no fallback download path, no "I'll just grab the latest" escape hatch.
+- **Reproducible builds:** goal, not hard requirement for v1. Pinned Go toolchain, `-trimpath`, vendored IG binary at a pinned SHA. Document current reproducibility status honestly in `docs/releases.md` rather than overclaiming — specifically, "signed" and "reproducible" are distinct properties and must not be conflated in release notes.
+
+**Threat model (one paragraph, not a full assessment):** if a compromised `csd` runs against a target container, it can read the target's process state and attach arbitrary eBPF programs with the privileges granted. It also has whatever the mounted container-runtime socket exposes — which, for the Docker and Podman sockets, is full container-create-and-mutate authority regardless of whether the bind mount is `:ro` (the `:ro` constrains the socket file, not the API). `csd observe` is coded to issue only read calls; `csd verify` creates a container under the proposed config to re-run the workload and therefore exercises the write surface deliberately. Either way, the *capability* granted to the process is root-equivalent on the host. Users treating `csd` as "untrusted until verified" should run it against throwaway infrastructure first and verify signatures before production use. Short statement: this tool's blast radius equals any other privileged BPF + Docker-API tool on the host.
+
+**Compose-lint contribution bar.** The acceptance contract for derived profiles is owned here (see Decisions item 9 and "Contribution loop with compose-lint" below), not cross-repo. Summary: `validated_via` lists `bpf-observation` + `ci-smoke`, image digest recorded, workload script committed, confidence ≥ `moderate`, reviewer spot-checks one cap against the entrypoint cross-check. Profiles below the bar land in an `exploratory/` path in the receiving catalog, not the main one.
+
+## Reference images and ground-truth fixtures
+
+Three reference images carry the v1 correctness story. Each ships in-repo with a workload script, a bisected ground-truth cap set, and the image digest the bisection was performed against.
+
+```
+testdata/
+  postgres/
+    workload.sh           # exerciser (connect, CREATE, INSERT, SELECT, DROP, restart)
+    ground_truth.json     # { image_digest, caps[], bisected_at, bisection_log }
+    probes.yaml           # (v2 forward-compat; empty placeholder for v1)
+  caddy/
+    workload.sh           # GET, POST, SIGHUP reload
+    ground_truth.json
+    probes.yaml
+  tailscale/
+    workload.sh           # userspace networking; no privileged caps expected
+    ground_truth.json
+    probes.yaml
+```
+
+Images were chosen because they have **small, exercisable surface areas** — not because they have good documentation. Opaque-workload images (proprietary apps, ML training, anything where we can't write a high-coverage exerciser) are poor ground-truth candidates regardless of documentation quality, and belong in exploratory/low-confidence territory after v1.
+
+`ground_truth.json` is regenerated by a `make ground-truth` target that runs the bisection loop. Bumping an image digest invalidates its ground truth and requires a re-run.
+
+## v0.1 build order
+
+v1 success criteria describe the finished shape, not the first thing to build. Shipping everything at once is the failure mode this section exists to prevent. Ordering:
+
+1. **v0.1.0-alpha — "does it work at all."** Subprocess `ig run trace_capabilities`, parse line-delimited JSON events, filter to one container by id, print the distinct cap set to stdout, exit. No formatters, no verify, no sidecar, no entrypoint cross-check, no confidence rubric. Ship against postgres only. The purpose of this milestone is to validate three load-bearing assumptions before any breadth work: (a) kretprobe pairing is deterministic enough on the reference workloads to hit the <0.1% miss rate the success criteria require; (b) cgroup-id attribution is stable across the lifetime of the observation and invalidates correctly on container exit; (c) the 500ms init filter (or whatever replacement) actually isolates init noise without dropping real workload events. If any of these fail on postgres, the remaining plan redirects — to LSM-BPF sooner, to a reconciliation layer, or to a different init-filter shape — *before* formatters and verify are built on top of them. Expected size: a few hundred lines of Go, one week.
+2. **v0.1.0-beta — "one reference image, end-to-end."** Add the canonical JSON evidence sidecar, the `compose` formatter, the confidence rubric *without* the entrypoint cross-check, and the postgres `workload.sh` + `ground_truth.json` (bisected by hand the first time; `make ground-truth` can wait). No verify, no other formatters, no multi-replica, no WSL2, no IG version fixtures. Proves the observe → aggregate → format loop against a real image.
+3. **v0.1.0-rc — "breadth."** Remaining six formatters (`compose-patch`, `docker-run`, `oci`, `k8s`, `json`, `compose-lint-profile`), entrypoint cross-check (which feeds the confidence rubric and the compose-lint contribution bar), caddy + tailscale reference images with bisected ground truth, `csd verify` with its three outcomes, `--all-matching` + replica disagreement, `trace_health` + event-loss handling.
+4. **v0.1.0 — "release."** WSL2 smoke matrix, IG version fixtures + parser, cosign pipeline, SBOM generation with vendored IG provenance recorded, full docs walkthrough. Everything remaining in "v1 success criteria."
+
+Each milestone has a working end-to-end demo path; none depend on a subsequent milestone's infrastructure. If alpha surfaces that kretprobe determinism on this kernel family isn't good enough, the sunk cost is one week, not three months.
+
+## v1 success criteria
+
+The tool is "v1 done" when every one of these is true. Checkboxes are binary; no partial credit.
+
+**Correctness**
+- [ ] For each reference image, `csd observe` output **equals** the bisected ground-truth cap set in `testdata/<image>/ground_truth.json`, OR any delta is explained by a recorded cause in the sidecar (`trace_health.drop_rate > 0`, `coverage_warnings` non-empty, init-filter suppression for a known comm). An unexplained subset or superset is a bug. "Delta-with-cause" is acceptable for v1 but each distinct cause must be listed in `docs/known-deltas.md` with reproduction steps; "the tool is non-deterministic" is not a documentable cause. kretprobe miss rate on the reference-image workloads must be < 0.1% (measured, not assumed) before this criterion is considered met.
+- [ ] Independent cross-check against compose-lint's curated postgres profile (CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID) agrees, or a documented divergence rationale ships with the profile. This is the independent-signal check called out in Validation methodology and is weighted equal to bisection, not secondary.
+- [ ] Entrypoint cross-check produces `expected_caps_from_entrypoint` for each reference image and agrees with observed caps under the committed workload (no `coverage_warnings`).
+
+**Verify**
+- [ ] `csd verify` correctly reports `consistent` when re-run under the proposed config. The `caveat` field is present and non-empty.
+- [ ] `csd verify` correctly reports `insufficient` with the offending cap when run with an artificially under-permissioned config.
+- [ ] `csd verify` correctly reports `over_permissioned` when given a config that grants caps the workload never triggers.
+
+**Output formatters (all seven)**
+- [ ] `compose`, `compose-patch`, `docker-run`, `oci`, `k8s`, `json`, `compose-lint-profile` produce valid syntax for their target.
+- [ ] `compose-lint-profile` enforces the acceptance contract (digest, duration, confidence, drop rate, coverage warnings, replica disagreement) and refuses to emit when unmet unless `--allow-exploratory` is passed.
+
+**Schema and evidence**
+- [ ] Sidecar includes `schema_version` set to `"1.0"` and is additive-stable: adding a second observer in v0.2 does not bump the major.
+- [ ] Event-loss reporting end-to-end: sidecar carries `trace_health.events_recorded` / `events_dropped` / `drop_rate`; ≥ 1% downgrades confidence; ≥ 10% exits nonzero. Covered by a synthetic-burst test.
+- [ ] Confidence rubric is deterministic: same inputs produce the same grade. Snapshot tests cover High / Moderate / Low transitions including entrypoint-miss → Low and replica-disagreement → Low.
+- [ ] Multi-replica: `--all-matching` populates `per_replica_caps` and `replica_cap_disagreement`; disagreement > 1 cap forces `low`.
+
+**Runtime**
+- [ ] IG compatibility fixtures (`testdata/ig-versions/<pinned>/`) exist; CI runs the parser against them; a deliberate wrong-version test exits with `SchemaMismatch` and produces no output.
+- [ ] Exit codes match the table in "Exit codes" for each documented scenario (covered by integration tests).
+- [ ] `make smoke-wsl2` passes on a current WSL2 + Docker Desktop install for all three reference images, or documents specific gaps in `docs/wsl2.md`.
+
+**Architecture forward-compat**
+- [ ] Architecture reviewed against the v0.2 (read_only) and v0.3 (privileged decomp) plans; no rewrite needed to add a second observer. Sidecar's top-level array shape accommodates a `writable_paths` sibling without schema-major bump.
+- [ ] Workload-script schema reviewed against the v2 daemon probe-manifest shape; a v1 `workload.sh` sits beside a future `probes.yaml` without rewriting surrounding metadata.
+
+**Release & docs**
+- [ ] Release artifacts (binary + container image) are cosign-signed; `SHA256SUMS` and SBOMs are published; README documents the verification command.
+- [ ] Documentation walks a user from "I have a new image" through observe → verify → `compose-lint-profile` emit → PR.
+
+## Contribution loop with compose-lint
+
+The JSON evidence sidecar is directly translatable to a compose-lint profile entry. The `--format compose-lint-profile` formatter emits exactly this shape, ready to PR:
+
+```yaml
+# compose-lint cap_profiles.yml entry derived from container-sec-derive
+postgres:
+  caps: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
+  derivation:
+    tool: container-sec-derive
+    tool_version: 0.1.0
+    schema_version: "1.0"
+    duration_seconds: 600
+    workload: exercises/postgres.sh
+    confidence: moderate
+  validated_image: postgres:16@sha256:...
+  validated_date: 2026-04-19
+  validated_via: [bpf-observation, ci-smoke]
+```
+
+**Acceptance contract (owned by this repo, honored by the formatter).** The formatter refuses to emit a profile entry unless:
+
+- `schema_version` is set and within the current major.
+- `image_digest` is present.
+- `workload` file path is set and the file is readable at emit time.
+- `duration_seconds` ≥ 300 (5 minutes).
+- `confidence.level` is `high` or `moderate`. `low`-confidence profiles fail emit with a pointer to the `coverage_warnings` and `factors` that caused the downgrade.
+- `coverage_warnings` is empty. (Entrypoint-expected caps must be covered by observation.)
+- `trace_health.drop_rate` < 1%.
+- `replica_cap_disagreement` is empty. (For `--all-matching` runs, either the replicas agree or the user explicitly picks one.)
+
+A user who wants to contribute a `low`-confidence profile for exploratory review uses `--format compose-lint-profile --allow-exploratory`, which emits under an `exploratory:` top-level key and annotates every failed check. The receiving catalog decides whether to accept such entries in an `exploratory/` subdirectory; `csd`'s contract only guarantees the annotation.
+
+**Re-validation on digest bump.** `csd observe` output is deterministic enough for sidecar-to-sidecar diff to drive re-validation:
+
+1. CI pins `image_digest` in the derived profile.
+2. On registry digest change, CI re-runs `csd observe` with the committed workload against the new digest.
+3. CI diffs the new sidecar's `capabilities[].name` list against the prior profile's `caps`.
+4. No diff → profile re-validated, `validated_date` and `validated_image` bumped.
+5. Diff → profile is invalidated; human review required; the diff becomes the PR body.
+
+v1 does not ship a `csd drift` subcommand — the diff is a shell one-liner and a dedicated subcommand is premature before real users surface a need. Revisit in v0.1.x if the one-liner proves insufficient.

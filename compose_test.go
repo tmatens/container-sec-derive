@@ -66,7 +66,7 @@ func TestRun_UnknownFormatIsUsageError(t *testing.T) {
 	// EX_USAGE with a guiding message, not as a silent fall-through.
 	var out, errBuf bytes.Buffer
 	err := run([]string{
-		"--fixture", "testdata/sample.ndjson",
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
 		"--format", "k8s",
 	}, &out, &errBuf)
@@ -87,7 +87,7 @@ func TestRun_ExplicitComposeFormatWorks(t *testing.T) {
 	// when the default would do).
 	var out, errBuf bytes.Buffer
 	err := run([]string{
-		"--fixture", "testdata/sample.ndjson",
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
 		"--format", "compose",
 	}, &out, &errBuf)

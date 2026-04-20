@@ -77,7 +77,7 @@
   "expected_caps_from_entrypoint": [],
   "coverage_warnings": [],
   "trace_health": {
-    "events_recorded": 18,
+    "events_recorded": 10,
     "events_dropped": 0,
     "drop_rate": 0
   },

@@ -37,8 +37,8 @@ func TestRun_ExitCode_UsageOnBadFlagCombo(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"container-and-image", []string{"--fixture", "testdata/sample.ndjson", "--container", "x", "--image", "y"}},
-		{"all-matching-without-image", []string{"--fixture", "testdata/sample.ndjson", "--container", "x", "--all-matching"}},
+		{"container-and-image", []string{"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "x", "--image", "y"}},
+		{"all-matching-without-image", []string{"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "x", "--all-matching"}},
 		{"no-target", []string{}},
 		{"unknown-flag", []string{"--nope"}},
 	}
@@ -60,7 +60,7 @@ func TestRun_ExitCode_TargetAmbiguous(t *testing.T) {
 	// sample.ndjson has two postgres replicas; --image without
 	// --all-matching is the documented ambiguity case.
 	var out, errBuf bytes.Buffer
-	err := run([]string{"--fixture", "testdata/sample.ndjson", "--image", "postgres:16"}, &out, &errBuf)
+	err := run([]string{"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--image", "postgres:16"}, &out, &errBuf)
 	if err == nil {
 		t.Fatal("expected ambiguity error")
 	}
@@ -79,7 +79,12 @@ func TestRun_ExitCode_DropRateExcessive(t *testing.T) {
 	// PLAN.md §Exit codes: drop rate >= 10% is artifact-with-caveat --
 	// caps must still print, and the exit code signals untrustworthiness.
 	var out, errBuf bytes.Buffer
-	err := run([]string{"--fixture", "testdata/high_drop_rate.ndjson", "--container", "t", "--init-window-ms", "0"}, &out, &errBuf)
+	err := run([]string{
+		"--fixture", "testdata/ig-versions/v0.51.0/high_drop_rate.ndjson",
+		"--fixture-stderr", "testdata/ig-versions/v0.51.0/high_drop_rate.stderr",
+		"--container", "t",
+		"--init-window-ms", "0",
+	}, &out, &errBuf)
 	if err == nil {
 		t.Fatal("expected drop-rate error")
 	}

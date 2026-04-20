@@ -164,8 +164,8 @@ func TestConfidence_ZeroEventsDoesNotDoubleCount(t *testing.T) {
 
 // Aggregating a real fixture should produce a graded sidecar end-to-end.
 func TestConfidence_PopulatedByAggregatePlusFinalize(t *testing.T) {
-	input := `{"timestamp":1000,"comm":"postgres","capName":"CAP_CHOWN","container":{"id":"a"}}
-{"timestamp":1600,"comm":"initdb","capName":"CAP_SETUID","container":{"id":"a"}}
+	input := `{"timestamp":1000,"cap":"CAP_CHOWN","proc":{"comm":"postgres","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":""}}
+{"timestamp":1600,"cap":"CAP_SETUID","proc":{"comm":"initdb","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":""}}
 `
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
 	if err != nil {

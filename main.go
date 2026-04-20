@@ -73,11 +73,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("open fixture: %w", err)
 		}
 		defer src.Close()
-		caps, err := aggregate(src, *container)
+		s, err := aggregate(src, *container)
 		if err != nil {
 			return err
 		}
-		printCaps(stdout, caps)
+		printCaps(stdout, s.CapNames())
 		return nil
 	}
 
@@ -86,17 +86,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 	ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
 	defer timeoutCancel()
 
-	caps, err := observe(ctx, *igBin, *container)
+	s, err := observe(ctx, *igBin, *container)
 	if err != nil {
 		return err
 	}
-	printCaps(stdout, caps)
+	printCaps(stdout, s.CapNames())
 	return nil
 }
 
 // observe spawns `ig run trace_capabilities --output json` and aggregates
 // events for the lifetime of ctx.
-func observe(ctx context.Context, igBin, container string) ([]string, error) {
+func observe(ctx context.Context, igBin, container string) (*Sidecar, error) {
 	cmd := exec.CommandContext(ctx, igBin, "run", "trace_capabilities", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -106,7 +106,7 @@ func observe(ctx context.Context, igBin, container string) ([]string, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
-	caps, aggErr := aggregate(stdout, container)
+	s, aggErr := aggregate(stdout, container)
 	// Wait for ig to exit. A context-cancel kill is the normal termination
 	// path for the timed observation window, so we don't propagate that as
 	// an error.
@@ -117,13 +117,14 @@ func observe(ctx context.Context, igBin, container string) ([]string, error) {
 	if waitErr != nil && ctx.Err() == nil {
 		return nil, fmt.Errorf("ig exited: %w", waitErr)
 	}
-	return caps, nil
+	return s, nil
 }
 
 // aggregate reads NDJSON events from r, filters to the given container
-// (by id or name; empty string matches all), and returns the sorted set
-// of distinct capability names observed.
-func aggregate(r io.Reader, container string) ([]string, error) {
+// (by id or name; empty string matches all), and returns a *Sidecar whose
+// Capabilities slice holds the sorted distinct caps. Counts and offsets
+// are left at zero values here; Steps 3+ populate them.
+func aggregate(r io.Reader, container string) (*Sidecar, error) {
 	seen := map[string]struct{}{}
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -151,12 +152,16 @@ func aggregate(r io.Reader, container string) ([]string, error) {
 	if err := scan.Err(); err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(seen))
+	names := make([]string, 0, len(seen))
 	for k := range seen {
-		out = append(out, k)
+		names = append(names, k)
 	}
-	sort.Strings(out)
-	return out, nil
+	sort.Strings(names)
+	s := NewSidecar()
+	for _, n := range names {
+		s.Capabilities = append(s.Capabilities, Capability{Name: n})
+	}
+	return s, nil
 }
 
 func matchesContainer(ev capEvent, target string) bool {

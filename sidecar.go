@@ -101,6 +101,18 @@ type Confidence struct {
 	Factors []string `json:"factors"`
 }
 
+// CapNames returns the capability names from s.Capabilities in the order
+// aggregate() stored them (sorted ascending). Formatters and the v0.1
+// stdout path both go through this helper so the one source of truth for
+// "the observed cap set" is the Sidecar, not a parallel slice.
+func (s *Sidecar) CapNames() []string {
+	out := make([]string, 0, len(s.Capabilities))
+	for _, c := range s.Capabilities {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
 // NewSidecar returns a Sidecar with identity fields locked and every
 // collection pre-initialized to empty (not nil). Empty vs null matters
 // because downstream parsers (including the compose-lint contribution

@@ -13,13 +13,13 @@ func TestAggregate_DistinctCapsSorted(t *testing.T) {
 {"capName":"CAP_CHOWN","container":{"id":"abc123def456","name":"pg"}}
 {"capName":"CAP_DAC_OVERRIDE","container":{"id":"abc123def456","name":"pg"}}
 `
-	caps, err := aggregate(strings.NewReader(input), "pg")
+	s, err := aggregate(strings.NewReader(input), "pg")
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
 	want := []string{"CHOWN", "DAC_OVERRIDE", "SETUID"}
-	if !equalSlice(caps, want) {
-		t.Errorf("caps = %v, want %v", caps, want)
+	if !equalSlice(s.CapNames(), want) {
+		t.Errorf("caps = %v, want %v", s.CapNames(), want)
 	}
 }
 
@@ -27,23 +27,23 @@ func TestAggregate_FiltersByContainer(t *testing.T) {
 	input := `{"capName":"CAP_CHOWN","container":{"id":"aaa","name":"pg"}}
 {"capName":"CAP_NET_RAW","container":{"id":"bbb","name":"other"}}
 `
-	caps, err := aggregate(strings.NewReader(input), "pg")
+	s, err := aggregate(strings.NewReader(input), "pg")
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"CHOWN"}) {
-		t.Errorf("expected only CHOWN for pg, got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+		t.Errorf("expected only CHOWN for pg, got %v", s.CapNames())
 	}
 }
 
 func TestAggregate_ContainerIDPrefix(t *testing.T) {
 	input := `{"capName":"CAP_SETGID","container":{"id":"abcdef1234567890","name":""}}` + "\n"
-	caps, err := aggregate(strings.NewReader(input), "abcdef")
+	s, err := aggregate(strings.NewReader(input), "abcdef")
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"SETGID"}) {
-		t.Errorf("prefix match failed, got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"SETGID"}) {
+		t.Errorf("prefix match failed, got %v", s.CapNames())
 	}
 }
 
@@ -51,12 +51,12 @@ func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
 	input := `{"capName":"CAP_CHOWN","container":{"id":"a"}}
 {"capName":"CAP_SETUID","container":{"id":"b"}}
 `
-	caps, err := aggregate(strings.NewReader(input), "")
+	s, err := aggregate(strings.NewReader(input), "")
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"CHOWN", "SETUID"}) {
-		t.Errorf("got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("got %v", s.CapNames())
 	}
 }
 
@@ -65,12 +65,12 @@ func TestAggregate_SkipsMalformedLines(t *testing.T) {
 		`{"capName":"CAP_CHOWN","container":{"id":"a"}}` + "\n" +
 		"\n" + // blank line
 		`{"capName":"CAP_SETUID","container":{"id":"a"}}` + "\n"
-	caps, err := aggregate(strings.NewReader(input), "a")
+	s, err := aggregate(strings.NewReader(input), "a")
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"CHOWN", "SETUID"}) {
-		t.Errorf("got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("got %v", s.CapNames())
 	}
 }
 

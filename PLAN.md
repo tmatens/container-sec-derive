@@ -182,7 +182,8 @@ JSON evidence sidecar (canonical artifact; all formatters derive from this):
     "replica_cap_disagreement": [],
     "restarts": [],
     "follow_restart": false,
-    "target_exited_early": false
+    "target_exited_early": false,
+    "init_window_suppressed": 2
   },
   "capabilities": [
     {
@@ -222,6 +223,8 @@ JSON evidence sidecar (canonical artifact; all formatters derive from this):
 The schema is observer-agnostic-ish: future observers add their own top-level array (e.g., `"writable_paths"`) alongside `"capabilities"`. Formatters select the relevant section. Adding a new observer's top-level block is an additive change within the current major.
 
 **Per-replica disagreement.** `replica_cap_disagreement` lists any cap observed on fewer than all replicas under `--all-matching`. Non-empty disagreement forces confidence to at most `moderate`; a disagreement of > 1 cap forces `low` (see rubric). This prevents the tool from silently emitting the union of replica cap sets as if every replica needed every cap.
+
+**Init-window accounting.** `target.init_window_suppressed` is the count of capability events dropped by the `--init-window-ms` filter (default 500ms). The same filtering is also recorded as a `confidence.factors` prose string so humans reading the artifact see it at a glance; the counter exists so machines and reviewers can judge whether a sparse derived cap set is workload-minimal or a window-too-wide artifact and retune accordingly.
 
 ## Tech stack — Inspektor Gadget
 

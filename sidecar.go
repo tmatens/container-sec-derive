@@ -62,6 +62,10 @@ type Target struct {
 	Restarts               []Restart           `json:"restarts"`
 	FollowRestart          bool                `json:"follow_restart"`
 	TargetExitedEarly      bool                `json:"target_exited_early"`
+	// InitWindowSuppressed is how many events the init-window filter
+	// dropped. Exposed so reviewers can tell whether a sparse derived
+	// cap set is genuine workload behavior or a window-too-wide artifact.
+	InitWindowSuppressed int `json:"init_window_suppressed"`
 }
 
 // Restart records a single exit-during-observation event. Attribution is

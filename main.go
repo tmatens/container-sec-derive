@@ -49,6 +49,53 @@ type traceHealthEvent struct {
 	EventsDropped  int    `json:"events_dropped"`
 }
 
+// aggregateOpts collects the knobs that control a single aggregate()
+// pass. It exists because the aggregator now takes a selector (container
+// or image), a multi-replica opt-in, and a filter window -- four
+// positional args was about to become five, which is where selection
+// vs. behavior start to get confused at call sites.
+type aggregateOpts struct {
+	Container    string // --container: exact id / name / id-prefix
+	Image        string // --image: image reference (may match N replicas)
+	AllMatching  bool   // --all-matching: aggregate across N replicas
+	InitWindowMs int    // --init-window-ms (0 disables)
+}
+
+func (o aggregateOpts) matches(ev capEvent) bool {
+	if o.Container == "" && o.Image == "" {
+		return true
+	}
+	if o.Container != "" {
+		if ev.Container.ID == o.Container || ev.Container.Name == o.Container {
+			return true
+		}
+		if len(o.Container) >= 6 && strings.HasPrefix(ev.Container.ID, o.Container) {
+			return true
+		}
+	}
+	if o.Image != "" && ev.Container.Image == o.Image {
+		return true
+	}
+	return false
+}
+
+func (o aggregateOpts) modeLabel() string {
+	if o.Image != "" {
+		if o.AllMatching {
+			return TargetModeAllMatching
+		}
+		return TargetModeImage
+	}
+	return TargetModeContainer
+}
+
+func (o aggregateOpts) selector() string {
+	if o.Image != "" {
+		return o.Image
+	}
+	return o.Container
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "csd:", err)
@@ -60,18 +107,33 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("csd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		container     = fs.String("container", "", "target container id or name (required unless --fixture)")
-		fixture       = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
-		duration      = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
-		igBin         = fs.String("ig", "ig", "path to the ig binary")
-		initWindowMs  = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
+		container    = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
+		image        = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
+		allMatching  = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
+		fixture      = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
+		duration     = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
+		igBin        = fs.String("ig", "ig", "path to the ig binary")
+		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if *fixture == "" && *container == "" {
-		return errors.New("--container is required (or pass --fixture <file> to read pre-captured events)")
+	if *container != "" && *image != "" {
+		return errors.New("--container and --image are mutually exclusive")
+	}
+	if *allMatching && *image == "" {
+		return errors.New("--all-matching requires --image")
+	}
+	if *fixture == "" && *container == "" && *image == "" {
+		return errors.New("one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
+	}
+
+	opts := aggregateOpts{
+		Container:    *container,
+		Image:        *image,
+		AllMatching:  *allMatching,
+		InitWindowMs: *initWindowMs,
 	}
 
 	var (
@@ -84,7 +146,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("open fixture: %w", err)
 		}
 		defer src.Close()
-		s, err := aggregate(src, *container, *initWindowMs)
+		s, err := aggregate(src, opts)
 		if err != nil {
 			return err
 		}
@@ -97,7 +159,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
 	defer timeoutCancel()
 
-	s, err := observe(ctx, *igBin, *container, *initWindowMs)
+	s, err := observe(ctx, *igBin, opts)
 	if err != nil {
 		return err
 	}
@@ -107,7 +169,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 // observe spawns `ig run trace_capabilities --output json` and aggregates
 // events for the lifetime of ctx.
-func observe(ctx context.Context, igBin, container string, initWindowMs int) (*Sidecar, error) {
+func observe(ctx context.Context, igBin string, opts aggregateOpts) (*Sidecar, error) {
 	cmd := exec.CommandContext(ctx, igBin, "run", "trace_capabilities", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -117,7 +179,7 @@ func observe(ctx context.Context, igBin, container string, initWindowMs int) (*S
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
-	s, aggErr := aggregate(stdout, container, initWindowMs)
+	s, aggErr := aggregate(stdout, opts)
 	// Wait for ig to exit. A context-cancel kill is the normal termination
 	// path for the timed observation window, so we don't propagate that as
 	// an error.
@@ -131,26 +193,40 @@ func observe(ctx context.Context, igBin, container string, initWindowMs int) (*S
 	return s, nil
 }
 
-// aggregate reads NDJSON events from r, filters to the given container
-// (by id or name; empty string matches all), and returns a *Sidecar whose
-// Capabilities slice holds the sorted distinct caps.
+// replicaState accumulates per-replica data as aggregate() streams events.
+// Replica identity is the container id (falling back to name when id is
+// empty, as happens in hand-authored test fixtures). Under live BPF this
+// will be cgroup id -- see PLAN.md §Target selection for the attribution
+// contract. Init-window filtering is per-replica because each replica has
+// its own startup phase.
+type replicaState struct {
+	seen       map[string]struct{}
+	firstTsMs  int64
+	firstSeen  bool
+	suppressed int
+	eventCount int
+	sampleName string // for ambiguity-error messages
+}
+
+// aggregate reads NDJSON events from r, filters via opts.matches(), and
+// returns a *Sidecar populated with per-replica event counts, per-replica
+// cap sets, cross-replica cap disagreement, and the union cap set.
 //
-// initWindowMs drops events observed within that many milliseconds of the
-// first matching event, reducing runc / ld.so init noise. 0 disables the
-// filter. Suppressed-event count is recorded on Target so reviewers can
-// tell the filter apart from a genuinely small cap set.
+// With --image but without --all-matching, matching more than one replica
+// is an error (PLAN.md §Target selection): the tool refuses to pretend
+// every replica needs every cap.
+//
+// opts.InitWindowMs drops events observed within that many milliseconds
+// of each replica's first matching event, reducing runc / ld.so init
+// noise. 0 disables. Suppressed-event count is summed across replicas
+// onto Target.InitWindowSuppressed.
 //
 // Timestamps are assumed to be milliseconds (fixture convention, matching
-// `ig run trace_capabilities --output json` at the pinned release). Revisit
-// if Step 11's IG version pin exposes a different unit.
-func aggregate(r io.Reader, container string, initWindowMs int) (*Sidecar, error) {
-	seen := map[string]struct{}{}
-	var (
-		firstTsMs      int64
-		firstSeen      bool
-		suppressed     int
-		latestHealth   *traceHealthEvent
-	)
+// `ig run trace_capabilities --output json` at the pinned release).
+// Revisit if Step 11's IG version pin exposes a different unit.
+func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
+	replicas := map[string]*replicaState{}
+	var latestHealth *traceHealthEvent
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scan.Scan() {
@@ -179,33 +255,93 @@ func aggregate(r io.Reader, container string, initWindowMs int) (*Sidecar, error
 			// lines on some versions.
 			continue
 		}
-		if !matchesContainer(ev, container) {
+		if !opts.matches(ev) {
 			continue
 		}
-		if !firstSeen {
-			firstTsMs = ev.Timestamp
-			firstSeen = true
+		rid := ev.Container.ID
+		if rid == "" {
+			rid = ev.Container.Name
 		}
-		if initWindowMs > 0 && ev.Timestamp-firstTsMs < int64(initWindowMs) {
-			suppressed++
+		st, ok := replicas[rid]
+		if !ok {
+			st = &replicaState{seen: map[string]struct{}{}, sampleName: ev.Container.Name}
+			replicas[rid] = st
+		}
+		st.eventCount++
+		if !st.firstSeen {
+			st.firstTsMs = ev.Timestamp
+			st.firstSeen = true
+		}
+		if opts.InitWindowMs > 0 && ev.Timestamp-st.firstTsMs < int64(opts.InitWindowMs) {
+			st.suppressed++
 			continue
 		}
 		name := normalizeCap(ev.CapName)
 		if name == "" {
 			continue
 		}
-		seen[name] = struct{}{}
+		st.seen[name] = struct{}{}
 	}
 	if err := scan.Err(); err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(seen))
-	for k := range seen {
-		names = append(names, k)
+
+	// Ambiguity: --image matched >1 replica without --all-matching.
+	// PLAN.md §Target selection requires an error here so the tool never
+	// silently emits the union of replica cap sets as a single profile.
+	if opts.Image != "" && !opts.AllMatching && len(replicas) > 1 {
+		labels := make([]string, 0, len(replicas))
+		for rid, st := range replicas {
+			if st.sampleName != "" {
+				labels = append(labels, fmt.Sprintf("%s (%s)", st.sampleName, rid))
+			} else {
+				labels = append(labels, rid)
+			}
+		}
+		sort.Strings(labels)
+		return nil, fmt.Errorf("--image %q matched %d replicas; rerun with --container to disambiguate or --all-matching to aggregate across replicas:\n  %s",
+			opts.Image, len(replicas), strings.Join(labels, "\n  "))
 	}
-	sort.Strings(names)
+
 	s := NewSidecar()
-	s.Target.InitWindowSuppressed = suppressed
+	s.Target.Mode = opts.modeLabel()
+	s.Target.Selector = opts.selector()
+	s.Target.ReplicasObserved = len(replicas)
+
+	union := map[string]struct{}{}
+	var totalSuppressed int
+	for rid, st := range replicas {
+		totalSuppressed += st.suppressed
+		s.Target.PerReplicaEventCounts[rid] = st.eventCount
+		s.Target.PerReplicaCaps[rid] = sortedStringSet(st.seen)
+		for n := range st.seen {
+			union[n] = struct{}{}
+		}
+	}
+	s.Target.InitWindowSuppressed = totalSuppressed
+
+	allNames := sortedStringSet(union)
+	for _, n := range allNames {
+		s.Capabilities = append(s.Capabilities, Capability{Name: n})
+	}
+
+	// Cross-replica disagreement: any cap not present in every replica.
+	// Undefined with <2 replicas -- PLAN.md specifies this list drives
+	// the confidence rubric's replica-divergence factor (Step 6).
+	if len(replicas) > 1 {
+		dis := []string{}
+		for _, n := range allNames {
+			for _, st := range replicas {
+				if _, ok := st.seen[n]; !ok {
+					dis = append(dis, n)
+					break
+				}
+			}
+		}
+		sort.Strings(dis)
+		s.Target.ReplicaCapDisagreement = dis
+	}
+
 	if latestHealth != nil {
 		s.TraceHealth.EventsRecorded = latestHealth.EventsRecorded
 		s.TraceHealth.EventsDropped = latestHealth.EventsDropped
@@ -213,25 +349,16 @@ func aggregate(r io.Reader, container string, initWindowMs int) (*Sidecar, error
 			s.TraceHealth.DropRate = float64(latestHealth.EventsDropped) / float64(latestHealth.EventsRecorded)
 		}
 	}
-	for _, n := range names {
-		s.Capabilities = append(s.Capabilities, Capability{Name: n})
-	}
 	return s, nil
 }
 
-func matchesContainer(ev capEvent, target string) bool {
-	if target == "" {
-		return true
+func sortedStringSet(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
-	if ev.Container.ID == target || ev.Container.Name == target {
-		return true
-	}
-	// Accept a short prefix match on the container id, matching docker's
-	// usual ergonomics (e.g. `docker ps` shows a 12-char prefix).
-	if len(target) >= 6 && strings.HasPrefix(ev.Container.ID, target) {
-		return true
-	}
-	return false
+	sort.Strings(out)
+	return out
 }
 
 // normalizeCap strips the CAP_ prefix so output is consistent regardless

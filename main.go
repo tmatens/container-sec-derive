@@ -1,8 +1,9 @@
 // csd — container-sec-derive.
 //
-// v0.1.0-beta scope (PLAN.md §v0.1 build order): alpha parsing/aggregation
-// plus the canonical JSON evidence sidecar on disk (--out). Still no
-// formatters, no verify, no entrypoint cross-check -- those land in rc.
+// v0.1.0-rc scope (PLAN.md §v0.1 build order): beta shipped the canonical
+// sidecar + `compose` formatter + deterministic confidence rubric (with
+// deferred factors). rc is landing the remaining six formatters, the
+// entrypoint cross-check, `csd verify`, and the reference-image bisections.
 package main
 
 import (
@@ -116,7 +117,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
-		format       = fs.String("format", FormatCompose, "output format for stdout (v0.1.0-beta: compose only; rc adds compose-patch, docker-run, oci, k8s, json, compose-lint-profile)")
+		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, docker-run; still landing in v0.1.0-rc: compose-patch, oci, k8s, json, compose-lint-profile)")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -133,8 +134,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *fixture == "" && *container == "" && *image == "" {
 		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
-	if *format != FormatCompose {
-		return codedErrorf(ExitUsage, "--format %q not supported in v0.1.0-beta; only %q is implemented (compose-patch, docker-run, oci, k8s, json, compose-lint-profile land in v0.1.0-rc)", *format, FormatCompose)
+	switch *format {
+	case FormatCompose, FormatDockerRun:
+		// implemented
+	default:
+		return codedErrorf(ExitUsage, "--format %q not implemented yet; supported: %s, %s (compose-patch, oci, k8s, json, compose-lint-profile still landing in v0.1.0-rc)", *format, FormatCompose, FormatDockerRun)
 	}
 
 	opts := aggregateOpts{
@@ -183,8 +187,15 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	s.ObservedAt = observedAt
 	computeConfidence(s)
-	if err := writeCompose(stdout, s); err != nil {
-		return fmt.Errorf("write compose: %w", err)
+	switch *format {
+	case FormatCompose:
+		if err := writeCompose(stdout, s); err != nil {
+			return fmt.Errorf("write compose: %w", err)
+		}
+	case FormatDockerRun:
+		if err := writeDockerRun(stdout, s); err != nil {
+			return fmt.Errorf("write docker-run: %w", err)
+		}
 	}
 
 	// Sidecar is written before the drop-rate abort so CI integrators

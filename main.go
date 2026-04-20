@@ -35,14 +35,28 @@ const (
 	PinnedIGVersion      = "v0.51.0"
 	MinIGVersion         = "v0.51.0"
 	MaxTestedIGVersion   = "v0.51.0"
+
+	// TraceCapabilitiesGadget is the OCI reference ig pulls to run the
+	// trace_capabilities gadget. ig v0.51.0 is fully image-based: a bare
+	// "trace_capabilities" is not a valid argument to `ig run`. We tag to
+	// PinnedIGVersion so the gadget image and the ig binary advance
+	// together; bumping the pin means re-pulling this tag.
+	TraceCapabilitiesGadget = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:" + PinnedIGVersion
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
 // PINNED_IG_VERSION. v0.51.0 puts process metadata under `proc` and
 // container attribution under `runtime`; the string cap name is `cap`
 // and the numeric form is `cap_raw` (we ignore the numeric form).
+//
+// Timestamp carries milliseconds. Live v0.51.0 emits two timestamp
+// fields: `timestamp` as an RFC3339 string (unusable as int64), and
+// `timestamp_raw` as int64 nanoseconds — the latter is what we read.
+// Fixtures written before the live-schema probe use `timestamp` as an
+// integer ms value; UnmarshalJSON accepts both so fixtures don't have
+// to be regenerated per smoke finding.
 type capEvent struct {
-	Timestamp int64  `json:"timestamp"`
+	Timestamp int64  `json:"-"`
 	Syscall   string `json:"syscall"`
 	CapName   string `json:"cap"`
 	Proc      struct {
@@ -55,6 +69,47 @@ type capEvent struct {
 		ContainerImage string `json:"containerImageName"`
 		RuntimeName    string `json:"runtimeName"`
 	} `json:"runtime"`
+}
+
+func (e *capEvent) UnmarshalJSON(data []byte) error {
+	type procT struct {
+		Comm string `json:"comm"`
+		Pid  int    `json:"pid"`
+	}
+	type runtimeT struct {
+		ContainerID    string `json:"containerId"`
+		ContainerName  string `json:"containerName"`
+		ContainerImage string `json:"containerImageName"`
+		RuntimeName    string `json:"runtimeName"`
+	}
+	var wire struct {
+		Timestamp    json.RawMessage `json:"timestamp"`
+		TimestampRaw int64           `json:"timestamp_raw"`
+		Syscall      string          `json:"syscall"`
+		CapName      string          `json:"cap"`
+		Proc         procT           `json:"proc"`
+		Runtime      runtimeT        `json:"runtime"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	e.Syscall = wire.Syscall
+	e.CapName = wire.CapName
+	e.Proc = wire.Proc
+	e.Runtime = wire.Runtime
+	switch {
+	case wire.TimestampRaw != 0:
+		// Live v0.51.0: nanoseconds → milliseconds.
+		e.Timestamp = wire.TimestampRaw / 1_000_000
+	case len(wire.Timestamp) > 0:
+		// Fixture fallback: bare integer ms. RFC3339 strings from live
+		// ig also land here but fail int decode and are ignored — the
+		// ns value from timestamp_raw is authoritative on live runs.
+		var n int64
+		_ = json.Unmarshal(wire.Timestamp, &n)
+		e.Timestamp = n
+	}
+	return nil
 }
 
 // igLostSamplesRE matches ig's ringbuf-loss stderr warnings. v0.51.0
@@ -251,7 +306,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 // parseIGStderr so the ringbuf-loss counter (v0.51.0 emits these as
 // stderr warnings, not typed stdout events) lands on the sidecar.
 func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*Sidecar, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", "trace_capabilities", "--output", "json")
+	cmd := exec.CommandContext(ctx, igBin, "run", TraceCapabilitiesGadget, "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -339,12 +394,16 @@ func finaliseTraceHealth(th *TraceHealth) {
 	}
 }
 
-// checkIGVersion runs `ig version --output json` and warns if the
-// detected release is outside [MinIGVersion, MaxTestedIGVersion].
+// checkIGVersion runs `ig version` and warns if the detected release
+// is not PinnedIGVersion. ig v0.51.0 does not support --output json
+// on `version`; the subcommand emits a single plain-text line like
+// "v0.51.0". We take the first whitespace-delimited token so future
+// ig releases that add trailing metadata still parse.
+//
 // v0.1-rc is warn-and-continue; PLAN.md §IG version pinning specifies
 // v1 promotes this to a hard SchemaMismatch exit.
 func checkIGVersion(igBin string, stderr io.Writer) {
-	out, err := exec.Command(igBin, "version", "--output", "json").Output()
+	out, err := exec.Command(igBin, "version").Output()
 	if err != nil {
 		// ig may be absent; observe() will surface the proper exit
 		// code. Only note it here if stderr is writable.
@@ -354,14 +413,11 @@ func checkIGVersion(igBin string, stderr io.Writer) {
 		return
 	}
 	var v struct {
-		Version string `json:"version"`
+		Version string
 	}
-	if err := json.Unmarshal(out, &v); err != nil || v.Version == "" {
-		// Older ig emitted plain text; first word is the version.
-		fields := strings.Fields(string(out))
-		if len(fields) > 0 {
-			v.Version = fields[0]
-		}
+	fields := strings.Fields(string(out))
+	if len(fields) > 0 {
+		v.Version = fields[0]
 	}
 	if v.Version == "" {
 		return

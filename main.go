@@ -35,6 +35,13 @@ const (
 	PinnedIGVersion      = "v0.51.0"
 	MinIGVersion         = "v0.51.0"
 	MaxTestedIGVersion   = "v0.51.0"
+
+	// TraceCapabilitiesGadget is the OCI reference ig pulls to run the
+	// trace_capabilities gadget. ig v0.51.0 is fully image-based: a bare
+	// "trace_capabilities" is not a valid argument to `ig run`. We tag to
+	// PinnedIGVersion so the gadget image and the ig binary advance
+	// together; bumping the pin means re-pulling this tag.
+	TraceCapabilitiesGadget = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:" + PinnedIGVersion
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -251,7 +258,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 // parseIGStderr so the ringbuf-loss counter (v0.51.0 emits these as
 // stderr warnings, not typed stdout events) lands on the sidecar.
 func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*Sidecar, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", "trace_capabilities", "--output", "json")
+	cmd := exec.CommandContext(ctx, igBin, "run", TraceCapabilitiesGadget, "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)

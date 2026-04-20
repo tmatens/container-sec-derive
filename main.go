@@ -17,38 +17,51 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
-// capEvent is the subset of ig trace_capabilities fields we consume.
-// IG's full schema is larger; we decode only what the aggregator needs
-// so a minor IG schema drift in unused fields doesn't break us.
+// Pinned IG release. v0.1 targets a single upstream version; MIN/MAX
+// equal the pin until we've smoke-tested against a widening window.
+// PLAN.md §IG version pinning defines the v1 semantics; v0.1-rc
+// warn-and-continues on mismatch so we learn about drift without
+// breaking fixture-only users.
+const (
+	PinnedIGVersion      = "v0.51.0"
+	MinIGVersion         = "v0.51.0"
+	MaxTestedIGVersion   = "v0.51.0"
+)
+
+// capEvent is the subset of ig trace_capabilities fields we consume at
+// PINNED_IG_VERSION. v0.51.0 puts process metadata under `proc` and
+// container attribution under `runtime`; the string cap name is `cap`
+// and the numeric form is `cap_raw` (we ignore the numeric form).
 type capEvent struct {
 	Timestamp int64  `json:"timestamp"`
-	Comm      string `json:"comm"`
-	Pid       int    `json:"pid"`
 	Syscall   string `json:"syscall"`
-	CapName   string `json:"capName"`
-	Cap       int    `json:"cap"`
-	Container struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Image string `json:"image"`
-	} `json:"container"`
+	CapName   string `json:"cap"`
+	Proc      struct {
+		Comm string `json:"comm"`
+		Pid  int    `json:"pid"`
+	} `json:"proc"`
+	Runtime struct {
+		ContainerID    string `json:"containerId"`
+		ContainerName  string `json:"containerName"`
+		ContainerImage string `json:"containerImageName"`
+		RuntimeName    string `json:"runtimeName"`
+	} `json:"runtime"`
 }
 
-// traceHealthEvent is IG's periodic ringbuf-health message. PLAN.md
-// §Event-loss reporting requires these counters be surfaced on every
-// run. Schema here is our best-effort; Step 11's IG version pin will
-// lock it against an upstream release.
-type traceHealthEvent struct {
-	Type           string `json:"type"`
-	EventsRecorded int    `json:"events_recorded"`
-	EventsDropped  int    `json:"events_dropped"`
-}
+// igLostSamplesRE matches ig's ringbuf-loss stderr warnings. v0.51.0
+// emits these as logrus-formatted lines rather than typed stdout
+// events; parsing them is the only way to surface drop counts on
+// real hosts. PLAN.md §Event-loss reporting.
+var igLostSamplesRE = regexp.MustCompile(`lost (\d+) samples`)
 
 // aggregateOpts collects the knobs that control a single aggregate()
 // pass. It exists because the aggregator now takes a selector (container
@@ -67,14 +80,14 @@ func (o aggregateOpts) matches(ev capEvent) bool {
 		return true
 	}
 	if o.Container != "" {
-		if ev.Container.ID == o.Container || ev.Container.Name == o.Container {
+		if ev.Runtime.ContainerID == o.Container || ev.Runtime.ContainerName == o.Container {
 			return true
 		}
-		if len(o.Container) >= 6 && strings.HasPrefix(ev.Container.ID, o.Container) {
+		if len(o.Container) >= 6 && strings.HasPrefix(ev.Runtime.ContainerID, o.Container) {
 			return true
 		}
 	}
-	if o.Image != "" && ev.Container.Image == o.Image {
+	if o.Image != "" && ev.Runtime.ContainerImage == o.Image {
 		return true
 	}
 	return false
@@ -113,6 +126,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		image        = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
 		allMatching  = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
 		fixture      = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
+		fixtureErr   = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
 		duration     = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
@@ -164,15 +178,27 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// Fixture mode: duration is unknown, so leave DurationSeconds=0
 		// (computeConfidence treats 0 as "not measured" and skips the
 		// soft-floor check).
+		if err == nil && s != nil && *fixtureErr != "" {
+			errSrc, openErrErr := os.Open(*fixtureErr)
+			if openErrErr != nil {
+				return fmt.Errorf("open fixture-stderr: %w", openErrErr)
+			}
+			s.TraceHealth.EventsDropped = parseIGStderr(errSrc, nil)
+			errSrc.Close()
+		}
 	} else {
+		checkIGVersion(*igBin, stderr)
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
 		defer timeoutCancel()
-		s, err = observe(ctx, *igBin, opts)
+		s, err = observe(ctx, *igBin, opts, stderr)
 		if s != nil {
 			s.DurationSeconds = int(duration.Seconds())
 		}
+	}
+	if s != nil {
+		finaliseTraceHealth(&s.TraceHealth)
 	}
 	if err != nil {
 		// Map typed failures to their PLAN.md §Exit codes slot. Anything
@@ -221,25 +247,49 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 // observe spawns `ig run trace_capabilities --output json` and aggregates
-// events for the lifetime of ctx.
-func observe(ctx context.Context, igBin string, opts aggregateOpts) (*Sidecar, error) {
+// events for the lifetime of ctx. ig's stderr is tee'd through
+// parseIGStderr so the ringbuf-loss counter (v0.51.0 emits these as
+// stderr warnings, not typed stdout events) lands on the sidecar.
+func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*Sidecar, error) {
 	cmd := exec.CommandContext(ctx, igBin, "run", "trace_capabilities", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = os.Stderr
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		if isIGMissing(err) {
 			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
 		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
+
+	var (
+		wg      sync.WaitGroup
+		lost    int
+		lostMu  sync.Mutex
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		n := parseIGStderr(stderrPipe, stderrSink)
+		lostMu.Lock()
+		lost = n
+		lostMu.Unlock()
+	}()
+
 	s, aggErr := aggregate(stdout, opts)
 	// Wait for ig to exit. A context-cancel kill is the normal termination
 	// path for the timed observation window, so we don't propagate that as
 	// an error.
 	waitErr := cmd.Wait()
+	wg.Wait()
+	if s != nil {
+		s.TraceHealth.EventsDropped = lost
+	}
 	if aggErr != nil && !errors.Is(aggErr, io.EOF) {
 		return nil, aggErr
 	}
@@ -247,6 +297,81 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts) (*Sidecar, e
 		return nil, fmt.Errorf("ig exited: %w", waitErr)
 	}
 	return s, nil
+}
+
+// parseIGStderr scans ig's stderr stream for ringbuf-loss warnings
+// of the form `lost N samples` (ig v0.51.0 format) and returns the
+// cumulative total. Every line is echoed to sink so operators still
+// see ig's diagnostics; passing nil for sink silences passthrough.
+func parseIGStderr(r io.Reader, sink io.Writer) int {
+	total := 0
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scan.Scan() {
+		line := scan.Bytes()
+		if sink != nil {
+			fmt.Fprintln(sink, string(line))
+		}
+		m := igLostSamplesRE.FindSubmatch(line)
+		if len(m) == 2 {
+			if n, err := strconv.Atoi(string(m[1])); err == nil {
+				total += n
+			}
+		}
+	}
+	return total
+}
+
+// finaliseTraceHealth computes DropRate once both sides of the ratio
+// are known. recorded is the count of events csd parsed; dropped is
+// ig's stderr-reported loss. Ratio is dropped / recorded to preserve
+// the pre-Step-11 rubric thresholds; recomputing against the total
+// population (dropped + recorded) would shift every threshold and is
+// out of scope for the parser realignment.
+func finaliseTraceHealth(th *TraceHealth) {
+	if th.EventsRecorded > 0 {
+		th.DropRate = float64(th.EventsDropped) / float64(th.EventsRecorded)
+	} else if th.EventsDropped > 0 {
+		// All-dropped-no-recorded is a pathological case we can still
+		// report as "everything lost". Without this branch a 0-record
+		// run with losses would look clean.
+		th.DropRate = 1.0
+	}
+}
+
+// checkIGVersion runs `ig version --output json` and warns if the
+// detected release is outside [MinIGVersion, MaxTestedIGVersion].
+// v0.1-rc is warn-and-continue; PLAN.md §IG version pinning specifies
+// v1 promotes this to a hard SchemaMismatch exit.
+func checkIGVersion(igBin string, stderr io.Writer) {
+	out, err := exec.Command(igBin, "version", "--output", "json").Output()
+	if err != nil {
+		// ig may be absent; observe() will surface the proper exit
+		// code. Only note it here if stderr is writable.
+		if stderr != nil {
+			fmt.Fprintf(stderr, "csd: ig version check skipped: %v\n", err)
+		}
+		return
+	}
+	var v struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil || v.Version == "" {
+		// Older ig emitted plain text; first word is the version.
+		fields := strings.Fields(string(out))
+		if len(fields) > 0 {
+			v.Version = fields[0]
+		}
+	}
+	if v.Version == "" {
+		return
+	}
+	if v.Version != PinnedIGVersion && stderr != nil {
+		fmt.Fprintf(stderr,
+			"csd: warning: ig %s detected, PINNED_IG_VERSION=%s (tested window %s..%s). Parsing may misalign; see PLAN.md §IG version pinning.\n",
+			v.Version, PinnedIGVersion, MinIGVersion, MaxTestedIGVersion,
+		)
+	}
 }
 
 // replicaState accumulates per-replica data as aggregate() streams events.
@@ -263,7 +388,7 @@ type replicaState struct {
 	suppressed int
 	eventCount int
 	sampleName string // for ambiguity-error messages
-	image      string // first observed ev.Container.Image; populates Sidecar.Image when --image not set
+	image      string // first observed ev.Runtime.ContainerImage; populates Sidecar.Image when --image not set
 }
 
 // capStats collapses N raw events for one capability into audit-ready
@@ -316,7 +441,7 @@ func (c *capStats) observe(tsMs int64, comm string) {
 func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	replicas := map[string]*replicaState{}
 	capUnion := map[string]*capStats{}
-	var latestHealth *traceHealthEvent
+	var recorded int
 	var globalFirstTsMs int64
 	globalFirstSeen := false
 	scan := bufio.NewScanner(r)
@@ -324,20 +449,6 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	for scan.Scan() {
 		line := scan.Bytes()
 		if len(line) == 0 {
-			continue
-		}
-		// Type-discriminate: trace_health / diagnostic lines are decoded
-		// first and never flow into the capability aggregator. Untagged
-		// lines fall through to the capEvent path (IG emits cap events
-		// without a "type" field at the pinned release).
-		var env struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(line, &env); err == nil && env.Type == "trace_health" {
-			var th traceHealthEvent
-			if err := json.Unmarshal(line, &th); err == nil {
-				latestHealth = &th
-			}
 			continue
 		}
 		var ev capEvent
@@ -350,17 +461,18 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		if !opts.matches(ev) {
 			continue
 		}
-		rid := ev.Container.ID
+		recorded++
+		rid := ev.Runtime.ContainerID
 		if rid == "" {
-			rid = ev.Container.Name
+			rid = ev.Runtime.ContainerName
 		}
 		st, ok := replicas[rid]
 		if !ok {
 			st = &replicaState{
 				seen:       map[string]*capStats{},
 				comms:      map[string]struct{}{},
-				sampleName: ev.Container.Name,
-				image:      ev.Container.Image,
+				sampleName: ev.Runtime.ContainerName,
+				image:      ev.Runtime.ContainerImage,
 			}
 			replicas[rid] = st
 		}
@@ -384,7 +496,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			globalFirstTsMs = ev.Timestamp
 			globalFirstSeen = true
 		}
-		comm := strings.TrimSpace(ev.Comm)
+		comm := strings.TrimSpace(ev.Proc.Comm)
 		rcs, ok := st.seen[name]
 		if !ok {
 			rcs = newCapStats()
@@ -485,13 +597,12 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		s.Target.ReplicaCapDisagreement = dis
 	}
 
-	if latestHealth != nil {
-		s.TraceHealth.EventsRecorded = latestHealth.EventsRecorded
-		s.TraceHealth.EventsDropped = latestHealth.EventsDropped
-		if latestHealth.EventsRecorded > 0 {
-			s.TraceHealth.DropRate = float64(latestHealth.EventsDropped) / float64(latestHealth.EventsRecorded)
-		}
-	}
+	// events_recorded is the count of cap events csd actually parsed
+	// (post-matching, pre-init-filter). Drops are supplied by the
+	// caller from ig's stderr (observe path) or from a fixture-stderr
+	// file (tests); finaliseTraceHealth recomputes the rate after both
+	// numerators are in hand.
+	s.TraceHealth.EventsRecorded = recorded
 	// Confidence scoring is a separate, callable-from-tests step. Callers
 	// (run/observe) populate DurationSeconds and any other late-arriving
 	// inputs before invoking computeConfidence so the rubric sees the

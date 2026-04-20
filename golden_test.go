@@ -16,12 +16,12 @@ import (
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/sidecar_golden.json from current output")
 
 // TestSidecar_GoldenPostgres1 pins the canonical JSON shape against
-// testdata/sample.ndjson. PLAN.md §Output schema requires schema_version
+// testdata/ig-versions/v0.51.0/sample.ndjson. PLAN.md §Output schema requires schema_version
 // stability; this is the test that enforces it for v0.1.x. Every field
 // rename, type change, or silent drop in a Capability sub-field has to
 // surface here before it can merge.
 func TestSidecar_GoldenPostgres1(t *testing.T) {
-	f, err := os.Open("testdata/sample.ndjson")
+	f, err := os.Open("testdata/ig-versions/v0.51.0/sample.ndjson")
 	if err != nil {
 		t.Fatalf("open fixture: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRun_OutFlagWritesSidecar(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := run([]string{
-		"--fixture", "testdata/sample.ndjson",
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
 		"--out", out,
 	}, &stdout, &stderr)

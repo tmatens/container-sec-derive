@@ -7,12 +7,35 @@ import (
 	"testing"
 )
 
+// ev builds an ig v0.51.0 trace_capabilities line. Tests use this
+// helper rather than inline JSON so a future schema bump touches one
+// function instead of every assertion. Fields not named default to
+// empty; tests pass only what each assertion actually cares about.
+func ev(fields ...string) string {
+	m := map[string]string{}
+	for i := 0; i+1 < len(fields); i += 2 {
+		m[fields[i]] = fields[i+1]
+	}
+	if m["containerId"] == "" && m["containerName"] != "" {
+		m["containerId"] = m["containerName"]
+	}
+	ts := m["timestamp"]
+	if ts == "" {
+		ts = "0"
+	}
+	return `{"timestamp":` + ts +
+		`,"cap":"` + m["cap"] + `"` +
+		`,"proc":{"comm":"` + m["comm"] + `","pid":0}` +
+		`,"runtime":{"runtimeName":"docker","containerId":"` + m["containerId"] +
+		`","containerName":"` + m["containerName"] +
+		`","containerImageName":"` + m["image"] + `"}}` + "\n"
+}
+
 func TestAggregate_DistinctCapsSorted(t *testing.T) {
-	input := `{"capName":"CAP_CHOWN","container":{"id":"abc123def456","name":"pg"}}
-{"capName":"CAP_SETUID","container":{"id":"abc123def456","name":"pg"}}
-{"capName":"CAP_CHOWN","container":{"id":"abc123def456","name":"pg"}}
-{"capName":"CAP_DAC_OVERRIDE","container":{"id":"abc123def456","name":"pg"}}
-`
+	input := ev("cap", "CAP_CHOWN", "containerId", "abc123def456", "containerName", "pg") +
+		ev("cap", "CAP_SETUID", "containerId", "abc123def456", "containerName", "pg") +
+		ev("cap", "CAP_CHOWN", "containerId", "abc123def456", "containerName", "pg") +
+		ev("cap", "CAP_DAC_OVERRIDE", "containerId", "abc123def456", "containerName", "pg")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "pg"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -24,9 +47,8 @@ func TestAggregate_DistinctCapsSorted(t *testing.T) {
 }
 
 func TestAggregate_FiltersByContainer(t *testing.T) {
-	input := `{"capName":"CAP_CHOWN","container":{"id":"aaa","name":"pg"}}
-{"capName":"CAP_NET_RAW","container":{"id":"bbb","name":"other"}}
-`
+	input := ev("cap", "CAP_CHOWN", "containerId", "aaa", "containerName", "pg") +
+		ev("cap", "CAP_NET_RAW", "containerId", "bbb", "containerName", "other")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "pg"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -37,7 +59,7 @@ func TestAggregate_FiltersByContainer(t *testing.T) {
 }
 
 func TestAggregate_ContainerIDPrefix(t *testing.T) {
-	input := `{"capName":"CAP_SETGID","container":{"id":"abcdef1234567890","name":""}}` + "\n"
+	input := ev("cap", "CAP_SETGID", "containerId", "abcdef1234567890")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "abcdef"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -48,9 +70,8 @@ func TestAggregate_ContainerIDPrefix(t *testing.T) {
 }
 
 func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
-	input := `{"capName":"CAP_CHOWN","container":{"id":"a"}}
-{"capName":"CAP_SETUID","container":{"id":"b"}}
-`
+	input := ev("cap", "CAP_CHOWN", "containerId", "a") +
+		ev("cap", "CAP_SETUID", "containerId", "b")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -62,9 +83,9 @@ func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
 
 func TestAggregate_SkipsMalformedLines(t *testing.T) {
 	input := "not json at all\n" +
-		`{"capName":"CAP_CHOWN","container":{"id":"a"}}` + "\n" +
+		ev("cap", "CAP_CHOWN", "containerId", "a") +
 		"\n" + // blank line
-		`{"capName":"CAP_SETUID","container":{"id":"a"}}` + "\n"
+		ev("cap", "CAP_SETUID", "containerId", "a")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -77,11 +98,10 @@ func TestAggregate_SkipsMalformedLines(t *testing.T) {
 func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
 	// First event sets t=0; a 500ms window must drop anything before 500ms
 	// and keep anything at/after it.
-	input := `{"timestamp":1000,"capName":"CAP_SYS_ADMIN","container":{"id":"a"}}
-{"timestamp":1100,"capName":"CAP_DAC_READ_SEARCH","container":{"id":"a"}}
-{"timestamp":1600,"capName":"CAP_CHOWN","container":{"id":"a"}}
-{"timestamp":1700,"capName":"CAP_SETUID","container":{"id":"a"}}
-`
+	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
+		ev("timestamp", "1100", "cap", "CAP_DAC_READ_SEARCH", "containerId", "a") +
+		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "a") +
+		ev("timestamp", "1700", "cap", "CAP_SETUID", "containerId", "a")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -95,9 +115,8 @@ func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
 }
 
 func TestAggregate_InitWindowDisabled(t *testing.T) {
-	input := `{"timestamp":1000,"capName":"CAP_SYS_ADMIN","container":{"id":"a"}}
-{"timestamp":1600,"capName":"CAP_CHOWN","container":{"id":"a"}}
-`
+	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
+		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "a")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -113,10 +132,9 @@ func TestAggregate_InitWindowDisabled(t *testing.T) {
 func TestAggregate_InitWindowIgnoresUnmatchedEvents(t *testing.T) {
 	// Events for other containers must not anchor the init window for
 	// the target. First *matching* event is the reference point.
-	input := `{"timestamp":1000,"capName":"CAP_NET_RAW","container":{"id":"other"}}
-{"timestamp":5000,"capName":"CAP_SYS_ADMIN","container":{"id":"a"}}
-{"timestamp":5600,"capName":"CAP_CHOWN","container":{"id":"a"}}
-`
+	input := ev("timestamp", "1000", "cap", "CAP_NET_RAW", "containerId", "other") +
+		ev("timestamp", "5000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
+		ev("timestamp", "5600", "cap", "CAP_CHOWN", "containerId", "a")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -131,7 +149,7 @@ func TestAggregate_InitWindowIgnoresUnmatchedEvents(t *testing.T) {
 
 func TestRun_FixtureMode(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	err := run([]string{"--fixture", "testdata/sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
+	err := run([]string{"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
 	if err != nil {
 		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
 	}
@@ -144,46 +162,43 @@ func TestRun_FixtureMode(t *testing.T) {
 	}
 }
 
-func TestAggregate_TraceHealthPopulated(t *testing.T) {
-	input := `{"timestamp":1000,"capName":"CAP_CHOWN","container":{"id":"a"}}
-{"timestamp":1600,"capName":"CAP_SETUID","container":{"id":"a"}}
-{"type":"trace_health","events_recorded":200,"events_dropped":2}
-`
+func TestAggregate_EventsRecordedCountsParsedEvents(t *testing.T) {
+	// Step 11 found ig v0.51.0 does not emit a typed trace_health stdout
+	// event; events_recorded is now the aggregator's own count of
+	// successfully parsed + matching cap events (pre-init-filter).
+	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "a") +
+		ev("timestamp", "1100", "cap", "CAP_CHOWN", "containerId", "a") +
+		ev("timestamp", "1600", "cap", "CAP_SETUID", "containerId", "a")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if s.TraceHealth.EventsRecorded != 200 || s.TraceHealth.EventsDropped != 2 {
-		t.Errorf("trace_health not captured: %+v", s.TraceHealth)
+	if s.TraceHealth.EventsRecorded != 3 {
+		t.Errorf("EventsRecorded = %d, want 3 (two pre-init-filter + one post)", s.TraceHealth.EventsRecorded)
 	}
-	if s.TraceHealth.DropRate != 0.01 {
-		t.Errorf("DropRate = %v, want 0.01", s.TraceHealth.DropRate)
-	}
-}
-
-func TestAggregate_TraceHealthLastWins(t *testing.T) {
-	input := `{"type":"trace_health","events_recorded":100,"events_dropped":0}
-{"type":"trace_health","events_recorded":250,"events_dropped":5}
-`
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{})
-	if err != nil {
-		t.Fatalf("aggregate: %v", err)
-	}
-	if s.TraceHealth.EventsRecorded != 250 || s.TraceHealth.EventsDropped != 5 {
-		t.Errorf("expected last trace_health to win, got %+v", s.TraceHealth)
+	if s.TraceHealth.EventsDropped != 0 {
+		t.Errorf("EventsDropped = %d, want 0 (no stderr input)", s.TraceHealth.EventsDropped)
 	}
 }
 
-func TestAggregate_TraceHealthLinesDoNotFeedCaps(t *testing.T) {
-	// A trace_health line must never be misread as a cap event.
-	input := `{"type":"trace_health","events_recorded":10,"events_dropped":0}
+func TestParseIGStderr_SumsLostSamples(t *testing.T) {
+	// Real ig v0.51.0 stderr shape: logrus-formatted warnings with the
+	// "lost N samples" tail. Multiple lines must sum.
+	stderr := `time="2026-04-20T12:00:00Z" level=warning msg="reading event: lost 128 samples"
+time="2026-04-20T12:00:03Z" level=warning msg="reading event: lost 64 samples"
+time="2026-04-20T12:00:05Z" level=info msg="ready"
 `
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{})
-	if err != nil {
-		t.Fatalf("aggregate: %v", err)
+	got := parseIGStderr(strings.NewReader(stderr), nil)
+	if got != 128+64 {
+		t.Errorf("parseIGStderr = %d, want %d", got, 128+64)
 	}
-	if len(s.Capabilities) != 0 {
-		t.Errorf("trace_health leaked into caps: %v", s.CapNames())
+}
+
+func TestFinaliseTraceHealth_RateIsDroppedOverRecorded(t *testing.T) {
+	th := TraceHealth{EventsRecorded: 100, EventsDropped: 2}
+	finaliseTraceHealth(&th)
+	if th.DropRate != 0.02 {
+		t.Errorf("DropRate = %v, want 0.02", th.DropRate)
 	}
 }
 
@@ -191,12 +206,11 @@ func TestAggregate_MultiReplicaUnionAndDisagreement(t *testing.T) {
 	// Two replicas, same image, divergent caps. With --all-matching, the
 	// union lands in Capabilities and the per-replica-missing caps land
 	// in ReplicaCapDisagreement.
-	input := `{"timestamp":1000,"capName":"CAP_CHOWN","container":{"id":"r1","name":"web-1","image":"app:1"}}
-{"timestamp":1010,"capName":"CAP_SETUID","container":{"id":"r1","name":"web-1","image":"app:1"}}
-{"timestamp":1020,"capName":"CAP_FOWNER","container":{"id":"r1","name":"web-1","image":"app:1"}}
-{"timestamp":1000,"capName":"CAP_CHOWN","container":{"id":"r2","name":"web-2","image":"app:1"}}
-{"timestamp":1010,"capName":"CAP_SETUID","container":{"id":"r2","name":"web-2","image":"app:1"}}
-`
+	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
+		ev("timestamp", "1010", "cap", "CAP_SETUID", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
+		ev("timestamp", "1020", "cap", "CAP_FOWNER", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
+		ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "r2", "containerName", "web-2", "image", "app:1") +
+		ev("timestamp", "1010", "cap", "CAP_SETUID", "containerId", "r2", "containerName", "web-2", "image", "app:1")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1", AllMatching: true})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -227,9 +241,8 @@ func TestAggregate_MultiReplicaUnionAndDisagreement(t *testing.T) {
 func TestAggregate_MultiReplicaAmbiguityWithoutAllMatching(t *testing.T) {
 	// --image matching >1 replica without --all-matching must error -- the
 	// tool refuses to silently union replicas (PLAN.md §Target selection).
-	input := `{"capName":"CAP_CHOWN","container":{"id":"r1","name":"web-1","image":"app:1"}}
-{"capName":"CAP_CHOWN","container":{"id":"r2","name":"web-2","image":"app:1"}}
-`
+	input := ev("cap", "CAP_CHOWN", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
+		ev("cap", "CAP_CHOWN", "containerId", "r2", "containerName", "web-2", "image", "app:1")
 	_, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1"})
 	if err == nil {
 		t.Fatal("expected ambiguity error, got nil")
@@ -241,8 +254,7 @@ func TestAggregate_MultiReplicaAmbiguityWithoutAllMatching(t *testing.T) {
 }
 
 func TestAggregate_SingleReplicaHasEmptyDisagreement(t *testing.T) {
-	input := `{"capName":"CAP_CHOWN","container":{"id":"r1","image":"app:1"}}
-`
+	input := ev("cap", "CAP_CHOWN", "containerId", "r1", "image", "app:1")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -262,11 +274,10 @@ func TestAggregate_MultiReplicaInitWindowPerReplica(t *testing.T) {
 	// Each replica gets its own init window, anchored on that replica's
 	// first matching event. A late-joining replica isn't held to the
 	// observation-start timestamp.
-	input := `{"timestamp":1000,"capName":"CAP_SYS_ADMIN","container":{"id":"r1","image":"app:1"}}
-{"timestamp":1600,"capName":"CAP_CHOWN","container":{"id":"r1","image":"app:1"}}
-{"timestamp":5000,"capName":"CAP_SYS_ADMIN","container":{"id":"r2","image":"app:1"}}
-{"timestamp":5600,"capName":"CAP_CHOWN","container":{"id":"r2","image":"app:1"}}
-`
+	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "containerId", "r1", "image", "app:1") +
+		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "r1", "image", "app:1") +
+		ev("timestamp", "5000", "cap", "CAP_SYS_ADMIN", "containerId", "r2", "image", "app:1") +
+		ev("timestamp", "5600", "cap", "CAP_CHOWN", "containerId", "r2", "image", "app:1")
 	s, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1", AllMatching: true, InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
@@ -283,7 +294,7 @@ func TestAggregate_MultiReplicaInitWindowPerReplica(t *testing.T) {
 
 func TestRun_ContainerAndImageMutuallyExclusive(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	err := run([]string{"--fixture", "testdata/sample.ndjson", "--container", "x", "--image", "y"}, &out, &errBuf)
+	err := run([]string{"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "x", "--image", "y"}, &out, &errBuf)
 	if err == nil {
 		t.Fatal("expected error for --container + --image together")
 	}
@@ -291,7 +302,7 @@ func TestRun_ContainerAndImageMutuallyExclusive(t *testing.T) {
 
 func TestRun_AllMatchingRequiresImage(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	err := run([]string{"--fixture", "testdata/sample.ndjson", "--container", "x", "--all-matching"}, &out, &errBuf)
+	err := run([]string{"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "x", "--all-matching"}, &out, &errBuf)
 	if err == nil {
 		t.Fatal("expected error for --all-matching without --image")
 	}
@@ -304,7 +315,7 @@ func TestRun_FixtureMode_AllMatchingPostgres(t *testing.T) {
 	// disagreement.
 	var out, errBuf bytes.Buffer
 	err := run([]string{
-		"--fixture", "testdata/sample.ndjson",
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--image", "postgres:16",
 		"--all-matching",
 	}, &out, &errBuf)
@@ -327,8 +338,8 @@ func TestRun_RequiresContainerOrFixture(t *testing.T) {
 
 func TestMain_FixtureExists(t *testing.T) {
 	// Sanity: fixture referenced by TestRun_FixtureMode must exist.
-	if _, err := os.Stat("testdata/sample.ndjson"); err != nil {
-		t.Fatalf("testdata/sample.ndjson missing: %v", err)
+	if _, err := os.Stat("testdata/ig-versions/v0.51.0/sample.ndjson"); err != nil {
+		t.Fatalf("testdata/ig-versions/v0.51.0/sample.ndjson missing: %v", err)
 	}
 }
 

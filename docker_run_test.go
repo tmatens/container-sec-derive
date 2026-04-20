@@ -60,7 +60,7 @@ func TestRun_DockerRunFormatEndToEnd(t *testing.T) {
 	// through and silently writes compose instead.
 	var out, errBuf bytes.Buffer
 	err := run([]string{
-		"--fixture", "testdata/sample.ndjson",
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
 		"--format", "docker-run",
 	}, &out, &errBuf)

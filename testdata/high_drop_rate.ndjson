@@ -1,0 +1,3 @@
+{"timestamp":1000,"capName":"CAP_CHOWN","container":{"id":"a","name":"t"}}
+{"timestamp":1600,"capName":"CAP_SETUID","container":{"id":"a","name":"t"}}
+{"type":"trace_health","events_recorded":100,"events_dropped":15}

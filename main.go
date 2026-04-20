@@ -48,8 +48,15 @@ const (
 // PINNED_IG_VERSION. v0.51.0 puts process metadata under `proc` and
 // container attribution under `runtime`; the string cap name is `cap`
 // and the numeric form is `cap_raw` (we ignore the numeric form).
+//
+// Timestamp carries milliseconds. Live v0.51.0 emits two timestamp
+// fields: `timestamp` as an RFC3339 string (unusable as int64), and
+// `timestamp_raw` as int64 nanoseconds — the latter is what we read.
+// Fixtures written before the live-schema probe use `timestamp` as an
+// integer ms value; UnmarshalJSON accepts both so fixtures don't have
+// to be regenerated per smoke finding.
 type capEvent struct {
-	Timestamp int64  `json:"timestamp"`
+	Timestamp int64  `json:"-"`
 	Syscall   string `json:"syscall"`
 	CapName   string `json:"cap"`
 	Proc      struct {
@@ -62,6 +69,47 @@ type capEvent struct {
 		ContainerImage string `json:"containerImageName"`
 		RuntimeName    string `json:"runtimeName"`
 	} `json:"runtime"`
+}
+
+func (e *capEvent) UnmarshalJSON(data []byte) error {
+	type procT struct {
+		Comm string `json:"comm"`
+		Pid  int    `json:"pid"`
+	}
+	type runtimeT struct {
+		ContainerID    string `json:"containerId"`
+		ContainerName  string `json:"containerName"`
+		ContainerImage string `json:"containerImageName"`
+		RuntimeName    string `json:"runtimeName"`
+	}
+	var wire struct {
+		Timestamp    json.RawMessage `json:"timestamp"`
+		TimestampRaw int64           `json:"timestamp_raw"`
+		Syscall      string          `json:"syscall"`
+		CapName      string          `json:"cap"`
+		Proc         procT           `json:"proc"`
+		Runtime      runtimeT        `json:"runtime"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	e.Syscall = wire.Syscall
+	e.CapName = wire.CapName
+	e.Proc = wire.Proc
+	e.Runtime = wire.Runtime
+	switch {
+	case wire.TimestampRaw != 0:
+		// Live v0.51.0: nanoseconds → milliseconds.
+		e.Timestamp = wire.TimestampRaw / 1_000_000
+	case len(wire.Timestamp) > 0:
+		// Fixture fallback: bare integer ms. RFC3339 strings from live
+		// ig also land here but fail int decode and are ignored — the
+		// ns value from timestamp_raw is authoritative on live runs.
+		var n int64
+		_ = json.Unmarshal(wire.Timestamp, &n)
+		e.Timestamp = n
+	}
+	return nil
 }
 
 // igLostSamplesRE matches ig's ringbuf-loss stderr warnings. v0.51.0

@@ -9,4 +9,10 @@
 {"timestamp":1700000000800,"comm":"postgres","pid":4012,"syscall":"chown","cap":0,"capName":"CAP_CHOWN","container":{"id":"abc123def456789","name":"postgres-1","image":"postgres:16"}}
 {"timestamp":1700000000900,"comm":"postgres","pid":4015,"syscall":"setuid","cap":7,"capName":"CAP_SETUID","container":{"id":"abc123def456789","name":"postgres-1","image":"postgres:16"}}
 {"timestamp":1700000001000,"comm":"curl","pid":9001,"syscall":"socket","cap":13,"capName":"CAP_NET_RAW","container":{"id":"ffff000011112222","name":"unrelated","image":"alpine:3"}}
-{"type":"trace_health","timestamp":1700000001100,"events_recorded":11,"events_dropped":0}
+{"timestamp":1700000002000,"comm":"runc:[2:INIT]","pid":5001,"syscall":"execve","cap":21,"capName":"CAP_SYS_ADMIN","container":{"id":"def789abc123456","name":"postgres-2","image":"postgres:16"}}
+{"timestamp":1700000002050,"comm":"ld-linux-x86-64","pid":5002,"syscall":"openat","cap":2,"capName":"CAP_DAC_READ_SEARCH","container":{"id":"def789abc123456","name":"postgres-2","image":"postgres:16"}}
+{"timestamp":1700000002600,"comm":"postgres","pid":5010,"syscall":"chown","cap":0,"capName":"CAP_CHOWN","container":{"id":"def789abc123456","name":"postgres-2","image":"postgres:16"}}
+{"timestamp":1700000002605,"comm":"postgres","pid":5010,"syscall":"setuid","cap":7,"capName":"CAP_SETUID","container":{"id":"def789abc123456","name":"postgres-2","image":"postgres:16"}}
+{"timestamp":1700000002606,"comm":"postgres","pid":5010,"syscall":"setgid","cap":6,"capName":"CAP_SETGID","container":{"id":"def789abc123456","name":"postgres-2","image":"postgres:16"}}
+{"timestamp":1700000002700,"comm":"postgres","pid":5012,"syscall":"openat","cap":1,"capName":"CAP_DAC_OVERRIDE","container":{"id":"def789abc123456","name":"postgres-2","image":"postgres:16"}}
+{"type":"trace_health","timestamp":1700000002800,"events_recorded":18,"events_dropped":0}

@@ -1,8 +1,8 @@
 // csd — container-sec-derive.
 //
-// v0.1.0-alpha scope (PLAN.md): subprocess `ig run trace_capabilities`,
-// parse line-delimited JSON events, filter to one container, print the
-// distinct cap set to stdout, exit. No formatters, no sidecar, no verify.
+// v0.1.0-beta scope (PLAN.md §v0.1 build order): alpha parsing/aggregation
+// plus the canonical JSON evidence sidecar on disk (--out). Still no
+// formatters, no verify, no entrypoint cross-check -- those land in rc.
 package main
 
 import (
@@ -115,6 +115,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		duration     = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
+		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints cap list)")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -138,6 +139,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		AllMatching:  *allMatching,
 		InitWindowMs: *initWindowMs,
 	}
+
+	observedAt := time.Now().UTC()
 
 	var (
 		s   *Sidecar
@@ -174,8 +177,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 
+	s.ObservedAt = observedAt
 	computeConfidence(s)
 	printCaps(stdout, s.CapNames())
+
+	// Sidecar is written before the drop-rate abort so CI integrators
+	// still get the artifact-with-caveat that PLAN.md §Exit codes
+	// promises for code 21.
+	if *outPath != "" {
+		if err := writeSidecar(s, *outPath); err != nil {
+			return fmt.Errorf("write sidecar: %w", err)
+		}
+	}
 
 	// Drop rate >= 10% is "artifact-with-caveat" per PLAN.md §Exit codes:
 	// caps have already been printed; the nonzero exit is what tells CI
@@ -226,13 +239,45 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts) (*Sidecar, e
 // contract. Init-window filtering is per-replica because each replica has
 // its own startup phase.
 type replicaState struct {
-	seen       map[string]struct{}
+	seen       map[string]*capStats
 	comms      map[string]struct{} // post-init-window comms; feeds confidence rubric
 	firstTsMs  int64
 	firstSeen  bool
 	suppressed int
 	eventCount int
 	sampleName string // for ambiguity-error messages
+	image      string // first observed ev.Container.Image; populates Sidecar.Image when --image not set
+}
+
+// capStats collapses N raw events for one capability into audit-ready
+// numbers. PLAN.md §Output schema requires event_count + first/last offset
+// + comm_samples so reviewers can trace a cap back to the workload phase
+// that needed it. Used per-replica (for PerReplicaCaps book-keeping) and
+// merged into a single union stats map that populates Sidecar.Capabilities.
+type capStats struct {
+	eventCount  int
+	firstTsMs   int64
+	lastTsMs    int64
+	hasTs       bool
+	commSamples map[string]struct{}
+}
+
+func newCapStats() *capStats {
+	return &capStats{commSamples: map[string]struct{}{}}
+}
+
+func (c *capStats) observe(tsMs int64, comm string) {
+	c.eventCount++
+	if !c.hasTs || tsMs < c.firstTsMs {
+		c.firstTsMs = tsMs
+	}
+	if tsMs > c.lastTsMs {
+		c.lastTsMs = tsMs
+	}
+	c.hasTs = true
+	if comm != "" {
+		c.commSamples[comm] = struct{}{}
+	}
 }
 
 // aggregate reads NDJSON events from r, filters via opts.matches(), and
@@ -253,7 +298,10 @@ type replicaState struct {
 // Revisit if Step 11's IG version pin exposes a different unit.
 func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	replicas := map[string]*replicaState{}
+	capUnion := map[string]*capStats{}
 	var latestHealth *traceHealthEvent
+	var globalFirstTsMs int64
+	globalFirstSeen := false
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scan.Scan() {
@@ -292,9 +340,10 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		st, ok := replicas[rid]
 		if !ok {
 			st = &replicaState{
-				seen:       map[string]struct{}{},
+				seen:       map[string]*capStats{},
 				comms:      map[string]struct{}{},
 				sampleName: ev.Container.Name,
+				image:      ev.Container.Image,
 			}
 			replicas[rid] = st
 		}
@@ -311,9 +360,28 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		if name == "" {
 			continue
 		}
-		st.seen[name] = struct{}{}
-		if c := strings.TrimSpace(ev.Comm); c != "" {
-			st.comms[c] = struct{}{}
+		// Offset origin is the earliest post-init-filter event across all
+		// replicas. Under --all-matching, staggered replicas share one
+		// timeline so offsets remain comparable across the profile.
+		if !globalFirstSeen || ev.Timestamp < globalFirstTsMs {
+			globalFirstTsMs = ev.Timestamp
+			globalFirstSeen = true
+		}
+		comm := strings.TrimSpace(ev.Comm)
+		rcs, ok := st.seen[name]
+		if !ok {
+			rcs = newCapStats()
+			st.seen[name] = rcs
+		}
+		rcs.observe(ev.Timestamp, comm)
+		ucs, ok := capUnion[name]
+		if !ok {
+			ucs = newCapStats()
+			capUnion[name] = ucs
+		}
+		ucs.observe(ev.Timestamp, comm)
+		if comm != "" {
+			st.comms[comm] = struct{}{}
 		}
 	}
 	if err := scan.Err(); err != nil {
@@ -341,16 +409,12 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	s.Target.Selector = opts.selector()
 	s.Target.ReplicasObserved = len(replicas)
 
-	union := map[string]struct{}{}
 	commUnion := map[string]struct{}{}
 	var totalSuppressed int
 	for rid, st := range replicas {
 		totalSuppressed += st.suppressed
 		s.Target.PerReplicaEventCounts[rid] = st.eventCount
-		s.Target.PerReplicaCaps[rid] = sortedStringSet(st.seen)
-		for n := range st.seen {
-			union[n] = struct{}{}
-		}
+		s.Target.PerReplicaCaps[rid] = sortedKeys(st.seen)
 		for c := range st.comms {
 			commUnion[c] = struct{}{}
 		}
@@ -358,9 +422,33 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	s.Target.InitWindowSuppressed = totalSuppressed
 	s.Target.DistinctComms = len(commUnion)
 
-	allNames := sortedStringSet(union)
+	// Image: explicit --image wins; otherwise copy any replica's observed
+	// image. Under --container, the flag is an id/name/prefix, not an
+	// image ref, so we do need the fallback to populate the sidecar.
+	if opts.Image != "" {
+		s.Image = opts.Image
+	} else {
+		for _, st := range replicas {
+			if st.image != "" {
+				s.Image = st.image
+				break
+			}
+		}
+	}
+
+	allNames := sortedKeys(capUnion)
 	for _, n := range allNames {
-		s.Capabilities = append(s.Capabilities, Capability{Name: n})
+		cs := capUnion[n]
+		cap := Capability{
+			Name:        n,
+			EventCount:  cs.eventCount,
+			CommSamples: sortedKeys(cs.commSamples),
+		}
+		if cs.hasTs {
+			cap.FirstSeenOffsetMs = cs.firstTsMs - globalFirstTsMs
+			cap.LastSeenOffsetMs = cs.lastTsMs - globalFirstTsMs
+		}
+		s.Capabilities = append(s.Capabilities, cap)
 	}
 
 	// Cross-replica disagreement: any cap not present in every replica.
@@ -394,7 +482,10 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	return s, nil
 }
 
-func sortedStringSet(m map[string]struct{}) []string {
+// sortedKeys returns the keys of m in sorted order. Used both for
+// set-valued maps (struct{} / bool) and for per-cap stats maps; keys are
+// the only thing we care about, value type is incidental.
+func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -414,4 +505,22 @@ func printCaps(w io.Writer, caps []string) {
 	for _, c := range caps {
 		fmt.Fprintln(w, c)
 	}
+}
+
+// writeSidecar serializes s to path as indented JSON. Atomic semantics
+// are not required for v0.1 -- consumers re-run the tool rather than
+// read a sidecar mid-write, and the caller paths that produce s
+// already ran to completion before we land here.
+func writeSidecar(s *Sidecar, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(s); err != nil {
+		return err
+	}
+	return nil
 }

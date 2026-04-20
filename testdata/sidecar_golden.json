@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "image": "postgres:16",
+  "observed_at": "2026-04-19T12:00:00Z",
+  "duration_seconds": 600,
+  "tool_version": "0.1.0-beta",
+  "target": {
+    "mode": "container",
+    "selector": "postgres-1",
+    "replicas_observed": 1,
+    "per_replica_event_counts": {
+      "abc123def456789": 10
+    },
+    "per_replica_caps": {
+      "abc123def456789": [
+        "CHOWN",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "SETGID",
+        "SETUID"
+      ]
+    },
+    "replica_cap_disagreement": [],
+    "restarts": [],
+    "follow_restart": false,
+    "target_exited_early": false,
+    "init_window_suppressed": 3,
+    "distinct_comms": 1
+  },
+  "capabilities": [
+    {
+      "name": "CHOWN",
+      "event_count": 2,
+      "first_seen_offset_ms": 0,
+      "last_seen_offset_ms": 200,
+      "comm_samples": [
+        "postgres"
+      ]
+    },
+    {
+      "name": "DAC_OVERRIDE",
+      "event_count": 1,
+      "first_seen_offset_ms": 100,
+      "last_seen_offset_ms": 100,
+      "comm_samples": [
+        "postgres"
+      ]
+    },
+    {
+      "name": "FOWNER",
+      "event_count": 1,
+      "first_seen_offset_ms": 110,
+      "last_seen_offset_ms": 110,
+      "comm_samples": [
+        "postgres"
+      ]
+    },
+    {
+      "name": "SETGID",
+      "event_count": 1,
+      "first_seen_offset_ms": 6,
+      "last_seen_offset_ms": 6,
+      "comm_samples": [
+        "postgres"
+      ]
+    },
+    {
+      "name": "SETUID",
+      "event_count": 2,
+      "first_seen_offset_ms": 5,
+      "last_seen_offset_ms": 300,
+      "comm_samples": [
+        "postgres"
+      ]
+    }
+  ],
+  "expected_caps_from_entrypoint": [],
+  "coverage_warnings": [],
+  "trace_health": {
+    "events_recorded": 18,
+    "events_dropped": 0,
+    "drop_rate": 0
+  },
+  "confidence": {
+    "level": "low",
+    "factors": [
+      "low: event count 10 \u003c 100",
+      "low: distinct comms = 1 \u003c 2",
+      "deferred: workload script presence not yet recorded",
+      "deferred: entrypoint cross-check not yet implemented (Step 9)",
+      "deferred: steady-state detection not yet implemented",
+      "deferred: target-exited-early signal not yet wired"
+    ]
+  },
+  "caveat": "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
+}

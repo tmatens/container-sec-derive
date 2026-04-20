@@ -13,13 +13,13 @@ func TestAggregate_DistinctCapsSorted(t *testing.T) {
 {"capName":"CAP_CHOWN","container":{"id":"abc123def456","name":"pg"}}
 {"capName":"CAP_DAC_OVERRIDE","container":{"id":"abc123def456","name":"pg"}}
 `
-	caps, err := aggregate(strings.NewReader(input), "pg")
+	s, err := aggregate(strings.NewReader(input), "pg", 0)
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
 	want := []string{"CHOWN", "DAC_OVERRIDE", "SETUID"}
-	if !equalSlice(caps, want) {
-		t.Errorf("caps = %v, want %v", caps, want)
+	if !equalSlice(s.CapNames(), want) {
+		t.Errorf("caps = %v, want %v", s.CapNames(), want)
 	}
 }
 
@@ -27,23 +27,23 @@ func TestAggregate_FiltersByContainer(t *testing.T) {
 	input := `{"capName":"CAP_CHOWN","container":{"id":"aaa","name":"pg"}}
 {"capName":"CAP_NET_RAW","container":{"id":"bbb","name":"other"}}
 `
-	caps, err := aggregate(strings.NewReader(input), "pg")
+	s, err := aggregate(strings.NewReader(input), "pg", 0)
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"CHOWN"}) {
-		t.Errorf("expected only CHOWN for pg, got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+		t.Errorf("expected only CHOWN for pg, got %v", s.CapNames())
 	}
 }
 
 func TestAggregate_ContainerIDPrefix(t *testing.T) {
 	input := `{"capName":"CAP_SETGID","container":{"id":"abcdef1234567890","name":""}}` + "\n"
-	caps, err := aggregate(strings.NewReader(input), "abcdef")
+	s, err := aggregate(strings.NewReader(input), "abcdef", 0)
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"SETGID"}) {
-		t.Errorf("prefix match failed, got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"SETGID"}) {
+		t.Errorf("prefix match failed, got %v", s.CapNames())
 	}
 }
 
@@ -51,12 +51,12 @@ func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
 	input := `{"capName":"CAP_CHOWN","container":{"id":"a"}}
 {"capName":"CAP_SETUID","container":{"id":"b"}}
 `
-	caps, err := aggregate(strings.NewReader(input), "")
+	s, err := aggregate(strings.NewReader(input), "", 0)
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"CHOWN", "SETUID"}) {
-		t.Errorf("got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("got %v", s.CapNames())
 	}
 }
 
@@ -65,12 +65,67 @@ func TestAggregate_SkipsMalformedLines(t *testing.T) {
 		`{"capName":"CAP_CHOWN","container":{"id":"a"}}` + "\n" +
 		"\n" + // blank line
 		`{"capName":"CAP_SETUID","container":{"id":"a"}}` + "\n"
-	caps, err := aggregate(strings.NewReader(input), "a")
+	s, err := aggregate(strings.NewReader(input), "a", 0)
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(caps, []string{"CHOWN", "SETUID"}) {
-		t.Errorf("got %v", caps)
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("got %v", s.CapNames())
+	}
+}
+
+func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
+	// First event sets t=0; a 500ms window must drop anything before 500ms
+	// and keep anything at/after it.
+	input := `{"timestamp":1000,"capName":"CAP_SYS_ADMIN","container":{"id":"a"}}
+{"timestamp":1100,"capName":"CAP_DAC_READ_SEARCH","container":{"id":"a"}}
+{"timestamp":1600,"capName":"CAP_CHOWN","container":{"id":"a"}}
+{"timestamp":1700,"capName":"CAP_SETUID","container":{"id":"a"}}
+`
+	s, err := aggregate(strings.NewReader(input), "a", 500)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("expected init-phase caps suppressed, got %v", s.CapNames())
+	}
+	if s.Target.InitWindowSuppressed != 2 {
+		t.Errorf("InitWindowSuppressed = %d, want 2", s.Target.InitWindowSuppressed)
+	}
+}
+
+func TestAggregate_InitWindowDisabled(t *testing.T) {
+	input := `{"timestamp":1000,"capName":"CAP_SYS_ADMIN","container":{"id":"a"}}
+{"timestamp":1600,"capName":"CAP_CHOWN","container":{"id":"a"}}
+`
+	s, err := aggregate(strings.NewReader(input), "a", 0)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SYS_ADMIN"}) {
+		t.Errorf("window=0 should keep all events, got %v", s.CapNames())
+	}
+	if s.Target.InitWindowSuppressed != 0 {
+		t.Errorf("InitWindowSuppressed = %d, want 0", s.Target.InitWindowSuppressed)
+	}
+}
+
+func TestAggregate_InitWindowIgnoresUnmatchedEvents(t *testing.T) {
+	// Events for other containers must not anchor the init window for
+	// the target. First *matching* event is the reference point.
+	input := `{"timestamp":1000,"capName":"CAP_NET_RAW","container":{"id":"other"}}
+{"timestamp":5000,"capName":"CAP_SYS_ADMIN","container":{"id":"a"}}
+{"timestamp":5600,"capName":"CAP_CHOWN","container":{"id":"a"}}
+`
+	s, err := aggregate(strings.NewReader(input), "a", 500)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+		t.Errorf("expected only CHOWN (SYS_ADMIN anchors+drops), got %v", s.CapNames())
+	}
+	if s.Target.InitWindowSuppressed != 1 {
+		t.Errorf("InitWindowSuppressed = %d, want 1", s.Target.InitWindowSuppressed)
 	}
 }
 
@@ -85,6 +140,49 @@ func TestRun_FixtureMode(t *testing.T) {
 	want := "CHOWN\nDAC_OVERRIDE\nFOWNER\nSETGID\nSETUID\n"
 	if out.String() != want {
 		t.Errorf("output mismatch:\ngot:\n%s\nwant:\n%s", out.String(), want)
+	}
+}
+
+func TestAggregate_TraceHealthPopulated(t *testing.T) {
+	input := `{"timestamp":1000,"capName":"CAP_CHOWN","container":{"id":"a"}}
+{"timestamp":1600,"capName":"CAP_SETUID","container":{"id":"a"}}
+{"type":"trace_health","events_recorded":200,"events_dropped":2}
+`
+	s, err := aggregate(strings.NewReader(input), "a", 500)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if s.TraceHealth.EventsRecorded != 200 || s.TraceHealth.EventsDropped != 2 {
+		t.Errorf("trace_health not captured: %+v", s.TraceHealth)
+	}
+	if s.TraceHealth.DropRate != 0.01 {
+		t.Errorf("DropRate = %v, want 0.01", s.TraceHealth.DropRate)
+	}
+}
+
+func TestAggregate_TraceHealthLastWins(t *testing.T) {
+	input := `{"type":"trace_health","events_recorded":100,"events_dropped":0}
+{"type":"trace_health","events_recorded":250,"events_dropped":5}
+`
+	s, err := aggregate(strings.NewReader(input), "", 0)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if s.TraceHealth.EventsRecorded != 250 || s.TraceHealth.EventsDropped != 5 {
+		t.Errorf("expected last trace_health to win, got %+v", s.TraceHealth)
+	}
+}
+
+func TestAggregate_TraceHealthLinesDoNotFeedCaps(t *testing.T) {
+	// A trace_health line must never be misread as a cap event.
+	input := `{"type":"trace_health","events_recorded":10,"events_dropped":0}
+`
+	s, err := aggregate(strings.NewReader(input), "", 0)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if len(s.Capabilities) != 0 {
+		t.Errorf("trace_health leaked into caps: %v", s.CapNames())
 	}
 }
 

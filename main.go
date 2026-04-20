@@ -39,6 +39,16 @@ type capEvent struct {
 	} `json:"container"`
 }
 
+// traceHealthEvent is IG's periodic ringbuf-health message. PLAN.md
+// §Event-loss reporting requires these counters be surfaced on every
+// run. Schema here is our best-effort; Step 11's IG version pin will
+// lock it against an upstream release.
+type traceHealthEvent struct {
+	Type           string `json:"type"`
+	EventsRecorded int    `json:"events_recorded"`
+	EventsDropped  int    `json:"events_dropped"`
+}
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "csd:", err)
@@ -50,10 +60,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("csd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		container = fs.String("container", "", "target container id or name (required unless --fixture)")
-		fixture   = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
-		duration  = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
-		igBin     = fs.String("ig", "ig", "path to the ig binary")
+		container     = fs.String("container", "", "target container id or name (required unless --fixture)")
+		fixture       = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
+		duration      = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
+		igBin         = fs.String("ig", "ig", "path to the ig binary")
+		initWindowMs  = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -73,11 +84,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("open fixture: %w", err)
 		}
 		defer src.Close()
-		caps, err := aggregate(src, *container)
+		s, err := aggregate(src, *container, *initWindowMs)
 		if err != nil {
 			return err
 		}
-		printCaps(stdout, caps)
+		printCaps(stdout, s.CapNames())
 		return nil
 	}
 
@@ -86,17 +97,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 	ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
 	defer timeoutCancel()
 
-	caps, err := observe(ctx, *igBin, *container)
+	s, err := observe(ctx, *igBin, *container, *initWindowMs)
 	if err != nil {
 		return err
 	}
-	printCaps(stdout, caps)
+	printCaps(stdout, s.CapNames())
 	return nil
 }
 
 // observe spawns `ig run trace_capabilities --output json` and aggregates
 // events for the lifetime of ctx.
-func observe(ctx context.Context, igBin, container string) ([]string, error) {
+func observe(ctx context.Context, igBin, container string, initWindowMs int) (*Sidecar, error) {
 	cmd := exec.CommandContext(ctx, igBin, "run", "trace_capabilities", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -106,7 +117,7 @@ func observe(ctx context.Context, igBin, container string) ([]string, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
-	caps, aggErr := aggregate(stdout, container)
+	s, aggErr := aggregate(stdout, container, initWindowMs)
 	// Wait for ig to exit. A context-cancel kill is the normal termination
 	// path for the timed observation window, so we don't propagate that as
 	// an error.
@@ -117,19 +128,48 @@ func observe(ctx context.Context, igBin, container string) ([]string, error) {
 	if waitErr != nil && ctx.Err() == nil {
 		return nil, fmt.Errorf("ig exited: %w", waitErr)
 	}
-	return caps, nil
+	return s, nil
 }
 
 // aggregate reads NDJSON events from r, filters to the given container
-// (by id or name; empty string matches all), and returns the sorted set
-// of distinct capability names observed.
-func aggregate(r io.Reader, container string) ([]string, error) {
+// (by id or name; empty string matches all), and returns a *Sidecar whose
+// Capabilities slice holds the sorted distinct caps.
+//
+// initWindowMs drops events observed within that many milliseconds of the
+// first matching event, reducing runc / ld.so init noise. 0 disables the
+// filter. Suppressed-event count is recorded on Target so reviewers can
+// tell the filter apart from a genuinely small cap set.
+//
+// Timestamps are assumed to be milliseconds (fixture convention, matching
+// `ig run trace_capabilities --output json` at the pinned release). Revisit
+// if Step 11's IG version pin exposes a different unit.
+func aggregate(r io.Reader, container string, initWindowMs int) (*Sidecar, error) {
 	seen := map[string]struct{}{}
+	var (
+		firstTsMs      int64
+		firstSeen      bool
+		suppressed     int
+		latestHealth   *traceHealthEvent
+	)
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scan.Scan() {
 		line := scan.Bytes()
 		if len(line) == 0 {
+			continue
+		}
+		// Type-discriminate: trace_health / diagnostic lines are decoded
+		// first and never flow into the capability aggregator. Untagged
+		// lines fall through to the capEvent path (IG emits cap events
+		// without a "type" field at the pinned release).
+		var env struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(line, &env); err == nil && env.Type == "trace_health" {
+			var th traceHealthEvent
+			if err := json.Unmarshal(line, &th); err == nil {
+				latestHealth = &th
+			}
 			continue
 		}
 		var ev capEvent
@@ -142,6 +182,14 @@ func aggregate(r io.Reader, container string) ([]string, error) {
 		if !matchesContainer(ev, container) {
 			continue
 		}
+		if !firstSeen {
+			firstTsMs = ev.Timestamp
+			firstSeen = true
+		}
+		if initWindowMs > 0 && ev.Timestamp-firstTsMs < int64(initWindowMs) {
+			suppressed++
+			continue
+		}
 		name := normalizeCap(ev.CapName)
 		if name == "" {
 			continue
@@ -151,12 +199,24 @@ func aggregate(r io.Reader, container string) ([]string, error) {
 	if err := scan.Err(); err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(seen))
+	names := make([]string, 0, len(seen))
 	for k := range seen {
-		out = append(out, k)
+		names = append(names, k)
 	}
-	sort.Strings(out)
-	return out, nil
+	sort.Strings(names)
+	s := NewSidecar()
+	s.Target.InitWindowSuppressed = suppressed
+	if latestHealth != nil {
+		s.TraceHealth.EventsRecorded = latestHealth.EventsRecorded
+		s.TraceHealth.EventsDropped = latestHealth.EventsDropped
+		if latestHealth.EventsRecorded > 0 {
+			s.TraceHealth.DropRate = float64(latestHealth.EventsDropped) / float64(latestHealth.EventsRecorded)
+		}
+	}
+	for _, n := range names {
+		s.Capabilities = append(s.Capabilities, Capability{Name: n})
+	}
+	return s, nil
 }
 
 func matchesContainer(ev capEvent, target string) bool {

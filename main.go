@@ -97,10 +97,11 @@ func (o aggregateOpts) selector() string {
 }
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	err := run(os.Args[1:], os.Stdout, os.Stderr)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "csd:", err)
-		os.Exit(1)
 	}
+	os.Exit(exitCodeFor(err))
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
@@ -116,17 +117,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 	)
 	if err := fs.Parse(args); err != nil {
-		return err
+		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
+		// flags as parse errors. CI integrators want both as EX_USAGE.
+		return wrapCoded(ExitUsage, err)
 	}
 
 	if *container != "" && *image != "" {
-		return errors.New("--container and --image are mutually exclusive")
+		return codedErrorf(ExitUsage, "--container and --image are mutually exclusive")
 	}
 	if *allMatching && *image == "" {
-		return errors.New("--all-matching requires --image")
+		return codedErrorf(ExitUsage, "--all-matching requires --image")
 	}
 	if *fixture == "" && *container == "" && *image == "" {
-		return errors.New("one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
+		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
 
 	opts := aggregateOpts{
@@ -137,39 +140,53 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	var (
-		src io.ReadCloser
+		s   *Sidecar
 		err error
 	)
 	if *fixture != "" {
-		src, err = os.Open(*fixture)
-		if err != nil {
-			return fmt.Errorf("open fixture: %w", err)
+		src, openErr := os.Open(*fixture)
+		if openErr != nil {
+			return fmt.Errorf("open fixture: %w", openErr)
 		}
 		defer src.Close()
-		s, err := aggregate(src, opts)
-		if err != nil {
-			return err
-		}
+		s, err = aggregate(src, opts)
 		// Fixture mode: duration is unknown, so leave DurationSeconds=0
 		// (computeConfidence treats 0 as "not measured" and skips the
 		// soft-floor check).
-		computeConfidence(s)
-		printCaps(stdout, s.CapNames())
-		return nil
+	} else {
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
+		defer timeoutCancel()
+		s, err = observe(ctx, *igBin, opts)
+		if s != nil {
+			s.DurationSeconds = int(duration.Seconds())
+		}
 	}
-
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
-	defer timeoutCancel()
-
-	s, err := observe(ctx, *igBin, opts)
 	if err != nil {
+		// Map typed failures to their PLAN.md §Exit codes slot. Anything
+		// already coded (e.g. ExitIGMissing from observe) is returned
+		// verbatim.
+		var amb *ambiguousSelectionError
+		if errors.As(err, &amb) {
+			return wrapCoded(ExitTargetAmbiguous, err)
+		}
 		return err
 	}
-	s.DurationSeconds = int(duration.Seconds())
+
 	computeConfidence(s)
 	printCaps(stdout, s.CapNames())
+
+	// Drop rate >= 10% is "artifact-with-caveat" per PLAN.md §Exit codes:
+	// caps have already been printed; the nonzero exit is what tells CI
+	// the profile isn't trustworthy.
+	if s.TraceHealth.DropRate >= DropRateAbort {
+		return codedErrorf(ExitDropRateExcessive,
+			"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
+			s.TraceHealth.DropRate, DropRateAbort,
+			s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
+		)
+	}
 	return nil
 }
 
@@ -183,6 +200,9 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts) (*Sidecar, e
 	}
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
+		if isIGMissing(err) {
+			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
 	s, aggErr := aggregate(stdout, opts)
@@ -313,8 +333,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			}
 		}
 		sort.Strings(labels)
-		return nil, fmt.Errorf("--image %q matched %d replicas; rerun with --container to disambiguate or --all-matching to aggregate across replicas:\n  %s",
-			opts.Image, len(replicas), strings.Join(labels, "\n  "))
+		return nil, &ambiguousSelectionError{image: opts.Image, replicas: labels}
 	}
 
 	s := NewSidecar()

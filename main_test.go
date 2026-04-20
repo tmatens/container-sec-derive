@@ -136,8 +136,9 @@ func TestRun_FixtureMode(t *testing.T) {
 		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
 	}
 	// Expected caps from the sample fixture, matching compose-lint's
-	// curated postgres profile (PLAN.md §v1 success criteria).
-	want := "CHOWN\nDAC_OVERRIDE\nFOWNER\nSETGID\nSETUID\n"
+	// curated postgres profile (PLAN.md §v1 success criteria). Default
+	// stdout format is compose (PLAN.md §Decisions item 2).
+	want := "cap_drop:\n  - ALL\ncap_add:\n  - CHOWN\n  - DAC_OVERRIDE\n  - FOWNER\n  - SETGID\n  - SETUID\n"
 	if out.String() != want {
 		t.Errorf("output mismatch:\ngot:\n%s\nwant:\n%s", out.String(), want)
 	}
@@ -310,7 +311,7 @@ func TestRun_FixtureMode_AllMatchingPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
 	}
-	want := "CHOWN\nDAC_OVERRIDE\nFOWNER\nSETGID\nSETUID\n"
+	want := "cap_drop:\n  - ALL\ncap_add:\n  - CHOWN\n  - DAC_OVERRIDE\n  - FOWNER\n  - SETGID\n  - SETUID\n"
 	if out.String() != want {
 		t.Errorf("output mismatch:\ngot:\n%s\nwant:\n%s", out.String(), want)
 	}

@@ -86,7 +86,7 @@ func TestRun_ExitCode_DropRateExcessive(t *testing.T) {
 	if got := exitCodeFor(err); got != ExitDropRateExcessive {
 		t.Errorf("exit = %d, want ExitDropRateExcessive (%d); err=%v", got, ExitDropRateExcessive, err)
 	}
-	if want := "CHOWN\nSETUID\n"; out.String() != want {
+	if want := "cap_drop:\n  - ALL\ncap_add:\n  - CHOWN\n  - SETUID\n"; out.String() != want {
 		t.Errorf("caps output lost on drop-rate exit; got %q want %q", out.String(), want)
 	}
 }

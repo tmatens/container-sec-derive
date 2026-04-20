@@ -115,7 +115,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		duration     = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
-		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints cap list)")
+		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
+		format       = fs.String("format", FormatCompose, "output format for stdout (v0.1.0-beta: compose only; rc adds compose-patch, docker-run, oci, k8s, json, compose-lint-profile)")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -131,6 +132,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	if *fixture == "" && *container == "" && *image == "" {
 		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
+	}
+	if *format != FormatCompose {
+		return codedErrorf(ExitUsage, "--format %q not supported in v0.1.0-beta; only %q is implemented (compose-patch, docker-run, oci, k8s, json, compose-lint-profile land in v0.1.0-rc)", *format, FormatCompose)
 	}
 
 	opts := aggregateOpts{
@@ -179,7 +183,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 
 	s.ObservedAt = observedAt
 	computeConfidence(s)
-	printCaps(stdout, s.CapNames())
+	if err := writeCompose(stdout, s); err != nil {
+		return fmt.Errorf("write compose: %w", err)
+	}
 
 	// Sidecar is written before the drop-rate abort so CI integrators
 	// still get the artifact-with-caveat that PLAN.md §Exit codes
@@ -499,12 +505,6 @@ func sortedKeys[V any](m map[string]V) []string {
 func normalizeCap(name string) string {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	return strings.TrimPrefix(name, "CAP_")
-}
-
-func printCaps(w io.Writer, caps []string) {
-	for _, c := range caps {
-		fmt.Fprintln(w, c)
-	}
 }
 
 // writeSidecar serializes s to path as indented JSON. Atomic semantics

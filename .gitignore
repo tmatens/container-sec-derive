@@ -1,3 +1,62 @@
+# Agent / AI assistant configuration.
+# CLAUDE.md is tracked. Memory, session, and local agent-runner state lives
+# under .claude/ and stays untracked.
+.claude/
+
+# Go build output
 /csd
+/csd_linux_amd64
+/csd_linux_arm64
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test / coverage
 *.test
+*.out
+coverage.html
+/cover/
+
+# Go profiling
+*.prof
+*.pprof
+
+# Go workspace (local-only)
+go.work
+go.work.sum
+
+# Distribution / packaging
 /dist/
+/build/
+SHA256SUMS
+*.sbom.json
+*.spdx.json
+*.cdx.json
+
+# Cosign / signing material.
+# Release .sig files are published to GitHub releases, never committed.
+# Private keys must never land in the tree — patterns below are a safety net.
+cosign.key
+*.pem.key
+*.sig
+*.pub.sig
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db

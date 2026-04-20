@@ -183,7 +183,8 @@ JSON evidence sidecar (canonical artifact; all formatters derive from this):
     "restarts": [],
     "follow_restart": false,
     "target_exited_early": false,
-    "init_window_suppressed": 2
+    "init_window_suppressed": 2,
+    "distinct_comms": 4
   },
   "capabilities": [
     {
@@ -225,6 +226,8 @@ The schema is observer-agnostic-ish: future observers add their own top-level ar
 **Per-replica disagreement.** `replica_cap_disagreement` lists any cap observed on fewer than all replicas under `--all-matching`. Non-empty disagreement forces confidence to at most `moderate`; a disagreement of > 1 cap forces `low` (see rubric). This prevents the tool from silently emitting the union of replica cap sets as if every replica needed every cap.
 
 **Init-window accounting.** `target.init_window_suppressed` is the count of capability events dropped by the `--init-window-ms` filter (default 500ms). The same filtering is also recorded as a `confidence.factors` prose string so humans reading the artifact see it at a glance; the counter exists so machines and reviewers can judge whether a sparse derived cap set is workload-minimal or a window-too-wide artifact and retune accordingly.
+
+**Comm-diversity accounting.** `target.distinct_comms` is the count of distinct `comm` values observed across all replicas after the init-window filter. It feeds the comm-diversity factor in the confidence rubric directly; exposing it on the sidecar (rather than keeping it in a private aggregator field) means reviewers can audit the rubric's input from the artifact alone without re-deriving it from `capabilities[].comm_samples`.
 
 ## Tech stack — Inspektor Gadget
 
@@ -460,8 +463,8 @@ Images were chosen because they have **small, exercisable surface areas** — no
 v1 success criteria describe the finished shape, not the first thing to build. Shipping everything at once is the failure mode this section exists to prevent. Ordering:
 
 1. **v0.1.0-alpha — "does it work at all."** Subprocess `ig run trace_capabilities`, parse line-delimited JSON events, filter to one container by id, print the distinct cap set to stdout, exit. No formatters, no verify, no sidecar, no entrypoint cross-check, no confidence rubric. Ship against postgres only. The purpose of this milestone is to validate three load-bearing assumptions before any breadth work: (a) kretprobe pairing is deterministic enough on the reference workloads to hit the <0.1% miss rate the success criteria require; (b) cgroup-id attribution is stable across the lifetime of the observation and invalidates correctly on container exit; (c) the 500ms init filter (or whatever replacement) actually isolates init noise without dropping real workload events. If any of these fail on postgres, the remaining plan redirects — to LSM-BPF sooner, to a reconciliation layer, or to a different init-filter shape — *before* formatters and verify are built on top of them. Expected size: a few hundred lines of Go, one week.
-2. **v0.1.0-beta — "one reference image, end-to-end."** Add the canonical JSON evidence sidecar, the `compose` formatter, the confidence rubric *without* the entrypoint cross-check, and the postgres `workload.sh` + `ground_truth.json` (bisected by hand the first time; `make ground-truth` can wait). No verify, no other formatters, no multi-replica, no WSL2, no IG version fixtures. Proves the observe → aggregate → format loop against a real image.
-3. **v0.1.0-rc — "breadth."** Remaining six formatters (`compose-patch`, `docker-run`, `oci`, `k8s`, `json`, `compose-lint-profile`), entrypoint cross-check (which feeds the confidence rubric and the compose-lint contribution bar), caddy + tailscale reference images with bisected ground truth, `csd verify` with its three outcomes, `--all-matching` + replica disagreement, `trace_health` + event-loss handling.
+2. **v0.1.0-beta — "structural close on the aggregate → format loop."** As shipped: canonical JSON evidence sidecar (`--out`), `compose` formatter (default, `--format` flag with the other six returning `EX_USAGE`), deterministic confidence rubric (subset of the full rubric — factors not yet wired are surfaced as `deferred:` entries and cap the grade at `moderate`), exit-code table, init-window filter with `init_window_suppressed` accounting, multi-replica aggregator (`--image` / `--all-matching` with per-replica cap sets and disagreement recorded in the sidecar), `trace_health` counters with the ≥10% abort. No verify, no other formatters, no entrypoint cross-check, no reference-image workloads, no WSL2, no IG version fixtures. Proves the observe → aggregate → format loop against the postgres fixture; the real-image bisection carries into rc.
+3. **v0.1.0-rc — "breadth."** Remaining six formatters (`compose-patch`, `docker-run`, `oci`, `k8s`, `json`, `compose-lint-profile`), entrypoint cross-check (feeds the confidence rubric *and* the compose-lint contribution bar — ship it before `compose-lint-profile` or the bar's `coverage_warnings`-empty check is vacuously true), postgres + caddy + tailscale reference images with bisected ground truth (postgres shifted in from beta), `csd verify` with its three outcomes, user-facing surfacing of `--all-matching` replica disagreement (aggregator records it today; rc promotes it to stderr/exit-code behavior), stderr warning for `trace_health` drops above 0 but below the 10% abort threshold.
 4. **v0.1.0 — "release."** WSL2 smoke matrix, IG version fixtures + parser, cosign pipeline, SBOM generation with vendored IG provenance recorded, full docs walkthrough. Everything remaining in "v1 success criteria."
 
 Each milestone has a working end-to-end demo path; none depend on a subsequent milestone's infrastructure. If alpha surfaces that kretprobe determinism on this kernel family isn't good enough, the sunk cost is one week, not three months.

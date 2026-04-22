@@ -186,7 +186,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
-		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, docker-run; still landing in v0.1.0-rc: compose-patch, oci, k8s, json, compose-lint-profile)")
+		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, docker-run, json; still landing in v0.1.0-rc: compose-patch, oci, k8s, compose-lint-profile)")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -204,10 +204,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
 	switch *format {
-	case FormatCompose, FormatDockerRun:
+	case FormatCompose, FormatDockerRun, FormatJSON:
 		// implemented
 	default:
-		return codedErrorf(ExitUsage, "--format %q not implemented yet; supported: %s, %s (compose-patch, oci, k8s, json, compose-lint-profile still landing in v0.1.0-rc)", *format, FormatCompose, FormatDockerRun)
+		return codedErrorf(ExitUsage, "--format %q not implemented yet; supported: %s, %s, %s (compose-patch, oci, k8s, compose-lint-profile still landing in v0.1.0-rc)", *format, FormatCompose, FormatDockerRun, FormatJSON)
 	}
 
 	opts := aggregateOpts{
@@ -276,6 +276,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case FormatDockerRun:
 		if err := writeDockerRun(stdout, s); err != nil {
 			return fmt.Errorf("write docker-run: %w", err)
+		}
+	case FormatJSON:
+		if err := writeJSON(stdout, s); err != nil {
+			return fmt.Errorf("write json: %w", err)
 		}
 	}
 
@@ -689,16 +693,14 @@ func normalizeCap(name string) string {
 // are not required for v0.1 -- consumers re-run the tool rather than
 // read a sidecar mid-write, and the caller paths that produce s
 // already ran to completion before we land here.
+//
+// Routes through writeJSON so the --out file and `--format json` stdout
+// are byte-identical.
 func writeSidecar(s *Sidecar, path string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(s); err != nil {
-		return err
-	}
-	return nil
+	return writeJSON(f, s)
 }

@@ -61,19 +61,19 @@ func TestWriteCompose_PreservesAggregatorOrder(t *testing.T) {
 }
 
 func TestRun_UnknownFormatIsUsageError(t *testing.T) {
-	// v0.1.0-beta ships only `compose`; the other six formatters land in
-	// v0.1.0-rc. Unknown / not-yet-supported values must surface as
-	// EX_USAGE with a guiding message, not as a silent fall-through.
-	// `oci` is still deferred at this point in rc; swap the probe if it
-	// lands before this test is refactored.
+	// v0.1.0-beta ships only `compose`; the remaining formatters land
+	// across v0.1.0-rc. Unknown / not-yet-supported values must surface
+	// as EX_USAGE with a guiding message, not as a silent fall-through.
+	// `compose-patch` is still deferred at this point in rc; swap the
+	// probe if it lands before this test is refactored.
 	var out, errBuf bytes.Buffer
 	err := run([]string{
 		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
-		"--format", "oci",
+		"--format", "compose-patch",
 	}, &out, &errBuf)
 	if err == nil {
-		t.Fatal("expected usage error for --format oci in v0.1.0-rc")
+		t.Fatal("expected usage error for --format compose-patch in v0.1.0-rc")
 	}
 	if code := exitCodeFor(err); code != ExitUsage {
 		t.Errorf("exit code = %d, want %d (ExitUsage)", code, ExitUsage)

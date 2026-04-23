@@ -64,14 +64,16 @@ func TestRun_UnknownFormatIsUsageError(t *testing.T) {
 	// v0.1.0-beta ships only `compose`; the other six formatters land in
 	// v0.1.0-rc. Unknown / not-yet-supported values must surface as
 	// EX_USAGE with a guiding message, not as a silent fall-through.
+	// `oci` is still deferred at this point in rc; swap the probe if it
+	// lands before this test is refactored.
 	var out, errBuf bytes.Buffer
 	err := run([]string{
 		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
-		"--format", "k8s",
+		"--format", "oci",
 	}, &out, &errBuf)
 	if err == nil {
-		t.Fatal("expected usage error for --format k8s in v0.1.0-beta")
+		t.Fatal("expected usage error for --format oci in v0.1.0-rc")
 	}
 	if code := exitCodeFor(err); code != ExitUsage {
 		t.Errorf("exit code = %d, want %d (ExitUsage)", code, ExitUsage)

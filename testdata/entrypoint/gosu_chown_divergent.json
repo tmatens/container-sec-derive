@@ -1,0 +1,8 @@
+{
+  "image": "postgres:16",
+  "entrypoint": ["/bin/sh", "-c", "chown postgres /var/lib/postgresql && exec gosu postgres postgres"],
+  "cmd": [],
+  "history_lines": [
+    "/bin/sh -c setcap cap_net_bind_service=+ep /usr/bin/postgres"
+  ]
+}

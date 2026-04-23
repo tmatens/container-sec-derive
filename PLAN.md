@@ -126,6 +126,8 @@ Workload coverage is the ceiling on correctness for both observation and bisecti
 
    This converts a silent coverage gap into a loud, actionable warning at the exact moment the user would otherwise commit the profile.
 
+   **v0.1.0-rc phase A (Step 15).** The cross-check ships as an *informational* signal: `expected_caps_from_entrypoint` and `coverage_warnings` are populated, and divergence contributes a single `moderate:` hit to the rubric (stacking with any other moderate pushes the grade to `low`), but the force-`low` rule above is not yet wired. Rationale: the heuristic table's false-positive rate is unmeasured until reference-image bisections run. Phase B flips the `moderate:` hit to `low:` (matches the PLAN shape above) once we have signal-quality evidence from those runs; if the signal proves noisy, the whole cross-check is removable by deleting `entrypoint.go` and leaving the sidecar fields as always-empty arrays (no schema break). The `compose-lint-profile` formatter's `coverage_warnings`-empty gate is independent of this phase: it reads the populated warnings directly and refuses to emit on divergence regardless of grade pressure.
+
 3. **Steady-state detection (retained).** No new distinct capability in the final `max(60s, 25% of duration)` contributes one confidence factor. Kept as-is; it's a useful signal for "within the paths the workload exercised, we've converged."
 
 **What v1 explicitly does not do:** grade workload coverage itself. A probe-manifest (`probes.yaml`) that enumerates expected behaviors per reference image is v2 work and already has a forward-compat placeholder in `testdata/<image>/probes.yaml`. The entrypoint cross-check is the v1 proxy; the probe manifest is the v2 generalization.

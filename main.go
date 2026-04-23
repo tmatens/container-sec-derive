@@ -187,7 +187,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
-		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, docker-run, json, k8s, oci; still landing in v0.1.0-rc: compose-patch, compose-lint-profile)")
+		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-lint-profile, docker-run, json, k8s, oci; still landing in v0.1.0-rc: compose-patch)")
+		allowExploratory = fs.Bool("allow-exploratory", false, "compose-lint-profile only: emit under exploratory: even when the acceptance contract is not met")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -205,10 +206,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
 	switch *format {
-	case FormatCompose, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI:
+	case FormatCompose, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI:
 		// implemented
 	default:
-		return codedErrorf(ExitUsage, "--format %q not implemented yet; supported: %s, %s, %s, %s, %s (compose-patch, compose-lint-profile still landing in v0.1.0-rc)", *format, FormatCompose, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
+		return codedErrorf(ExitUsage, "--format %q not implemented yet; supported: %s, %s, %s, %s, %s, %s (compose-patch still landing in v0.1.0-rc)", *format, FormatCompose, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
+	}
+	if *allowExploratory && *format != FormatComposeLintEntry {
+		return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 	}
 
 	opts := aggregateOpts{
@@ -290,6 +294,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case FormatOCI:
 		if err := writeOCI(stdout, s); err != nil {
 			return fmt.Errorf("write oci: %w", err)
+		}
+	case FormatComposeLintEntry:
+		if err := writeComposeLintProfile(stdout, s, *allowExploratory); err != nil {
+			// Contract-not-met is a usage-class failure: the user asked
+			// for a contribution-ready profile and the artifact didn't
+			// clear the bar. Surface as EX_USAGE so CI pipelines catch
+			// it rather than quietly accepting a silently-empty stdout.
+			return wrapCoded(ExitUsage, fmt.Errorf("write compose-lint-profile: %w", err))
 		}
 	}
 

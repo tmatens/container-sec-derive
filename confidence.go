@@ -12,9 +12,14 @@ import "fmt"
 // achievable level at moderate; later steps wire them in:
 //
 //   - workload script presence -- ships with the formatter / contribution flow
-//   - entrypoint cross-check  -- Step 9
-//   - steady-state detection  -- needs time-windowed aggregation
-//   - target exited early     -- needs observe()-side instrumentation
+//   - steady-state detection   -- needs time-windowed aggregation
+//   - target exited early      -- needs observe()-side instrumentation
+//
+// Step 15 (v0.1.0-rc) wires the entrypoint cross-check as an informational
+// factor: divergence contributes one "moderate:" hit but does NOT force-
+// low on its own. PLAN.md §Workload coverage item 2's force-low rule is
+// intentionally deferred until reference-image runs give us a real read
+// on signal quality vs false-positive rate.
 //
 // Reporting deferred factors honestly (rather than silently grading
 // High) keeps the rubric trustworthy while the rest of the inputs land.
@@ -85,11 +90,36 @@ func computeConfidence(s *Sidecar) {
 		}
 	}
 
+	// Entrypoint cross-check (PLAN.md §Workload coverage items 1-2).
+	// Phase A: divergence is informational; warnings contribute one
+	// "moderate:" hit (stacking with any other moderate pushes to low)
+	// but the force-low rule from PLAN.md item 2 is not yet wired. The
+	// populated ExpectedCapsFromEntrypoint + CoverageWarnings fields
+	// remain the authoritative record regardless of grade pressure.
+	switch {
+	case s.crossCheckStatus == "":
+		// Skipped (fixture mode without --inspect-fixture, or no image
+		// reference available in a path that didn't attempt inspect).
+		// Emit no factor -- absence of evidence isn't evidence of
+		// absence, and the sidecar's empty ExpectedCapsFromEntrypoint
+		// + empty CoverageWarnings already tell the reviewer.
+	case s.crossCheckStatus != crossCheckStatusOK:
+		// Attempted but failed (docker daemon down, image not present,
+		// etc.). Informational factor with the truncated reason so the
+		// reviewer can see why the check couldn't run.
+		addInfo("entrypoint cross-check unavailable: " + s.crossCheckStatus)
+	case len(s.CoverageWarnings) > 0:
+		addModerate(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
+	case len(s.ExpectedCapsFromEntrypoint) == 0:
+		addInfo("entrypoint cross-check ran; no static signals matched")
+	default:
+		addInfo(fmt.Sprintf("entrypoint cross-check clean (%d expected caps covered)", len(s.ExpectedCapsFromEntrypoint)))
+	}
+
 	// Deferred preconditions for High. These cap the achievable grade at
 	// moderate until later steps wire in the inputs.
 	factors = append(factors,
 		"deferred: workload script presence not yet recorded",
-		"deferred: entrypoint cross-check not yet implemented (Step 9)",
 		"deferred: steady-state detection not yet implemented",
 		"deferred: target-exited-early signal not yet wired",
 	)

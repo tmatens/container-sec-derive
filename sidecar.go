@@ -48,6 +48,19 @@ type Sidecar struct {
 	TraceHealth                TraceHealth  `json:"trace_health"`
 	Confidence                 Confidence   `json:"confidence"`
 	Caveat                     string       `json:"caveat"`
+
+	// crossCheckStatus is an internal (unserialized) handoff from the
+	// observe/run path to computeConfidence. Empty = skipped (e.g.
+	// fixture mode without --inspect-fixture, or no image reference
+	// available). "ok" = ran successfully (cap sets are authoritative
+	// regardless of whether signals fired). Any other non-empty value
+	// is a short reason explaining why the live inspect failed, and
+	// feeds an "entrypoint cross-check unavailable: ..." factor in
+	// the rubric. Not serialized because PLAN.md §Output schema does
+	// not define a sidecar field for cross-check status; the public
+	// contract is ExpectedCapsFromEntrypoint + CoverageWarnings, and
+	// everything else is internal telemetry.
+	crossCheckStatus string `json:"-"`
 }
 
 // Target captures which container(s) produced the observation and how

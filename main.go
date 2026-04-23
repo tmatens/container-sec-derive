@@ -180,8 +180,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		container    = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
 		image        = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
 		allMatching  = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
-		fixture      = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
-		fixtureErr   = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
+		fixture        = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
+		fixtureErr     = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
+		inspectFixture = fs.String("inspect-fixture", "", "read pre-captured image-inspection JSON from this file instead of running `docker inspect`")
 		duration     = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
@@ -267,6 +268,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	s.ObservedAt = observedAt
+	applyEntrypointCrossCheck(s, *inspectFixture, *fixture != "", stderr)
 	computeConfidence(s)
 	switch *format {
 	case FormatCompose:

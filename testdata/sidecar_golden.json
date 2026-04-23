@@ -87,7 +87,6 @@
       "low: event count 10 \u003c 100",
       "low: distinct comms = 1 \u003c 2",
       "deferred: workload script presence not yet recorded",
-      "deferred: entrypoint cross-check not yet implemented (Step 9)",
       "deferred: steady-state detection not yet implemented",
       "deferred: target-exited-early signal not yet wired"
     ]

@@ -29,16 +29,21 @@ func TestConfidence_AllGreenCapsAtModerate(t *testing.T) {
 		t.Fatalf("level = %q, want %q\nfactors: %v", s.Confidence.Level, ConfidenceModerate, s.Confidence.Factors)
 	}
 	// Deferred markers must be present so reviewers see why we capped.
+	// Step 15 (v0.1.0-rc) removed the entrypoint cross-check deferred
+	// marker -- that rubric input is now wired; see the dedicated
+	// cross-check tests below.
 	joined := strings.Join(s.Confidence.Factors, "\n")
 	for _, want := range []string{
 		"deferred: workload script presence",
-		"deferred: entrypoint cross-check",
 		"deferred: steady-state detection",
 		"deferred: target-exited-early",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing deferred factor %q in:\n%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "deferred: entrypoint cross-check") {
+		t.Errorf("entrypoint cross-check is wired (Step 15); deferred marker should be gone:\n%s", joined)
 	}
 }
 
@@ -159,6 +164,100 @@ func TestConfidence_ZeroEventsDoesNotDoubleCount(t *testing.T) {
 	}
 	if lows != 1 {
 		t.Errorf("expected exactly 1 low factor (event count), got %d:\n%v", lows, s.Confidence.Factors)
+	}
+}
+
+// Entrypoint cross-check (Step 15, phase A): skipped state contributes
+// no factor and does not pressure the grade.
+func TestConfidence_CrossCheckSkippedEmitsNoFactor(t *testing.T) {
+	s := helperSidecar()
+	// helperSidecar leaves crossCheckStatus empty -- the skipped case.
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if strings.Contains(joined, "entrypoint cross-check") {
+		t.Errorf("skipped cross-check must not emit a factor; got:\n%s", joined)
+	}
+}
+
+// Clean run with signals matched + covered → informational "clean" factor.
+// Phase A: grade stays at moderate (deferred cap), not high.
+func TestConfidence_CrossCheckCleanEmitsOkFactor(t *testing.T) {
+	s := helperSidecar()
+	s.crossCheckStatus = crossCheckStatusOK
+	s.ExpectedCapsFromEntrypoint = []string{"CHOWN", "SETUID"}
+	// CoverageWarnings empty -- observed covers expected.
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "entrypoint cross-check clean") {
+		t.Errorf("expected clean-cross-check factor; got:\n%s", joined)
+	}
+	if s.Confidence.Level != ConfidenceModerate {
+		t.Errorf("phase A clean cross-check should leave grade at moderate (deferred cap), got %q", s.Confidence.Level)
+	}
+}
+
+// Ran but no static signals matched → distinct factor so the reviewer
+// sees we tried. Distinguishes from skipped (no factor at all).
+func TestConfidence_CrossCheckNoSignalsEmitsOkFactor(t *testing.T) {
+	s := helperSidecar()
+	s.crossCheckStatus = crossCheckStatusOK
+	// ExpectedCapsFromEntrypoint empty; CoverageWarnings empty.
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "entrypoint cross-check ran; no static signals matched") {
+		t.Errorf("expected no-signals-matched factor; got:\n%s", joined)
+	}
+}
+
+// Divergence (warnings non-empty) adds a moderate hit. On its own the
+// grade stays at moderate; paired with another moderate it drops to
+// low -- phase A keeps the force-low rule unwired.
+func TestConfidence_CrossCheckWarningsContributeModerate(t *testing.T) {
+	s := helperSidecar()
+	s.crossCheckStatus = crossCheckStatusOK
+	s.ExpectedCapsFromEntrypoint = []string{"CHOWN", "FOWNER"}
+	s.CoverageWarnings = []string{
+		"entrypoint references `chown` but FOWNER was not observed. Likely cause: workload did not exercise a code path that needs it.",
+	}
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "1 entrypoint coverage warnings present") {
+		t.Errorf("expected warnings-present moderate factor; got:\n%s", joined)
+	}
+	// Phase A: warnings alone should not force low.
+	if s.Confidence.Level != ConfidenceModerate {
+		t.Errorf("warnings alone should not force low in phase A; got %q", s.Confidence.Level)
+	}
+}
+
+// Stacking: warnings moderate + one other moderate → low. This is the
+// only existing path to low through the cross-check in phase A.
+func TestConfidence_CrossCheckWarningsStackWithAnotherModerateToLow(t *testing.T) {
+	s := helperSidecar()
+	s.crossCheckStatus = crossCheckStatusOK
+	s.ExpectedCapsFromEntrypoint = []string{"CHOWN"}
+	s.CoverageWarnings = []string{"dummy warning for test"}
+	s.Target.DistinctComms = 2 // second moderate hit
+	computeConfidence(s)
+	if s.Confidence.Level != ConfidenceLow {
+		t.Errorf("warnings + one other moderate should downgrade to low; got %q\nfactors: %v",
+			s.Confidence.Level, s.Confidence.Factors)
+	}
+}
+
+// Inspect-unavailable reason surfaces verbatim (truncated) as an
+// informational factor. No grade pressure -- cross-check failure is not
+// coverage-gap evidence.
+func TestConfidence_CrossCheckUnavailableEmitsOkFactor(t *testing.T) {
+	s := helperSidecar()
+	s.crossCheckStatus = "docker inspect postgres:16: exec: \"docker\": executable file not found"
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "entrypoint cross-check unavailable: docker inspect postgres:16") {
+		t.Errorf("expected unavailable-with-reason factor; got:\n%s", joined)
+	}
+	if s.Confidence.Level != ConfidenceModerate {
+		t.Errorf("unavailable cross-check should not change grade; got %q", s.Confidence.Level)
 	}
 }
 

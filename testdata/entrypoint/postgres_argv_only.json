@@ -1,0 +1,6 @@
+{
+  "image": "postgres:16",
+  "entrypoint": ["docker-entrypoint.sh"],
+  "cmd": ["postgres"],
+  "history_lines": []
+}

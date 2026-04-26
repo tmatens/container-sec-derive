@@ -189,6 +189,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
 		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-lint-profile, docker-run, json, k8s, oci; still landing in v0.1.0-rc: compose-patch)")
 		allowExploratory = fs.Bool("allow-exploratory", false, "compose-lint-profile only: emit under exploratory: even when the acceptance contract is not met")
+		workload         = fs.String("workload", "", "path to the user-supplied workload script that exercised the container; recorded on the sidecar and required by the compose-lint-profile gate")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -213,6 +214,15 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 	if *allowExploratory && *format != FormatComposeLintEntry {
 		return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+	}
+	// Workload is recorded on the sidecar and surfaced as a confidence
+	// factor; the compose-lint contribution gate also requires the file to
+	// be readable. Validate at flag-parse time so a typo'd path fails fast
+	// (EX_USAGE) rather than after a full observation window.
+	if *workload != "" {
+		if _, err := os.Stat(*workload); err != nil {
+			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
+		}
 	}
 
 	opts := aggregateOpts{
@@ -272,6 +282,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	s.ObservedAt = observedAt
+	s.Workload = *workload
 	applyEntrypointCrossCheck(s, *inspectFixture, *fixture != "", stderr)
 	computeConfidence(s)
 	switch *format {

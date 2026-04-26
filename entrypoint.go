@@ -49,11 +49,19 @@ const inspectDefaultTimeout = 10 * time.Second
 // cross-check. Populated by inspectEntrypoint (live docker) or by
 // loadInspectionFixture (tests). Image is informational and used in
 // error prose; it is not part of the heuristic input.
+//
+// RepoDigests carries `docker inspect`'s top-level RepoDigests array
+// (one "<repo>@sha256:..." entry per published push). Step 17 promotes
+// the matching digest onto Sidecar.ImageDigest so the compose-lint
+// contribution gate can pin profiles to a digest. Locally-built images
+// that were never pushed have an empty RepoDigests; the contract gate
+// then refuses cleanly with an "image_digest missing" violation.
 type entrypointInspection struct {
 	Image        string   `json:"image"`
 	Entrypoint   []string `json:"entrypoint"`
 	Cmd          []string `json:"cmd"`
 	HistoryLines []string `json:"history_lines"`
+	RepoDigests  []string `json:"repo_digests,omitempty"`
 }
 
 // argvHeuristic is one row of PLAN.md §Workload coverage item 1's table.
@@ -112,19 +120,28 @@ func inspectEntrypoint(ctx context.Context, image string) (entrypointInspection,
 		return insp, fmt.Errorf("no image reference available for cross-check")
 	}
 
-	inspectOut, err := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Config}}", image).Output()
+	// Combine the two fields we need into one inspect call. RepoDigests is
+	// top-level on the inspect object, not under .Config -- step 17 added
+	// it for digest enrichment. Two separate `docker inspect` invocations
+	// would also work but cost an extra subprocess per run.
+	const inspectFormat = `{"config":{{json .Config}},"repo_digests":{{json .RepoDigests}}}`
+	inspectOut, err := exec.CommandContext(ctx, "docker", "inspect", "--format", inspectFormat, image).Output()
 	if err != nil {
 		return insp, fmt.Errorf("docker inspect %s: %w", image, err)
 	}
-	var cfg struct {
-		Entrypoint []string `json:"Entrypoint"`
-		Cmd        []string `json:"Cmd"`
+	var combined struct {
+		Config struct {
+			Entrypoint []string `json:"Entrypoint"`
+			Cmd        []string `json:"Cmd"`
+		} `json:"config"`
+		RepoDigests []string `json:"repo_digests"`
 	}
-	if err := json.Unmarshal(bytes.TrimSpace(inspectOut), &cfg); err != nil {
+	if err := json.Unmarshal(bytes.TrimSpace(inspectOut), &combined); err != nil {
 		return insp, fmt.Errorf("parse docker inspect output: %w", err)
 	}
-	insp.Entrypoint = cfg.Entrypoint
-	insp.Cmd = cfg.Cmd
+	insp.Entrypoint = combined.Config.Entrypoint
+	insp.Cmd = combined.Config.Cmd
+	insp.RepoDigests = combined.RepoDigests
 
 	historyOut, err := exec.CommandContext(ctx, "docker", "history", "--no-trunc", "--format", "{{.CreatedBy}}", image).Output()
 	if err != nil {
@@ -257,12 +274,49 @@ func applyEntrypointCrossCheck(s *Sidecar, inspectFixture string, fixtureMode bo
 	expected, hits := deriveExpectedCaps(insp)
 	s.ExpectedCapsFromEntrypoint = expected
 	s.CoverageWarnings = computeCoverageWarnings(hits, s.CapNames())
+	// Promote a matching digest onto the sidecar so the compose-lint
+	// contribution gate can pin to it. Pre-populated values win -- a
+	// caller that already attributed a digest (future --digest flag,
+	// fixture override) is authoritative over inspect's view.
+	if s.ImageDigest == "" {
+		s.ImageDigest = pickRepoDigest(s.Image, insp.RepoDigests)
+	}
 	s.crossCheckStatus = crossCheckStatusOK
 	if stderrSink != nil {
 		for _, w := range s.CoverageWarnings {
 			fmt.Fprintf(stderrSink, "csd: coverage_warning: %s\n", w)
 		}
 	}
+}
+
+// pickRepoDigest returns the bare "sha256:..." digest from repoDigests
+// whose repo prefix matches imageRef's repo (everything before the tag
+// or @-digest). Returns "" when no digest matches; callers leave
+// Sidecar.ImageDigest empty in that case rather than guess at a wrong
+// repo's digest.
+//
+// `docker inspect` formats RepoDigests entries as "<repo>@sha256:...".
+// We strip the "<repo>@" prefix so the value lines up with the format
+// the compose-lint contribution flow expects (`validated_image:
+// postgres:16@sha256:...` is built by appending "@" + ImageDigest).
+func pickRepoDigest(imageRef string, repoDigests []string) string {
+	repo := imageRef
+	if at := strings.Index(repo, "@"); at >= 0 {
+		repo = repo[:at]
+	}
+	if col := strings.LastIndex(repo, ":"); col >= 0 {
+		repo = repo[:col]
+	}
+	for _, d := range repoDigests {
+		i := strings.Index(d, "@")
+		if i < 0 {
+			continue
+		}
+		if d[:i] == repo {
+			return d[i+1:]
+		}
+	}
+	return ""
 }
 
 // truncateReason keeps an unavailable-factor string short enough that it

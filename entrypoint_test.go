@@ -356,6 +356,108 @@ func TestRun_CleanCrossCheckSerializesEmptySlice(t *testing.T) {
 	}
 }
 
+func TestPickRepoDigest_MatchesByRepo(t *testing.T) {
+	cases := []struct {
+		name      string
+		imageRef  string
+		digests   []string
+		want      string
+	}{
+		{
+			name:     "tagged ref matches by repo prefix",
+			imageRef: "postgres:16",
+			digests:  []string{"postgres@sha256:aaaaaaaaaaaa"},
+			want:     "sha256:aaaaaaaaaaaa",
+		},
+		{
+			name:     "registry-qualified ref matches its qualified digest entry",
+			imageRef: "docker.io/library/postgres:16",
+			digests: []string{
+				"postgres@sha256:bbbbbbbbbbbb",
+				"docker.io/library/postgres@sha256:cccccccccccc",
+			},
+			want: "sha256:cccccccccccc",
+		},
+		{
+			name:     "ref already pinned by digest still matches by repo",
+			imageRef: "postgres:16@sha256:dddddddddddd",
+			digests:  []string{"postgres@sha256:dddddddddddd"},
+			want:     "sha256:dddddddddddd",
+		},
+		{
+			name:     "no matching repo returns empty",
+			imageRef: "postgres:16",
+			digests:  []string{"redis@sha256:eeeeeeeeeeee"},
+			want:     "",
+		},
+		{
+			name:     "empty repo digests returns empty",
+			imageRef: "postgres:16",
+			digests:  nil,
+			want:     "",
+		},
+		{
+			name:     "malformed digest entry without @ is skipped",
+			imageRef: "postgres:16",
+			digests:  []string{"postgres-no-digest", "postgres@sha256:ffffffffffff"},
+			want:     "sha256:ffffffffffff",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickRepoDigest(tc.imageRef, tc.digests); got != tc.want {
+				t.Errorf("pickRepoDigest(%q, %v) = %q, want %q", tc.imageRef, tc.digests, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestApplyEntrypointCrossCheck_PromotesRepoDigest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "insp.json")
+	b, _ := json.Marshal(entrypointInspection{
+		Image:       "postgres:16",
+		Entrypoint:  []string{"docker-entrypoint.sh"},
+		Cmd:         []string{"postgres"},
+		RepoDigests: []string{"postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+	})
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := NewSidecar()
+	s.Image = "postgres:16"
+	applyEntrypointCrossCheck(s, path, false, nil)
+	if s.crossCheckStatus != crossCheckStatusOK {
+		t.Fatalf("status = %q, want %q", s.crossCheckStatus, crossCheckStatusOK)
+	}
+	want := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	if s.ImageDigest != want {
+		t.Errorf("ImageDigest = %q, want %q", s.ImageDigest, want)
+	}
+}
+
+// Pre-populated digest wins over inspection's view: a future --digest
+// flag (or any caller that already attributed a digest) must not be
+// overwritten by the cross-check.
+func TestApplyEntrypointCrossCheck_PreservesExistingDigest(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "insp.json")
+	b, _ := json.Marshal(entrypointInspection{
+		Image:       "postgres:16",
+		RepoDigests: []string{"postgres@sha256:2222222222222222222222222222222222222222222222222222222222222222"},
+	})
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	s := NewSidecar()
+	s.Image = "postgres:16"
+	s.ImageDigest = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+	applyEntrypointCrossCheck(s, path, false, nil)
+	if s.ImageDigest != "sha256:9999999999999999999999999999999999999999999999999999999999999999" {
+		t.Errorf("pre-populated digest overwritten: got %q", s.ImageDigest)
+	}
+}
+
 func TestSetcapCapsFromHistory_IgnoresNonSetcapMentions(t *testing.T) {
 	lines := []string{
 		"/bin/sh -c apt-get install libcap2-bin",                 // no setcap

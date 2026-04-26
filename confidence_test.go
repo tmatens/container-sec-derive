@@ -17,6 +17,10 @@ func helperSidecar() *Sidecar {
 	s.Target.PerReplicaCaps["r1"] = []string{"CHOWN", "SETUID"}
 	s.Target.DistinctComms = 5
 	s.DurationSeconds = 120
+	// Workload presence is wired in step 17; helper sets it so tests that
+	// don't care about the workload factor stay all-green by default.
+	// Tests that assert the no-workload path clear it explicitly.
+	s.Workload = "exercises/test.sh"
 	return s
 }
 
@@ -34,7 +38,6 @@ func TestConfidence_AllGreenCapsAtModerate(t *testing.T) {
 	// cross-check tests below.
 	joined := strings.Join(s.Confidence.Factors, "\n")
 	for _, want := range []string{
-		"deferred: workload script presence",
 		"deferred: steady-state detection",
 		"deferred: target-exited-early",
 	} {
@@ -42,8 +45,50 @@ func TestConfidence_AllGreenCapsAtModerate(t *testing.T) {
 			t.Errorf("missing deferred factor %q in:\n%s", want, joined)
 		}
 	}
-	if strings.Contains(joined, "deferred: entrypoint cross-check") {
-		t.Errorf("entrypoint cross-check is wired (Step 15); deferred marker should be gone:\n%s", joined)
+	for _, gone := range []string{
+		"deferred: workload script presence", // wired in step 17
+		"deferred: entrypoint cross-check",   // wired in step 15
+	} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("deferred marker %q should be gone:\n%s", gone, joined)
+		}
+	}
+}
+
+func TestConfidence_WorkloadProvidedEmitsOkFactor(t *testing.T) {
+	s := helperSidecar()
+	// helperSidecar sets Workload; assert the wired path emits the ok factor.
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "ok: workload script provided (exercises/test.sh)") {
+		t.Errorf("expected ok-workload factor; got:\n%s", joined)
+	}
+}
+
+func TestConfidence_NoWorkloadIsModerateNotLow(t *testing.T) {
+	s := helperSidecar()
+	s.Workload = ""
+	computeConfidence(s)
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "moderate: no workload script provided") {
+		t.Errorf("expected moderate no-workload factor; got:\n%s", joined)
+	}
+	// PLAN.md §Confidence scoring lists "no workload" as a Moderate
+	// condition, not a Low one. On its own it should not force low.
+	if s.Confidence.Level != ConfidenceModerate {
+		t.Errorf("no-workload alone should be moderate, got %q\nfactors: %v", s.Confidence.Level, s.Confidence.Factors)
+	}
+}
+
+// Two moderates → low: no workload + comm diversity = 2.
+func TestConfidence_NoWorkloadStacksWithAnotherModerateToLow(t *testing.T) {
+	s := helperSidecar()
+	s.Workload = ""
+	s.Target.DistinctComms = 2
+	computeConfidence(s)
+	if s.Confidence.Level != ConfidenceLow {
+		t.Errorf("no-workload + low comm diversity should downgrade to low; got %q\nfactors: %v",
+			s.Confidence.Level, s.Confidence.Factors)
 	}
 }
 

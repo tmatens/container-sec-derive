@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -333,6 +335,54 @@ func TestRun_RequiresContainerOrFixture(t *testing.T) {
 	err := run([]string{}, &out, &errBuf)
 	if err == nil {
 		t.Fatal("expected error when neither --container nor --fixture given")
+	}
+}
+
+func TestRun_WorkloadPopulatesSidecar(t *testing.T) {
+	dir := t.TempDir()
+	wl := filepath.Join(dir, "exercise.sh")
+	if err := os.WriteFile(wl, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+		t.Fatalf("write workload: %v", err)
+	}
+	out := filepath.Join(dir, "sidecar.json")
+	var stdout, stderr bytes.Buffer
+	err := run([]string{
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--container", "postgres-1",
+		"--workload", wl,
+		"--out", out,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run: %v (stderr: %s)", err, stderr.String())
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var s Sidecar
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if s.Workload != wl {
+		t.Errorf("Workload = %q, want %q", s.Workload, wl)
+	}
+}
+
+func TestRun_WorkloadMissingFileFailsEXUsage(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--container", "postgres-1",
+		"--workload", "/nonexistent/path/exercise.sh",
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected error for missing workload file, got nil")
+	}
+	if exitCodeFor(err) != ExitUsage {
+		t.Errorf("exit code = %d, want %d (EX_USAGE)", exitCodeFor(err), ExitUsage)
+	}
+	if !strings.Contains(err.Error(), "--workload") {
+		t.Errorf("error should name the flag: %v", err)
 	}
 }
 

@@ -86,7 +86,7 @@
     "factors": [
       "low: event count 10 \u003c 100",
       "low: distinct comms = 1 \u003c 2",
-      "deferred: workload script presence not yet recorded",
+      "moderate: no workload script provided (startup + idle only)",
       "deferred: steady-state detection not yet implemented",
       "deferred: target-exited-early signal not yet wired"
     ]

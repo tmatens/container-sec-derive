@@ -11,9 +11,13 @@ import "fmt"
 // don't yet collect are surfaced as "deferred:" factors and cap the
 // achievable level at moderate; later steps wire them in:
 //
-//   - workload script presence -- ships with the formatter / contribution flow
 //   - steady-state detection   -- needs time-windowed aggregation
 //   - target exited early      -- needs observe()-side instrumentation
+//
+// Step 17 wired workload script presence: --workload's path is recorded
+// on the sidecar at flag-parse time and read here. PLAN.md §Confidence
+// scoring lists "no workload script" as a Moderate condition (not Low),
+// so absence contributes one moderate hit rather than forcing the grade.
 //
 // Step 15 (v0.1.0-rc) wires the entrypoint cross-check as an informational
 // factor: divergence contributes one "moderate:" hit but does NOT force-
@@ -90,6 +94,15 @@ func computeConfidence(s *Sidecar) {
 		}
 	}
 
+	// Workload script presence (PLAN.md §Confidence scoring). Recording
+	// the path is enough for the rubric -- the compose-lint contribution
+	// gate is the layer that re-checks readability.
+	if s.Workload != "" {
+		addInfo("workload script provided (" + s.Workload + ")")
+	} else {
+		addModerate("no workload script provided (startup + idle only)")
+	}
+
 	// Entrypoint cross-check (PLAN.md §Workload coverage items 1-2).
 	// Phase A: divergence is informational; warnings contribute one
 	// "moderate:" hit (stacking with any other moderate pushes to low)
@@ -119,7 +132,6 @@ func computeConfidence(s *Sidecar) {
 	// Deferred preconditions for High. These cap the achievable grade at
 	// moderate until later steps wire in the inputs.
 	factors = append(factors,
-		"deferred: workload script presence not yet recorded",
 		"deferred: steady-state detection not yet implemented",
 		"deferred: target-exited-early signal not yet wired",
 	)

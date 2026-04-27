@@ -378,6 +378,36 @@ func emitAdvisoryWarnings(s *Sidecar, stderr io.Writer) {
 	}
 }
 
+// noteWSL2IfDetected emits a one-line stderr advisory pointing at
+// docs/wsl2.md when the host kernel string identifies as WSL2. PLAN.md
+// §Platform support: WSL2 + Docker Desktop is nominally supported but
+// kernel coverage and BTF availability vary across builds; the note
+// directs the user to the per-image smoke matrix and known-issues list
+// before they trust an observation. Live observe path only -- fixture
+// replay is host-agnostic.
+func noteWSL2IfDetected(stderr io.Writer) {
+	if stderr == nil {
+		return
+	}
+	data, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return
+	}
+	if !looksLikeWSL2(string(data)) {
+		return
+	}
+	fmt.Fprintln(stderr, "csd: note: WSL2 host detected; see docs/wsl2.md for known-good kernel versions and BTF/Docker Desktop notes")
+}
+
+// looksLikeWSL2 returns true when the /proc/version contents match
+// either of the two markers WSL2 kernels carry. Both forms have been
+// observed across the Microsoft kernel branches: the older lower-case
+// "microsoft" tag and the explicit "WSL2" tag on the 5.15+ images.
+func looksLikeWSL2(procVersion string) bool {
+	lower := strings.ToLower(procVersion)
+	return strings.Contains(lower, "microsoft") || strings.Contains(lower, "wsl2")
+}
+
 // observePipelineOpts bundles every input the fixture-or-live observe
 // pipeline takes. Step 23 introduced the helper so `csd verify`'s
 // run-mode can produce the verify-time observation without duplicating
@@ -437,6 +467,7 @@ func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, e
 			errSrc.Close()
 		}
 	} else {
+		noteWSL2IfDetected(stderr)
 		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}

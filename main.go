@@ -369,6 +369,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
+	emitAdvisoryWarnings(s, stderr)
+
 	// Drop rate >= 10% is "artifact-with-caveat" per PLAN.md §Exit codes:
 	// caps have already been printed; the nonzero exit is what tells CI
 	// the profile isn't trustworthy.
@@ -380,6 +382,31 @@ func run(args []string, stdout, stderr io.Writer) error {
 		)
 	}
 	return nil
+}
+
+// emitAdvisoryWarnings surfaces sub-abort signals the aggregator already
+// records but didn't previously make user-visible. PLAN.md §v0.1 build
+// order rc bullet 9: replica disagreement and sub-10% drop rate are
+// recorded on the sidecar but only useful if reviewers can see them
+// without reading the JSON. Both are non-fatal (the ≥10% drop abort
+// stays); silent stderr is the cheapest path to making them obvious.
+func emitAdvisoryWarnings(s *Sidecar, stderr io.Writer) {
+	if stderr == nil {
+		return
+	}
+	if s.TraceHealth.DropRate > 0 && s.TraceHealth.DropRate < DropRateAbort {
+		fmt.Fprintf(stderr,
+			"csd: warning: trace_health drop_rate %.4f (%d dropped / %d recorded); below %.2f abort threshold but profile may be incomplete\n",
+			s.TraceHealth.DropRate, s.TraceHealth.EventsDropped, s.TraceHealth.EventsRecorded, DropRateAbort,
+		)
+	}
+	if len(s.Target.ReplicaCapDisagreement) > 0 {
+		fmt.Fprintf(stderr,
+			"csd: warning: replicas disagree on %d cap(s) [%s]; --all-matching produced a union profile that no single replica required\n",
+			len(s.Target.ReplicaCapDisagreement),
+			strings.Join(s.Target.ReplicaCapDisagreement, ", "),
+		)
+	}
 }
 
 // observe spawns `ig run trace_capabilities --output json` and aggregates

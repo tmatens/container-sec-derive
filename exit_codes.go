@@ -23,7 +23,7 @@ const (
 	ExitVerifyOverPermissioned   = 11 // `csd verify` outcome: profile grants caps the workload never triggers
 	ExitTargetExitedEarly        = 20 // reachable once observe() wires restart detection
 	ExitDropRateExcessive        = 21
-	ExitSchemaMismatch           = 30 // reachable once the IG version-pin parser lands
+	ExitSchemaMismatch           = 30 // checkIGVersion returns this when detected ig is not PinnedIGVersion
 	ExitIGMissing                = 31
 	ExitTargetAmbiguous          = 40
 	ExitUsage                    = 64 // EX_USAGE

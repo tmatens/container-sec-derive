@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -114,6 +116,81 @@ func TestRun_ExitCode_IGMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ig binary") {
 		t.Errorf("error message should name the missing binary: %q", err.Error())
+	}
+}
+
+// fakeIGBinary writes a tiny shell script that prints version on `version`
+// and returns it as a path suitable for --ig. It does not implement
+// `run`; the version-pin test never reaches that subcommand because
+// produceObservation() short-circuits on the SchemaMismatch error.
+func fakeIGBinary(t *testing.T, version string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ig-fake")
+	script := "#!/bin/sh\nif [ \"$1\" = version ]; then echo " + version + "; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ig: %v", err)
+	}
+	return path
+}
+
+func TestRun_ExitCode_SchemaMismatchOnWrongIGVersion(t *testing.T) {
+	// PLAN.md §IG version pinning: when ig's reported version is not
+	// PinnedIGVersion, csd refuses to parse and exits SchemaMismatch.
+	// No sidecar must be written -- the artifact would be untrustworthy
+	// because csd's parser is shape-pinned to PinnedIGVersion.
+	dir := t.TempDir()
+	out := filepath.Join(dir, "sidecar.json")
+	fake := fakeIGBinary(t, "v0.50.0")
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{
+		"--container", "anything",
+		"--ig", fake,
+		"--duration", "10ms",
+		"--out", out,
+	}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected SchemaMismatch error")
+	}
+	if got := exitCodeFor(err); got != ExitSchemaMismatch {
+		t.Errorf("exit = %d, want ExitSchemaMismatch (%d); err=%v", got, ExitSchemaMismatch, err)
+	}
+	if !strings.Contains(err.Error(), PinnedIGVersion) {
+		t.Errorf("error message should name PINNED_IG_VERSION; got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "v0.50.0") {
+		t.Errorf("error message should name detected version; got %q", err.Error())
+	}
+	if _, statErr := os.Stat(out); statErr == nil {
+		t.Errorf("--out file %q should not have been written on SchemaMismatch", out)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("no stdout should be emitted on SchemaMismatch; got %q", stdout.String())
+	}
+}
+
+func TestRun_ExitCode_PinnedIGVersionPasses(t *testing.T) {
+	// Positive control: when the fake ig reports PinnedIGVersion, the
+	// version-pin gate passes and we fall through to observe(), which
+	// fails on the fake's missing `run` subcommand. The exit code must
+	// NOT be SchemaMismatch -- exact downstream code (likely Runtime)
+	// is not asserted; this test only proves the pin check accepts a
+	// matching version.
+	fake := fakeIGBinary(t, PinnedIGVersion)
+	var stdout, stderr bytes.Buffer
+	err := run([]string{
+		"--container", "anything",
+		"--ig", fake,
+		"--duration", "10ms",
+	}, &stdout, &stderr)
+	if err == nil {
+		// Unlikely (the fake doesn't implement `run`), but a clean exit
+		// would also prove the pin check accepted the version.
+		return
+	}
+	if got := exitCodeFor(err); got == ExitSchemaMismatch {
+		t.Errorf("PinnedIGVersion should pass the gate; got SchemaMismatch err=%v", err)
 	}
 }
 

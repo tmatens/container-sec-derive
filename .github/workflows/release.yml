@@ -1,0 +1,117 @@
+# Release pipeline for container-sec-derive.
+#
+# Tag-triggered (push: tags: ['v*']). Builds static binaries for
+# linux/amd64 + linux/arm64, generates SHA256SUMS, cosign-signs each
+# artifact (binaries + the SHA256SUMS file itself) keyless via the
+# GitHub OIDC issuer, and uploads everything to a GitHub release.
+#
+# Per PLAN.md §Supply-chain: "Unsigned artifacts are not released."
+# This workflow is the gate. SBOM generation lands in Step 36 alongside
+# vendored ig provenance; container image build/sign + ig vendoring
+# (PLAN.md §IG binary shipping) lands in a follow-up.
+#
+# All third-party actions are SHA-pinned per CLAUDE.md
+# §Dependency pinning. To bump: re-resolve the SHA from the action's
+# git tag, update both the SHA and the trailing tag comment in the
+# same commit. Reusing actions/checkout + actions/setup-go pins from
+# .github/workflows/ci.yml so the two workflows advance in lockstep.
+#
+# Verification command (also in README.md):
+#   cosign verify-blob \
+#     --bundle csd_linux_amd64.cosign.bundle \
+#     --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/.github/workflows/release\.yml@.*' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     csd_linux_amd64
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # upload to GitHub release
+  id-token: write   # cosign keyless OIDC
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: '0'
+        # -trimpath strips local file paths from the binary;
+        # -ldflags "-s -w" strips symbol/debug tables. Reproducibility
+        # status is documented in docs/wsl2.md / future docs/releases.md
+        # — we are pinned + trimmed, not yet bit-for-bit.
+        run: |
+          go build -trimpath -ldflags "-s -w" -o "csd_linux_${GOARCH}" .
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: csd-linux-${{ matrix.arch }}
+          path: csd_linux_${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: sign + publish
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+      - name: layout
+        run: |
+          ls -la dist/
+          # The matrix uploads name the file directly; flatten
+          # confirms both expected binaries are present before signing.
+          test -f dist/csd_linux_amd64
+          test -f dist/csd_linux_arm64
+          chmod +x dist/csd_linux_amd64 dist/csd_linux_arm64
+      - name: SHA256SUMS
+        working-directory: dist
+        # Sorted to keep the manifest stable across runs. SBOM entries
+        # land here in Step 36; vendored ig digest lands here when ig
+        # bundling ships.
+        run: |
+          sha256sum csd_linux_amd64 csd_linux_arm64 | sort > SHA256SUMS
+          cat SHA256SUMS
+      - uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+      - name: cosign sign-blob (each artifact)
+        working-directory: dist
+        # --yes accepts the OIDC flow non-interactively; --bundle
+        # writes a self-contained Sigstore bundle that includes the
+        # signature, certificate, and Rekor inclusion proof so
+        # verifiers do not need to fetch from the transparency log
+        # at verify time.
+        run: |
+          for f in csd_linux_amd64 csd_linux_arm64 SHA256SUMS; do
+            cosign sign-blob --yes \
+              --bundle "${f}.cosign.bundle" \
+              "${f}"
+          done
+          ls -la
+      - name: publish release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            dist/csd_linux_amd64
+            dist/csd_linux_arm64
+            dist/SHA256SUMS
+            dist/csd_linux_amd64.cosign.bundle
+            dist/csd_linux_arm64.cosign.bundle
+            dist/SHA256SUMS.cosign.bundle

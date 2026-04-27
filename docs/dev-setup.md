@@ -53,7 +53,7 @@ After `ig` is installed, you can run the live observer against any container:
 
 ```sh
 go build -o csd .
-sudo ./csd observe --container <name-or-id> --duration 30
+sudo ./csd observe --container <name-or-id> --duration 30s
 ```
 
 Add `--out sidecar.json` to capture the canonical evidence sidecar.

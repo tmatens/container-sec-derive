@@ -262,6 +262,22 @@ func TestRun_FixtureMode(t *testing.T) {
 	}
 }
 
+// TestRun_ObserveSubcommandStripsKeyword verifies that `csd observe
+// --container x` is accepted symmetrically with the bare `csd
+// --container x` form. Without the dispatcher's keyword strip,
+// flag.Parse would stop at the "observe" positional and the trailing
+// flags would never bind -- the bug the docs walkthrough surfaced.
+func TestRun_ObserveSubcommandStripsKeyword(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	err := run([]string{"observe", "--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run with observe subcommand: %v (stderr: %s)", err, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "cap_drop:") {
+		t.Errorf("expected compose output, got:\n%s", out.String())
+	}
+}
+
 func TestAggregate_EventsRecordedCountsParsedEvents(t *testing.T) {
 	// Step 11 found ig v0.51.0 does not emit a typed trace_health stdout
 	// event; events_recorded is now the aggregator's own count of

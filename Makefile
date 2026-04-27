@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build build test vet
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 build test vet
 
 ground-truth: ground-truth-postgres ground-truth-caddy ground-truth-tailscale
 
@@ -37,6 +37,13 @@ ground-truth-tailscale:
 
 synthetic-build:
 	docker build -t csd-synthetic-exerciser:0.1 testdata/synthetic
+
+# WSL2 smoke matrix — see scripts/smoke_wsl2.sh and docs/wsl2.md.
+# Runs csd against each reference image and reports pass/fail per
+# image. Designed for WSL2 + Docker Desktop but runs anywhere with
+# docker + ig + the built csd binary.
+smoke-wsl2: build
+	./scripts/smoke_wsl2.sh
 
 build:
 	go build -o csd .

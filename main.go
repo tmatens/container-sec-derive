@@ -187,9 +187,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 		igBin        = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
-		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-lint-profile, docker-run, json, k8s, oci; still landing in v0.1.0-rc: compose-patch)")
+		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci)")
 		allowExploratory = fs.Bool("allow-exploratory", false, "compose-lint-profile only: emit under exploratory: even when the acceptance contract is not met")
 		workload         = fs.String("workload", "", "path to the user-supplied workload script that exercised the container; recorded on the sidecar and required by the compose-lint-profile gate")
+		composeIn        = fs.String("compose-in", "", "compose-patch only: path to the user's compose file to diff against")
+		composeService   = fs.String("service", "", "compose-patch only: name of the service under services: whose cap_drop/cap_add to rewrite")
 	)
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
@@ -207,13 +209,26 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
 	switch *format {
-	case FormatCompose, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI:
+	case FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI:
 		// implemented
 	default:
-		return codedErrorf(ExitUsage, "--format %q not implemented yet; supported: %s, %s, %s, %s, %s, %s (compose-patch still landing in v0.1.0-rc)", *format, FormatCompose, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
+		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
 	}
 	if *allowExploratory && *format != FormatComposeLintEntry {
 		return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+	}
+	// compose-patch needs both --compose-in and --service; reject the
+	// flags elsewhere so a future user doesn't believe they have an
+	// effect with another formatter.
+	if *format == FormatComposePatch {
+		if *composeIn == "" || *composeService == "" {
+			return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+		}
+		if _, err := os.Stat(*composeIn); err != nil {
+			return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, err))
+		}
+	} else if *composeIn != "" || *composeService != "" {
+		return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
 	}
 	// Workload is recorded on the sidecar and surfaced as a confidence
 	// factor; the compose-lint contribution gate also requires the file to
@@ -289,6 +304,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case FormatCompose:
 		if err := writeCompose(stdout, s); err != nil {
 			return fmt.Errorf("write compose: %w", err)
+		}
+	case FormatComposePatch:
+		raw, readErr := os.ReadFile(*composeIn)
+		if readErr != nil {
+			return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+		}
+		if err := writeComposePatch(stdout, s, raw, *composeIn, *composeService); err != nil {
+			// Service-not-found / services-block-missing are usage
+			// errors: the user pointed at a file that can't host the
+			// patch, not a runtime failure of csd.
+			return wrapCoded(ExitUsage, fmt.Errorf("write compose-patch: %w", err))
 		}
 	case FormatDockerRun:
 		if err := writeDockerRun(stdout, s); err != nil {

@@ -53,6 +53,29 @@ This is not a contradiction with the tool's purpose — `csd` is a one-shot obse
 
 A long-running daemon shape (v2) with these privileges is its own security decision and will not ship without the corresponding review. See ROADMAP.md.
 
+## Verifying release artifacts
+
+Releases publish two static binaries (`csd_linux_amd64`, `csd_linux_arm64`), a `SHA256SUMS` manifest, and a Sigstore bundle (`<file>.cosign.bundle`) per artifact. Bundles are produced by `.github/workflows/release.yml` using cosign keyless signing via the GitHub OIDC issuer; each bundle is self-contained (signature + certificate + Rekor inclusion proof) so verification does not need to fetch from the transparency log.
+
+```sh
+# Per-binary
+cosign verify-blob \
+  --bundle csd_linux_amd64.cosign.bundle \
+  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  csd_linux_amd64
+
+# Or verify the manifest first, then check the binary against it
+cosign verify-blob \
+  --bundle SHA256SUMS.cosign.bundle \
+  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`. The container image (`ghcr.io/tmatens/container-sec-derive`) and SBOM artifacts ship in follow-up release-work; this section will grow `cosign verify` examples for them when they land.
+
 ## License
 
 MIT. Matches compose-lint. See [LICENSE](LICENSE).

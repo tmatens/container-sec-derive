@@ -1,2 +1,2 @@
-{"timestamp":1000,"syscall":"chown","cap":"CAP_CHOWN","cap_raw":0,"proc":{"comm":"t","pid":1},"runtime":{"runtimeName":"docker","containerId":"t","containerName":"t","containerImageName":"t:1"}}
-{"timestamp":1600,"syscall":"setuid","cap":"CAP_SETUID","cap_raw":7,"proc":{"comm":"t","pid":1},"runtime":{"runtimeName":"docker","containerId":"t","containerName":"t","containerImageName":"t:1"}}
+{"timestamp":1000,"syscall":"chown","cap":"CAP_CHOWN","cap_raw":0,"capable":true,"proc":{"comm":"t","pid":1},"runtime":{"runtimeName":"docker","containerId":"t","containerName":"t","containerImageName":"t:1"}}
+{"timestamp":1600,"syscall":"setuid","cap":"CAP_SETUID","cap_raw":7,"capable":true,"proc":{"comm":"t","pid":1},"runtime":{"runtimeName":"docker","containerId":"t","containerName":"t","containerImageName":"t:1"}}

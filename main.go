@@ -194,14 +194,20 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
-	// Subcommand dispatch. v0.1 has one explicit subcommand (`verify`);
-	// everything else (and the no-arg / flags-only forms) falls through
-	// to the default observe path so users invoking `csd --container x`
-	// don't have to type a redundant `observe`. If a future subcommand
-	// is added, mirror this shape: peek at args[0], dispatch, fall
-	// through on no match.
+	// Subcommand dispatch. v0.1 has two explicit subcommands (`observe`,
+	// `verify`); the no-arg / flags-only form (`csd --container x`) is
+	// also accepted for the observe path so docs that omit the
+	// subcommand still work. `observe` is dispatched by stripping the
+	// keyword and falling through to the same flag parser the bare form
+	// uses -- otherwise flag.Parse stops at the positional and the
+	// trailing flags never bind. If a future subcommand is added,
+	// mirror this shape: peek at args[0], dispatch, fall through on
+	// no match.
 	if len(args) > 0 && args[0] == "verify" {
 		return runVerify(args[1:], stdout, stderr)
+	}
+	if len(args) > 0 && args[0] == "observe" {
+		args = args[1:]
 	}
 
 	fs := flag.NewFlagSet("csd", flag.ContinueOnError)

@@ -1,0 +1,4 @@
+# v2 forward-compat placeholder. Mirrors the other reference images;
+# the synthetic exerciser drives caps directly from its ENTRYPOINT
+# binary so the v0.1 primary correctness signal is the exerciser
+# source itself, not a probe manifest. Empty file is intentional.

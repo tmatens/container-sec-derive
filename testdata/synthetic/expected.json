@@ -1,0 +1,16 @@
+{
+  "image": "csd-synthetic-exerciser:0.1",
+  "workload": "testdata/synthetic/workload.sh",
+  "expected_caps_minimum": [
+    "CHOWN",
+    "NET_BIND_SERVICE",
+    "SETGID",
+    "SETUID"
+  ],
+  "expected_comm": "exerciser",
+  "runtime_requirements": {
+    "docker_run_args": "--sysctl net.ipv4.ip_unprivileged_port_start=1024",
+    "why": "Docker containers default ip_unprivileged_port_start=0, which lets unprivileged processes bind low ports without CAP_NET_BIND_SERVICE. Restoring the default-Linux 1024 boundary inside the container is what makes bind(:80) actually invoke the cap check."
+  },
+  "notes": "Synthetic regression fixture — the image is contrived to fire cap_capable() events for a known set of caps from a stable non-runc comm, every cycle, for as long as the container runs. Bisection N/A (the image has no real workload semantics; it would bisect to whatever subset of expected_caps_minimum the kernel still enforces under default-deny). Role: csd's pipeline regression test. `csd observe` against this image (run with the docker_run_args above) must produce a derived cap set that includes every cap in expected_caps_minimum, attributed to comm `exerciser`. CHOWN and NET_BIND_SERVICE fire from the main process every cycle; SETGID and SETUID fire from a forked child once per cycle. CAP_FSETID is also attempted (chmod with the suid bit set) but does not appear in observed events because the kernel short-circuits the cap check when current_fsuid matches the inode owner — both are uid 0 here. CAP_SYS_ADMIN appears as `capable=false` denials (~2 per cycle, related to setuid()/RLIMIT_NPROC paths) and is correctly dropped by csd's Step 19 capable=false filter — not a real ask. Confidence grades `low` by design — `distinct_comms = 1` (single binary fires every cap) trips the `< 2` low factor; gaming this with a fake second comm would defeat the rubric. The grade is informative for Step 32's entrypoint phase B decision and is the correct output for a single-comm workload."
+}

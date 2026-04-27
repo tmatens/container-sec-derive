@@ -268,66 +268,23 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	opts := aggregateOpts{
-		Container:    *container,
-		Image:        *image,
-		AllMatching:  *allMatching,
-		InitWindowMs: *initWindowMs,
-	}
-
-	observedAt := time.Now().UTC()
-
-	var (
-		s   *Sidecar
-		err error
-	)
-	if *fixture != "" {
-		src, openErr := os.Open(*fixture)
-		if openErr != nil {
-			return fmt.Errorf("open fixture: %w", openErr)
-		}
-		defer src.Close()
-		s, err = aggregate(src, opts)
-		// Fixture mode: duration is unknown, so leave DurationSeconds=0
-		// (computeConfidence treats 0 as "not measured" and skips the
-		// soft-floor check).
-		if err == nil && s != nil && *fixtureErr != "" {
-			errSrc, openErrErr := os.Open(*fixtureErr)
-			if openErrErr != nil {
-				return fmt.Errorf("open fixture-stderr: %w", openErrErr)
-			}
-			s.TraceHealth.EventsDropped = parseIGStderr(errSrc, nil)
-			errSrc.Close()
-		}
-	} else {
-		checkIGVersion(*igBin, stderr)
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer cancel()
-		ctx, timeoutCancel := context.WithTimeout(ctx, *duration)
-		defer timeoutCancel()
-		s, err = observe(ctx, *igBin, opts, stderr)
-		if s != nil {
-			s.DurationSeconds = int(duration.Seconds())
-		}
-	}
-	if s != nil {
-		finaliseTraceHealth(&s.TraceHealth)
-	}
+	s, err := produceObservation(observePipelineOpts{
+		AggregateOpts: aggregateOpts{
+			Container:    *container,
+			Image:        *image,
+			AllMatching:  *allMatching,
+			InitWindowMs: *initWindowMs,
+		},
+		Fixture:        *fixture,
+		FixtureStderr:  *fixtureErr,
+		InspectFixture: *inspectFixture,
+		IGBin:          *igBin,
+		Duration:       *duration,
+		Workload:       *workload,
+	}, stderr)
 	if err != nil {
-		// Map typed failures to their PLAN.md §Exit codes slot. Anything
-		// already coded (e.g. ExitIGMissing from observe) is returned
-		// verbatim.
-		var amb *ambiguousSelectionError
-		if errors.As(err, &amb) {
-			return wrapCoded(ExitTargetAmbiguous, err)
-		}
 		return err
 	}
-
-	s.ObservedAt = observedAt
-	s.Workload = *workload
-	applyEntrypointCrossCheck(s, *inspectFixture, *fixture != "", stderr)
-	computeConfidence(s)
 	switch *format {
 	case FormatCompose:
 		if err := writeCompose(stdout, s); err != nil {
@@ -417,6 +374,93 @@ func emitAdvisoryWarnings(s *Sidecar, stderr io.Writer) {
 			strings.Join(s.Target.ReplicaCapDisagreement, ", "),
 		)
 	}
+}
+
+// observePipelineOpts bundles every input the fixture-or-live observe
+// pipeline takes. Step 23 introduced the helper so `csd verify`'s
+// run-mode can produce the verify-time observation without duplicating
+// the observe→finalise→cross-check→confidence sequence from run().
+//
+// Composition: AggregateOpts carries the per-event-stream knobs
+// (container/image selectors, init-window). The remaining fields are
+// the wrapping concerns (where the events come from, where digests
+// come from, how long the live window runs, the workload script
+// recorded on the sidecar).
+type observePipelineOpts struct {
+	AggregateOpts  aggregateOpts
+	Fixture        string
+	FixtureStderr  string
+	InspectFixture string
+	IGBin          string
+	Duration       time.Duration
+	Workload       string
+}
+
+// produceObservation runs the fixture-or-live observe path end-to-end
+// and returns a fully populated Sidecar with confidence already scored.
+// Mirrors the body of run() prior to the formatter switch; both `run`
+// (default observe path) and `runVerify` (Step 23 run-mode) call it so
+// any future fix to the pipeline lands in one place.
+//
+// Errors that the run path translated to typed exit codes are
+// translated here: ambiguous-selection becomes ExitTargetAmbiguous,
+// ig-missing flows through observe()'s wrapped error verbatim. Drop-
+// rate abort is NOT applied here -- callers may want to emit the
+// formatted artifact (run) or the verify result (runVerify) before
+// surfacing the abort, and centralising that here would force a flag
+// on this helper that neither caller needs.
+func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, error) {
+	observedAt := time.Now().UTC()
+
+	var (
+		s   *Sidecar
+		err error
+	)
+	if opts.Fixture != "" {
+		src, openErr := os.Open(opts.Fixture)
+		if openErr != nil {
+			return nil, fmt.Errorf("open fixture: %w", openErr)
+		}
+		defer src.Close()
+		s, err = aggregate(src, opts.AggregateOpts)
+		// Fixture mode: duration is unknown, so leave DurationSeconds=0
+		// (computeConfidence treats 0 as "not measured" and skips the
+		// soft-floor check).
+		if err == nil && s != nil && opts.FixtureStderr != "" {
+			errSrc, openErrErr := os.Open(opts.FixtureStderr)
+			if openErrErr != nil {
+				return nil, fmt.Errorf("open fixture-stderr: %w", openErrErr)
+			}
+			s.TraceHealth.EventsDropped = parseIGStderr(errSrc, nil)
+			errSrc.Close()
+		}
+	} else {
+		checkIGVersion(opts.IGBin, stderr)
+		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer cancel()
+		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
+		defer timeoutCancel()
+		s, err = observe(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+		if s != nil {
+			s.DurationSeconds = int(opts.Duration.Seconds())
+		}
+	}
+	if s != nil {
+		finaliseTraceHealth(&s.TraceHealth)
+	}
+	if err != nil {
+		var amb *ambiguousSelectionError
+		if errors.As(err, &amb) {
+			return nil, wrapCoded(ExitTargetAmbiguous, err)
+		}
+		return nil, err
+	}
+
+	s.ObservedAt = observedAt
+	s.Workload = opts.Workload
+	applyEntrypointCrossCheck(s, opts.InspectFixture, opts.Fixture != "", stderr)
+	computeConfidence(s)
+	return s, nil
 }
 
 // observe spawns `ig run trace_capabilities --output json` and aggregates

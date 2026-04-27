@@ -6,37 +6,114 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
-// runVerify is the entry point for `csd verify`. v0.1-rc Step 22 ships
-// the sidecar-vs-sidecar form: the user runs `csd observe` once to
-// produce the baseline profile, applies the proposed config to the
-// container themselves, runs `csd observe` a second time to produce
-// the verify-time observation, and feeds both sidecars in. Step 23
-// adds the run-mode that wraps observe to produce the second sidecar
-// internally; until that lands, this subcommand strictly classifies
-// pre-existing sidecars and does not touch the container runtime.
+// runVerify is the entry point for `csd verify`. Two input shapes:
+//
+//   - **Sidecar-vs-sidecar (Step 22).** `--baseline <sidecar> --observation
+//     <sidecar>` reads two prior `csd observe` sidecars and classifies
+//     the pair. The user runs observe twice (once for the baseline,
+//     once under the proposed config) and feeds both in.
+//   - **Run-mode (Step 23).** `--baseline <sidecar>` plus the standard
+//     observe-mode flags (`--container`/`--image`/`--all-matching`/
+//     `--fixture`/`--workload`/`--duration`/`--init-window-ms`/`--ig`/
+//     `--inspect-fixture`/`--fixture-stderr`) runs an internal
+//     observation against the user-supplied target (which they have
+//     already restarted under the proposed config) and classifies it
+//     against the baseline. Saves the user from running observe a
+//     second time and capturing the sidecar by hand.
+//
+// Container-spawning under proposed config (PLAN.md §Verify runtime
+// context's compose-anchored fresh container) is v1 scope; v0.1-rc lands
+// the classifier plus a one-shot wrapper, and the user-supplied
+// container/image is what actually carries the proposed config.
 func runVerify(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("csd verify", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
 		baseline    = fs.String("baseline", "", "path to the baseline observe-mode evidence sidecar (the proposed profile under verify)")
-		observation = fs.String("observation", "", "path to the verify-time observe-mode evidence sidecar (events captured under the proposed config)")
+		observation = fs.String("observation", "", "path to the verify-time observe-mode evidence sidecar (events captured under the proposed config); mutually exclusive with the observe-mode flags")
+		// Observe-mode flags. Mirror run()'s defaults so existing user
+		// muscle memory (--init-window-ms 500, --duration 30s) carries
+		// over verbatim. --format / --out / --compose-in / --service /
+		// --allow-exploratory are deliberately NOT exposed: verify's
+		// stdout is verify_result JSON, not a formatter artifact.
+		container      = fs.String("container", "", "run-mode: target container id or name (mutually exclusive with --image)")
+		image          = fs.String("image", "", "run-mode: select containers by image reference")
+		allMatching    = fs.Bool("all-matching", false, "run-mode: aggregate across all replicas matching --image")
+		fixture        = fs.String("fixture", "", "run-mode: read ig-format NDJSON from this file instead of spawning ig")
+		fixtureErr     = fs.String("fixture-stderr", "", "run-mode + fixture-mode: file of ig stderr lines; drops parsed as if piped from live ig")
+		inspectFixture = fs.String("inspect-fixture", "", "run-mode: pre-captured image-inspection JSON")
+		duration       = fs.Duration("duration", 30*time.Second, "run-mode: observation window (ignored in --fixture mode)")
+		igBin          = fs.String("ig", "ig", "run-mode: path to the ig binary")
+		initWindowMs   = fs.Int("init-window-ms", 500, "run-mode: drop capability events observed within this many ms of the first matching event (0 disables)")
+		workload       = fs.String("workload", "", "run-mode: path to the workload script that exercised the container under the proposed config")
 	)
 	if err := fs.Parse(args); err != nil {
 		return wrapCoded(ExitUsage, err)
 	}
-	if *baseline == "" || *observation == "" {
-		return codedErrorf(ExitUsage, "csd verify requires --baseline <sidecar> and --observation <sidecar>")
+	if *baseline == "" {
+		return codedErrorf(ExitUsage, "csd verify requires --baseline <sidecar>")
+	}
+
+	// Mode selection: --observation picks sidecar-vs-sidecar; presence
+	// of any observe-mode selector picks run-mode. Mixing the two is a
+	// usage error -- the user is asking for two different things.
+	hasRunModeSelector := *container != "" || *image != "" || *fixture != ""
+	if *observation == "" && !hasRunModeSelector {
+		return codedErrorf(ExitUsage,
+			"csd verify needs either --observation <sidecar> (sidecar-vs-sidecar) or one of --container/--image/--fixture (run-mode)")
+	}
+	if *observation != "" && hasRunModeSelector {
+		return codedErrorf(ExitUsage,
+			"--observation is mutually exclusive with --container/--image/--fixture; sidecar-vs-sidecar mode reads a pre-existing sidecar, run-mode produces one internally")
+	}
+	if *allMatching && *image == "" {
+		return codedErrorf(ExitUsage, "--all-matching requires --image")
+	}
+	if *container != "" && *image != "" {
+		return codedErrorf(ExitUsage, "--container and --image are mutually exclusive")
+	}
+	if *workload != "" {
+		if _, err := os.Stat(*workload); err != nil {
+			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
+		}
 	}
 
 	baseSidecar, err := loadSidecar(*baseline)
 	if err != nil {
 		return wrapCoded(ExitUsage, fmt.Errorf("--baseline: %w", err))
 	}
-	obsSidecar, err := loadSidecar(*observation)
-	if err != nil {
-		return wrapCoded(ExitUsage, fmt.Errorf("--observation: %w", err))
+
+	var obsSidecar *Sidecar
+	if *observation != "" {
+		obsSidecar, err = loadSidecar(*observation)
+		if err != nil {
+			return wrapCoded(ExitUsage, fmt.Errorf("--observation: %w", err))
+		}
+	} else {
+		// Run-mode: produce the verify-time observation from the
+		// user-supplied target. The target carries the proposed config
+		// (the user restarted it before invoking verify); we just
+		// observe it under the same workload.
+		obsSidecar, err = produceObservation(observePipelineOpts{
+			AggregateOpts: aggregateOpts{
+				Container:    *container,
+				Image:        *image,
+				AllMatching:  *allMatching,
+				InitWindowMs: *initWindowMs,
+			},
+			Fixture:        *fixture,
+			FixtureStderr:  *fixtureErr,
+			InspectFixture: *inspectFixture,
+			IGBin:          *igBin,
+			Duration:       *duration,
+			Workload:       *workload,
+		}, stderr)
+		if err != nil {
+			return err
+		}
 	}
 
 	vr, code := classifyVerify(baseSidecar.CapNames(), obsSidecar, *baseline)

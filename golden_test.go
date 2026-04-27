@@ -108,13 +108,14 @@ func TestRun_InspectFixturePopulatesCrossCheck(t *testing.T) {
 		t.Errorf("warning should name NET_BIND_SERVICE: %q", s.CoverageWarnings[0])
 	}
 
-	// Phase A: warnings are informational; the rubric contributes one
-	// moderate hit but does not force-low on its own. (The postgres
-	// fixture alone produces low via event-count; this test only asserts
-	// that the cross-check factor made it into the factors list.)
+	// Phase B (Step 32): warnings non-empty forces low. Asserts both the
+	// factor text and the resulting grade.
 	joined := strings.Join(s.Confidence.Factors, "\n")
-	if !strings.Contains(joined, "1 entrypoint coverage warnings present") {
-		t.Errorf("factors should include coverage-warnings moderate:\n%s", joined)
+	if !strings.Contains(joined, "low: 1 entrypoint coverage warnings present") {
+		t.Errorf("factors should include coverage-warnings low:\n%s", joined)
+	}
+	if s.Confidence.Level != ConfidenceLow {
+		t.Errorf("warnings should force low; got %q", s.Confidence.Level)
 	}
 
 	// Warnings should also have been echoed to stderr during the run.

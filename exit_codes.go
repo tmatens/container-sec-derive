@@ -17,14 +17,16 @@ import (
 // are defined here so later steps drop in without renumbering or a
 // parallel constants file.
 const (
-	ExitOK                = 0
-	ExitRuntime           = 1  // unclassified runtime failure; last-resort fallback
-	ExitTargetExitedEarly = 20 // reachable once observe() wires restart detection
-	ExitDropRateExcessive = 21
-	ExitSchemaMismatch    = 30 // reachable once the IG version-pin parser lands
-	ExitIGMissing         = 31
-	ExitTargetAmbiguous   = 40
-	ExitUsage             = 64 // EX_USAGE
+	ExitOK                       = 0
+	ExitRuntime                  = 1  // unclassified runtime failure; last-resort fallback
+	ExitVerifyInsufficient       = 10 // `csd verify` outcome: at least one new denial under the proposed config
+	ExitVerifyOverPermissioned   = 11 // `csd verify` outcome: profile grants caps the workload never triggers
+	ExitTargetExitedEarly        = 20 // reachable once observe() wires restart detection
+	ExitDropRateExcessive        = 21
+	ExitSchemaMismatch           = 30 // reachable once the IG version-pin parser lands
+	ExitIGMissing                = 31
+	ExitTargetAmbiguous          = 40
+	ExitUsage                    = 64 // EX_USAGE
 )
 
 // DropRateAbort is the trace-health drop rate at or above which the

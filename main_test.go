@@ -176,6 +176,59 @@ func TestAggregate_InitWindowDisabled(t *testing.T) {
 	}
 }
 
+func TestAggregate_InitCommFilterDropsRuncEvents(t *testing.T) {
+	// PLAN.md §Foot-guns: runc:[*] events are init-process capability
+	// checks, not workload behavior. Step 11.1 follow-up (iii) saw
+	// runc:[2:INIT] events leak past the 500ms time window; the comm
+	// filter must drop them regardless of when they fire.
+	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") +
+		ev("timestamp", "1600", "cap", "CAP_NET_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") + // past time window, still runc
+		ev("timestamp", "1700", "cap", "CAP_CHOWN", "comm", "postgres", "containerId", "a") +
+		ev("timestamp", "1800", "cap", "CAP_SETUID", "comm", "postgres", "containerId", "a")
+	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("expected runc events suppressed by comm, got %v", s.CapNames())
+	}
+	if s.Target.InitWindowSuppressed != 2 {
+		t.Errorf("InitWindowSuppressed = %d, want 2 (both runc events)", s.Target.InitWindowSuppressed)
+	}
+}
+
+func TestAggregate_InitCommFilterFiresWithoutTimeWindow(t *testing.T) {
+	// Comm filter is independent of --init-window-ms: even with the time
+	// window disabled, runc:[*] events must still be dropped.
+	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") +
+		ev("timestamp", "1100", "cap", "CAP_CHOWN", "comm", "postgres", "containerId", "a")
+	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+		t.Errorf("comm filter should fire even with time window disabled, got %v", s.CapNames())
+	}
+	if s.Target.InitWindowSuppressed != 1 {
+		t.Errorf("InitWindowSuppressed = %d, want 1 (the runc event)", s.Target.InitWindowSuppressed)
+	}
+}
+
+func TestAggregate_InitCommFilterDoesNotFilterUnrelatedComms(t *testing.T) {
+	// "runc-something" without the colon must not match (only runc:[*]
+	// is the documented init shape; conservative prefix avoids
+	// accidentally filtering user processes named e.g. "runcounter").
+	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "comm", "runcounter", "containerId", "a") +
+		ev("timestamp", "1100", "cap", "CAP_SETUID", "comm", "runc-helper", "containerId", "a")
+	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("non-runc-init comms should not be filtered, got %v", s.CapNames())
+	}
+}
+
 func TestAggregate_InitWindowIgnoresUnmatchedEvents(t *testing.T) {
 	// Events for other containers must not anchor the init window for
 	// the target. First *matching* event is the reference point.

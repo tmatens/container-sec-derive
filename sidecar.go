@@ -75,9 +75,14 @@ type Target struct {
 	Restarts               []Restart           `json:"restarts"`
 	FollowRestart          bool                `json:"follow_restart"`
 	TargetExitedEarly      bool                `json:"target_exited_early"`
-	// InitWindowSuppressed is how many events the init-window filter
-	// dropped. Exposed so reviewers can tell whether a sparse derived
-	// cap set is genuine workload behavior or a window-too-wide artifact.
+	// InitWindowSuppressed is how many events the init filter dropped:
+	// either the time-window filter (--init-window-ms) or the comm-aware
+	// runc:[*] filter (Step 21). Exposed so reviewers can tell whether
+	// a sparse derived cap set is genuine workload behavior or an
+	// init-filter artifact. The two suppression sources are summed
+	// because both are "init noise removed before reaching the cap set"
+	// from a reviewer's perspective; if the distinction matters later,
+	// split into separate counters in a schema-additive bump.
 	InitWindowSuppressed int `json:"init_window_suppressed"`
 	// DistinctComms is the count of distinct `comm` values observed across
 	// all replicas after the init-window filter. Feeds the comm-diversity

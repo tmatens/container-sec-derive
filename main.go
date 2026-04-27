@@ -653,6 +653,19 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			st.firstTsMs = ev.Timestamp
 			st.firstSeen = true
 		}
+		// Comm-aware init filter (PLAN.md §Foot-guns "Init-process noise"):
+		// runc:[*] events are container-init capability checks regardless
+		// of when they fire. Step 11.1 follow-up (iii) saw runc:[2:INIT]
+		// events leak past the 500ms time window on real postgres runs;
+		// dropping them by comm catches the late ones the time filter
+		// misses without widening the window and hiding genuine early
+		// workload caps. Counted toward InitWindowSuppressed alongside
+		// the time-window drops -- both are "init suppressed before
+		// reaching the cap set" from a reviewer's perspective.
+		if isInitComm(ev.Proc.Comm) {
+			st.suppressed++
+			continue
+		}
 		if opts.InitWindowMs > 0 && ev.Timestamp-st.firstTsMs < int64(opts.InitWindowMs) {
 			st.suppressed++
 			continue
@@ -799,6 +812,15 @@ func sortedKeys[V any](m map[string]V) []string {
 func normalizeCap(name string) string {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	return strings.TrimPrefix(name, "CAP_")
+}
+
+// isInitComm reports whether comm names a container-init process whose
+// capability checks belong to runc/init bring-up rather than the user's
+// workload. v0.1-rc only filters runc:[*] (e.g. "runc:[2:INIT]"); other
+// init shapes (containerd-shim, crio-init) are out of scope until they
+// surface on a reference image.
+func isInitComm(comm string) bool {
+	return strings.HasPrefix(comm, "runc:")
 }
 
 // writeSidecar serializes s to path as indented JSON. Atomic semantics

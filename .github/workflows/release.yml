@@ -6,9 +6,11 @@
 # GitHub OIDC issuer, and uploads everything to a GitHub release.
 #
 # Per PLAN.md §Supply-chain: "Unsigned artifacts are not released."
-# This workflow is the gate. SBOM generation lands in Step 36 alongside
-# vendored ig provenance; container image build/sign + ig vendoring
-# (PLAN.md §IG binary shipping) lands in a follow-up.
+# This workflow is the gate. Step 36 added SBOM generation (SPDX +
+# CycloneDX via anchore/sbom-action) alongside the existing cosign
+# signing; vendored ig provenance is recorded as a follow-up alongside
+# container image build/sign + ig vendoring (PLAN.md §IG binary
+# shipping).
 #
 # All third-party actions are SHA-pinned per CLAUDE.md
 # §Dependency pinning. To bump: re-resolve the SHA from the action's
@@ -81,13 +83,41 @@ jobs:
           test -f dist/csd_linux_amd64
           test -f dist/csd_linux_arm64
           chmod +x dist/csd_linux_amd64 dist/csd_linux_arm64
+      # SBOMs are generated against the source tree (which includes
+      # go.mod / go.sum) before SHA256SUMS so the manifest captures
+      # their digests. Two formats per PLAN.md §Supply-chain: SPDX
+      # JSON (the cross-tool lingua franca) and CycloneDX JSON (richer
+      # metadata, common in container scanners). syft auto-detects Go
+      # modules; csd has zero non-stdlib runtime deps so the SBOM is
+      # small but still records the Go toolchain version. Vendored ig
+      # provenance is NOT yet recorded in these SBOMs — that lands
+      # with the ig vendoring + container image step (follow-up).
+      - name: SBOM (SPDX JSON)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: csd.spdx.json
+          output-file: dist/csd.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: SBOM (CycloneDX JSON)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: csd.cyclonedx.json
+          output-file: dist/csd.cyclonedx.json
+          upload-artifact: false
+          upload-release-assets: false
       - name: SHA256SUMS
         working-directory: dist
-        # Sorted to keep the manifest stable across runs. SBOM entries
-        # land here in Step 36; vendored ig digest lands here when ig
-        # bundling ships.
+        # Sorted to keep the manifest stable across runs. SBOM digests
+        # are included so a verifier with only the manifest in hand
+        # can confirm the SBOMs alongside the binaries. Vendored ig
+        # digest lands here when ig bundling ships.
         run: |
-          sha256sum csd_linux_amd64 csd_linux_arm64 | sort > SHA256SUMS
+          sha256sum csd_linux_amd64 csd_linux_arm64 csd.spdx.json csd.cyclonedx.json | sort > SHA256SUMS
           cat SHA256SUMS
       - uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
       - name: cosign sign-blob (each artifact)
@@ -96,9 +126,11 @@ jobs:
         # writes a self-contained Sigstore bundle that includes the
         # signature, certificate, and Rekor inclusion proof so
         # verifiers do not need to fetch from the transparency log
-        # at verify time.
+        # at verify time. SBOMs are signed alongside binaries with
+        # the same identity so a single verify-blob invocation works
+        # for any release artifact.
         run: |
-          for f in csd_linux_amd64 csd_linux_arm64 SHA256SUMS; do
+          for f in csd_linux_amd64 csd_linux_arm64 csd.spdx.json csd.cyclonedx.json SHA256SUMS; do
             cosign sign-blob --yes \
               --bundle "${f}.cosign.bundle" \
               "${f}"
@@ -111,7 +143,11 @@ jobs:
           files: |
             dist/csd_linux_amd64
             dist/csd_linux_arm64
+            dist/csd.spdx.json
+            dist/csd.cyclonedx.json
             dist/SHA256SUMS
             dist/csd_linux_amd64.cosign.bundle
             dist/csd_linux_arm64.cosign.bundle
+            dist/csd.spdx.json.cosign.bundle
+            dist/csd.cyclonedx.json.cosign.bundle
             dist/SHA256SUMS.cosign.bundle

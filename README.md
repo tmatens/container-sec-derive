@@ -74,7 +74,17 @@ cosign verify-blob \
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`. The container image (`ghcr.io/tmatens/container-sec-derive`) and SBOM artifacts ship in follow-up release-work; this section will grow `cosign verify` examples for them when they land.
+Each release also publishes two SBOMs — `csd.spdx.json` (SPDX 2.3 JSON) and `csd.cyclonedx.json` (CycloneDX JSON) — generated from the source tree at release time and listed in `SHA256SUMS`. Both are cosign-signed under the same identity as the binaries, so the same verify command works:
+
+```sh
+cosign verify-blob \
+  --bundle csd.spdx.json.cosign.bundle \
+  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  csd.spdx.json
+```
+
+Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`. The container image (`ghcr.io/tmatens/container-sec-derive`) ships in follow-up release-work; this section will grow `cosign verify` examples for it when it lands. Vendored `ig` provenance is not yet recorded in the SBOMs — that lands alongside the container image step.
 
 ## License
 

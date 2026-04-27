@@ -22,7 +22,9 @@
 #
 # RUN_ARGS is shell-evaluated and passed to docker run (env, volumes, etc).
 # The container name used is csd-bisect-<image_name>; it is removed before
-# every iteration. Output: ground_truth.json on stdout.
+# every iteration. Output: ground_truth.json on stdout. Captured fields:
+# image, image_digest, workload, caps, bisected_at, host_context (kernel,
+# arch, os, docker_server_version, cgroup_driver), bisection_log.
 set -euo pipefail
 
 : "${IMAGE:?IMAGE must be set}"
@@ -102,6 +104,15 @@ cleanup
 DIGEST="$(docker image inspect --format '{{index .RepoDigests 0}}' "${IMAGE}" 2>/dev/null | awk -F@ '{print $2}')"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+# Host context — captured so per-host drift is detectable when comparing
+# ground_truth.json across machines. If any field can't be read, emit
+# "unknown" rather than aborting; the bisected cap set is still valid.
+KERNEL="$(uname -r 2>/dev/null || echo unknown)"
+ARCH="$(uname -m 2>/dev/null || echo unknown)"
+OS_NAME="$(uname -s 2>/dev/null || echo unknown)"
+DOCKER_VER="$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo unknown)"
+CGROUP_DRIVER="$(docker info --format '{{.CgroupDriver}}' 2>/dev/null || echo unknown)"
+
 # json_str — minimal JSON string escaper (handles backslash, double-quote,
 # and the bisection_log's printable ASCII; the only field that needs more
 # than that is bisection_log, which we control).
@@ -131,6 +142,13 @@ json_str() {
     done
     printf '],\n'
     printf '  "bisected_at": %s,\n' "$(json_str "${NOW}")"
+    printf '  "host_context": {\n'
+    printf '    "kernel": %s,\n' "$(json_str "${KERNEL}")"
+    printf '    "arch": %s,\n' "$(json_str "${ARCH}")"
+    printf '    "os": %s,\n' "$(json_str "${OS_NAME}")"
+    printf '    "docker_server_version": %s,\n' "$(json_str "${DOCKER_VER}")"
+    printf '    "cgroup_driver": %s\n' "$(json_str "${CGROUP_DRIVER}")"
+    printf '  },\n'
     printf '  "bisection_log": [\n'
     first=1
     for line in "${LOG[@]}"; do

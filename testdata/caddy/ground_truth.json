@@ -1,0 +1,24 @@
+{
+  "image": "caddy:2",
+  "image_digest": "sha256:25cdc846626b62d05f6b633b9b40c2c9f6ef89b515dc76133cefd920f7dbe562",
+  "workload": "testdata/caddy/workload.sh",
+  "caps": ["NET_BIND_SERVICE"],
+  "bisected_at": "2026-04-27T02:29:52Z",
+  "bisection_log": [
+    "baseline default-caps run: pass",
+    "drop CHOWN: workload still passes — unneeded",
+    "drop DAC_OVERRIDE: workload still passes — unneeded",
+    "drop FOWNER: workload still passes — unneeded",
+    "drop FSETID: workload still passes — unneeded",
+    "drop KILL: workload still passes — unneeded",
+    "drop SETGID: workload still passes — unneeded",
+    "drop SETUID: workload still passes — unneeded",
+    "drop SETPCAP: workload still passes — unneeded",
+    "drop NET_BIND_SERVICE: workload fails — required",
+    "drop NET_RAW: workload still passes — unneeded",
+    "drop SYS_CHROOT: workload still passes — unneeded",
+    "drop MKNOD: workload still passes — unneeded",
+    "drop AUDIT_WRITE: workload still passes — unneeded",
+    "drop SETFCAP: workload still passes — unneeded"
+  ]
+}

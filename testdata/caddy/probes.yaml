@@ -1,0 +1,3 @@
+# v2 forward-compat placeholder. The probe-manifest schema is defined in
+# PLAN.md §Workload coverage as v2 work; for v0.1 the workload script is
+# the primary correctness signal. Empty file is intentional.

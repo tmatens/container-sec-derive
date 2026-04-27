@@ -23,7 +23,7 @@ ground-truth-caddy:
 	IMAGE=caddy:2 \
 	IMAGE_NAME=caddy \
 	WORKLOAD=$(CURDIR)/testdata/caddy/workload.sh \
-	RUN_ARGS='-p 127.0.0.1:18080:80' \
+	RUN_ARGS='-e CADDY_ADMIN=0.0.0.0:2019 -p 127.0.0.1:18080:80 -p 127.0.0.1:12019:2019' \
 	READY_TIMEOUT=30 \
 	./scripts/bisect_caps.sh > testdata/caddy/ground_truth.json
 

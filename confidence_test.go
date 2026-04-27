@@ -254,10 +254,11 @@ func TestConfidence_CrossCheckNoSignalsEmitsOkFactor(t *testing.T) {
 	}
 }
 
-// Divergence (warnings non-empty) adds a moderate hit. On its own the
-// grade stays at moderate; paired with another moderate it drops to
-// low -- phase A keeps the force-low rule unwired.
-func TestConfidence_CrossCheckWarningsContributeModerate(t *testing.T) {
+// Phase B (Step 32): coverage_warnings non-empty forces low on its own.
+// Phase A's "warnings contribute moderate, may stack to low" behavior
+// is replaced by a deterministic force-low so the rubric's answer to
+// entrypoint-mismatch is the same regardless of other rubric inputs.
+func TestConfidence_CrossCheckWarningsForceLow(t *testing.T) {
 	s := helperSidecar()
 	s.crossCheckStatus = crossCheckStatusOK
 	s.ExpectedCapsFromEntrypoint = []string{"CHOWN", "FOWNER"}
@@ -266,27 +267,11 @@ func TestConfidence_CrossCheckWarningsContributeModerate(t *testing.T) {
 	}
 	computeConfidence(s)
 	joined := strings.Join(s.Confidence.Factors, "\n")
-	if !strings.Contains(joined, "1 entrypoint coverage warnings present") {
-		t.Errorf("expected warnings-present moderate factor; got:\n%s", joined)
+	if !strings.Contains(joined, "low: 1 entrypoint coverage warnings present") {
+		t.Errorf("expected warnings-present low factor; got:\n%s", joined)
 	}
-	// Phase A: warnings alone should not force low.
-	if s.Confidence.Level != ConfidenceModerate {
-		t.Errorf("warnings alone should not force low in phase A; got %q", s.Confidence.Level)
-	}
-}
-
-// Stacking: warnings moderate + one other moderate → low. This is the
-// only existing path to low through the cross-check in phase A.
-func TestConfidence_CrossCheckWarningsStackWithAnotherModerateToLow(t *testing.T) {
-	s := helperSidecar()
-	s.crossCheckStatus = crossCheckStatusOK
-	s.ExpectedCapsFromEntrypoint = []string{"CHOWN"}
-	s.CoverageWarnings = []string{"dummy warning for test"}
-	s.Target.DistinctComms = 2 // second moderate hit
-	computeConfidence(s)
 	if s.Confidence.Level != ConfidenceLow {
-		t.Errorf("warnings + one other moderate should downgrade to low; got %q\nfactors: %v",
-			s.Confidence.Level, s.Confidence.Factors)
+		t.Errorf("warnings should force low in phase B; got %q", s.Confidence.Level)
 	}
 }
 

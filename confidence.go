@@ -19,11 +19,20 @@ import "fmt"
 // scoring lists "no workload script" as a Moderate condition (not Low),
 // so absence contributes one moderate hit rather than forcing the grade.
 //
-// Step 15 (v0.1.0-rc) wires the entrypoint cross-check as an informational
-// factor: divergence contributes one "moderate:" hit but does NOT force-
-// low on its own. PLAN.md §Workload coverage item 2's force-low rule is
-// intentionally deferred until reference-image runs give us a real read
-// on signal quality vs false-positive rate.
+// Step 15 (v0.1.0-rc) wired the entrypoint cross-check as an
+// informational factor; Step 32 (v0.1.0-rc, phase B) wires PLAN.md
+// §Workload coverage item 2's force-low rule: when the cross-check
+// ran and any coverage_warnings fired, confidence is forced to low.
+// The phase B decision was made on Step 30 + Step 31 evidence that
+// the heuristic table fires zero signals on the reference images
+// (postgres argv = `docker-entrypoint.sh postgres`, caddy =
+// `caddy run ...`, tailscale = `containerboot`, synthetic =
+// `/exerciser` -- none match the chown/chmod/gosu/su-exec/setpriv/
+// mount/umount/ping table). Force-low is therefore additive and
+// regression-free on current workloads; it locks in the rubric's
+// answer to entrypoint-mismatch ahead of any v0.2+ work that
+// expands the heuristic (layer-script reading, etc.) to actually
+// fire signals.
 //
 // Reporting deferred factors honestly (rather than silently grading
 // High) keeps the rubric trustworthy while the rest of the inputs land.
@@ -104,9 +113,7 @@ func computeConfidence(s *Sidecar) {
 	}
 
 	// Entrypoint cross-check (PLAN.md §Workload coverage items 1-2).
-	// Phase A: divergence is informational; warnings contribute one
-	// "moderate:" hit (stacking with any other moderate pushes to low)
-	// but the force-low rule from PLAN.md item 2 is not yet wired. The
+	// Phase B (Step 32): coverage_warnings non-empty forces low. The
 	// populated ExpectedCapsFromEntrypoint + CoverageWarnings fields
 	// remain the authoritative record regardless of grade pressure.
 	switch {
@@ -122,7 +129,7 @@ func computeConfidence(s *Sidecar) {
 		// reviewer can see why the check couldn't run.
 		addInfo("entrypoint cross-check unavailable: " + s.crossCheckStatus)
 	case len(s.CoverageWarnings) > 0:
-		addModerate(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
+		addLow(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
 	case len(s.ExpectedCapsFromEntrypoint) == 0:
 		addInfo("entrypoint cross-check ran; no static signals matched")
 	default:

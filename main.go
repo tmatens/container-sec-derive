@@ -59,7 +59,14 @@ type capEvent struct {
 	Timestamp int64  `json:"-"`
 	Syscall   string `json:"syscall"`
 	CapName   string `json:"cap"`
-	Proc      struct {
+	// Capable is the kretprobe verdict (PLAN.md §IG vs Tracee): true =
+	// the cap was held, false = it was denied. v0.51.0 emits this on
+	// every event; csd's aggregator filters to capable:true so denied
+	// checks don't inflate the derived cap set. UnmarshalJSON below
+	// defaults Capable to true when the field is absent so hand-rolled
+	// test fixtures predating Step 19 keep working unchanged.
+	Capable bool `json:"-"`
+	Proc    struct {
 		Comm string `json:"comm"`
 		Pid  int    `json:"pid"`
 	} `json:"proc"`
@@ -87,14 +94,25 @@ func (e *capEvent) UnmarshalJSON(data []byte) error {
 		TimestampRaw int64           `json:"timestamp_raw"`
 		Syscall      string          `json:"syscall"`
 		CapName      string          `json:"cap"`
-		Proc         procT           `json:"proc"`
-		Runtime      runtimeT        `json:"runtime"`
+		// *bool so we can distinguish "absent" from "false". Absent
+		// defaults to true (lenient) so legacy hand-rolled fixtures
+		// without a `capable` field don't get silently filtered out;
+		// pinned ig v0.51.0 always emits the field, so the live path
+		// gets exact verdict semantics regardless.
+		Capable *bool    `json:"capable"`
+		Proc    procT    `json:"proc"`
+		Runtime runtimeT `json:"runtime"`
 	}
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
 	e.Syscall = wire.Syscall
 	e.CapName = wire.CapName
+	if wire.Capable == nil {
+		e.Capable = true
+	} else {
+		e.Capable = *wire.Capable
+	}
 	e.Proc = wire.Proc
 	e.Runtime = wire.Runtime
 	switch {
@@ -581,6 +599,14 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			continue
 		}
 		recorded++
+		// Capable=false events are kretprobe-recorded denials: the
+		// kernel asked, the LSM said no. PLAN.md §IG vs Tracee — we
+		// only want held caps in the derived set. Counted toward
+		// events_recorded so drop_rate's denominator reflects every
+		// real ig sample we parsed.
+		if !ev.Capable {
+			continue
+		}
 		rid := ev.Runtime.ContainerID
 		if rid == "" {
 			rid = ev.Runtime.ContainerName

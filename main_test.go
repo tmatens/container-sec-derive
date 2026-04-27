@@ -25,8 +25,15 @@ func ev(fields ...string) string {
 	if ts == "" {
 		ts = "0"
 	}
+	// capable defaults to true (held). Pass capable=false to model a
+	// kretprobe-recorded denial that the Step 19 filter must drop.
+	capable := "true"
+	if v, ok := m["capable"]; ok {
+		capable = v
+	}
 	return `{"timestamp":` + ts +
 		`,"cap":"` + m["cap"] + `"` +
+		`,"capable":` + capable +
 		`,"proc":{"comm":"` + m["comm"] + `","pid":0}` +
 		`,"runtime":{"runtimeName":"docker","containerId":"` + m["containerId"] +
 		`","containerName":"` + m["containerName"] +
@@ -80,6 +87,44 @@ func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
 	}
 	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("got %v", s.CapNames())
+	}
+}
+
+func TestAggregate_FiltersCapableFalse(t *testing.T) {
+	// PLAN.md §IG vs Tracee: ig's kretprobe records both held and
+	// denied checks. The derived cap set must include only held caps;
+	// denied checks (capable=false) are kernel "no" answers and would
+	// inflate the profile if counted.
+	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "a", "capable", "true") +
+		ev("timestamp", "1001", "cap", "CAP_NET_RAW", "containerId", "a", "capable", "false") +
+		ev("timestamp", "1002", "cap", "CAP_SYS_ADMIN", "containerId", "a", "capable", "false") +
+		ev("timestamp", "1003", "cap", "CAP_SETUID", "containerId", "a", "capable", "true")
+	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+		t.Errorf("denied caps leaked into derived set: got %v, want only held caps", s.CapNames())
+	}
+	// Denials still count toward events_recorded so drop_rate's
+	// denominator reflects every real ig sample we parsed.
+	if s.TraceHealth.EventsRecorded != 4 {
+		t.Errorf("EventsRecorded = %d, want 4 (denials must count toward drop-rate denominator)", s.TraceHealth.EventsRecorded)
+	}
+}
+
+func TestAggregate_LegacyFixtureWithoutCapableFieldKeptForCompat(t *testing.T) {
+	// Hand-rolled fixtures predating Step 19 omit the capable field.
+	// UnmarshalJSON treats absent as true so they don't silently drop
+	// to zero caps; pinned ig v0.51.0 always emits the field, so the
+	// live path still gets exact verdict semantics.
+	input := `{"timestamp":1000,"cap":"CAP_CHOWN","proc":{"comm":"x","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":"x"}}` + "\n"
+	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+		t.Errorf("legacy fixture got filtered (absent capable should default to true): %v", s.CapNames())
 	}
 }
 

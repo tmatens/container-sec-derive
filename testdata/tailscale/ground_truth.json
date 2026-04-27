@@ -1,0 +1,24 @@
+{
+  "image": "tailscale/tailscale:stable",
+  "image_digest": "sha256:dbeff02d2337344b351afac203427218c4d0a06c43fc10a865184063498472a6",
+  "workload": "testdata/tailscale/workload.sh",
+  "caps": [],
+  "bisected_at": "2026-04-27T02:34:02Z",
+  "bisection_log": [
+    "baseline default-caps run: pass",
+    "drop CHOWN: workload still passes — unneeded",
+    "drop DAC_OVERRIDE: workload still passes — unneeded",
+    "drop FOWNER: workload still passes — unneeded",
+    "drop FSETID: workload still passes — unneeded",
+    "drop KILL: workload still passes — unneeded",
+    "drop SETGID: workload still passes — unneeded",
+    "drop SETUID: workload still passes — unneeded",
+    "drop SETPCAP: workload still passes — unneeded",
+    "drop NET_BIND_SERVICE: workload still passes — unneeded",
+    "drop NET_RAW: workload still passes — unneeded",
+    "drop SYS_CHROOT: workload still passes — unneeded",
+    "drop MKNOD: workload still passes — unneeded",
+    "drop AUDIT_WRITE: workload still passes — unneeded",
+    "drop SETFCAP: workload still passes — unneeded"
+  ]
+}

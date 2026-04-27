@@ -61,25 +61,23 @@ func TestWriteCompose_PreservesAggregatorOrder(t *testing.T) {
 }
 
 func TestRun_UnknownFormatIsUsageError(t *testing.T) {
-	// v0.1.0-beta ships only `compose`; the remaining formatters land
-	// across v0.1.0-rc. Unknown / not-yet-supported values must surface
-	// as EX_USAGE with a guiding message, not as a silent fall-through.
-	// `compose-patch` is still deferred at this point in rc; swap the
-	// probe if it lands before this test is refactored.
+	// All v0.1.0-rc formatters are now implemented; an unrecognized
+	// value must surface as EX_USAGE with a list of supported formats,
+	// not as a silent fall-through.
 	var out, errBuf bytes.Buffer
 	err := run([]string{
 		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
 		"--container", "postgres-1",
-		"--format", "compose-patch",
+		"--format", "xml",
 	}, &out, &errBuf)
 	if err == nil {
-		t.Fatal("expected usage error for --format compose-patch in v0.1.0-rc")
+		t.Fatal("expected usage error for --format xml")
 	}
 	if code := exitCodeFor(err); code != ExitUsage {
 		t.Errorf("exit code = %d, want %d (ExitUsage)", code, ExitUsage)
 	}
-	if !strings.Contains(err.Error(), "v0.1.0-rc") {
-		t.Errorf("error should point to v0.1.0-rc for deferred formats, got: %v", err)
+	if !strings.Contains(err.Error(), "supported:") {
+		t.Errorf("error should list supported formats, got: %v", err)
 	}
 }
 

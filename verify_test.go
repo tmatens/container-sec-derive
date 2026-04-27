@@ -175,14 +175,129 @@ func TestRunVerify_OverPermissionedExit11(t *testing.T) {
 	}
 }
 
-func TestRunVerify_RequiresBothFlagsEXUsage(t *testing.T) {
+func TestRunVerify_RequiresBaselineEXUsage(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := run([]string{"verify"}, &stdout, &stderr)
 	if err == nil {
-		t.Fatal("expected EX_USAGE for missing flags")
+		t.Fatal("expected EX_USAGE for missing --baseline")
 	}
 	if exitCodeFor(err) != ExitUsage {
 		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	}
+}
+
+func TestRunVerify_RequiresObservationOrSelectorEXUsage(t *testing.T) {
+	dir := t.TempDir()
+	bp := writeSidecarFile(t, dir, "b.json", makeSidecar("x", "", "", 0, "CHOWN"))
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"verify", "--baseline", bp}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected EX_USAGE for --baseline without --observation or run-mode selector")
+	}
+	if exitCodeFor(err) != ExitUsage {
+		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	}
+	if !strings.Contains(err.Error(), "--observation") {
+		t.Errorf("error should guide the user toward both modes: %v", err)
+	}
+}
+
+func TestRunVerify_ObservationAndRunModeMutuallyExclusive(t *testing.T) {
+	dir := t.TempDir()
+	bp := writeSidecarFile(t, dir, "b.json", makeSidecar("x", "", "", 0, "CHOWN"))
+	op := writeSidecarFile(t, dir, "o.json", makeSidecar("x", "", "", 0, "CHOWN"))
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"verify", "--baseline", bp, "--observation", op,
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected EX_USAGE for mixing --observation with run-mode flags")
+	}
+	if exitCodeFor(err) != ExitUsage {
+		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	}
+}
+
+func TestRunVerify_RunMode_FixtureConsistent(t *testing.T) {
+	// Run-mode against the v0.51.0 sample fixture. Single-replica
+	// (postgres-1) cap set is [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+	// (matches the existing TestRun_FixtureMode assertion). A baseline
+	// listing the same caps must classify as consistent.
+	dir := t.TempDir()
+	bp := writeSidecarFile(t, dir, "b.json",
+		makeSidecar("postgres:16", "", "", 0, "CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"))
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"verify", "--baseline", bp,
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--container", "postgres-1"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("verify run-mode: %v (stderr=%q)", err, stderr.String())
+	}
+	var vr VerifyResult
+	if err := json.Unmarshal(stdout.Bytes(), &vr); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if vr.Outcome != VerifyOutcomeConsistent {
+		t.Errorf("outcome = %q, want %q (denials=%+v unused=%v)",
+			vr.Outcome, VerifyOutcomeConsistent, vr.NewDenials, vr.UnusedCaps)
+	}
+}
+
+func TestRunVerify_RunMode_FixtureInsufficientWhenBaselineTooSmall(t *testing.T) {
+	// Same fixture, but baseline only lists CHOWN -- the postgres-1
+	// observation will surface DAC_OVERRIDE/FOWNER/SETGID/SETUID as new
+	// denials and the outcome must be insufficient (exit 10).
+	dir := t.TempDir()
+	bp := writeSidecarFile(t, dir, "b.json",
+		makeSidecar("postgres:16", "", "", 0, "CHOWN"))
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"verify", "--baseline", bp,
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--container", "postgres-1"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected nonzero exit for insufficient outcome")
+	}
+	if got := exitCodeFor(err); got != ExitVerifyInsufficient {
+		t.Errorf("exit = %d, want %d", got, ExitVerifyInsufficient)
+	}
+	var vr VerifyResult
+	if err := json.Unmarshal(stdout.Bytes(), &vr); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	denialNames := make([]string, 0, len(vr.NewDenials))
+	for _, d := range vr.NewDenials {
+		denialNames = append(denialNames, d.Cap)
+	}
+	want := []string{"DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}
+	if !equalSlice(denialNames, want) {
+		t.Errorf("new_denials = %v, want %v", denialNames, want)
+	}
+}
+
+func TestRunVerify_RunMode_FixtureOverPermissionedWhenBaselineTooLarge(t *testing.T) {
+	// Baseline lists a cap (SYS_PTRACE) the fixture observation does not
+	// produce -- outcome must be over_permissioned.
+	dir := t.TempDir()
+	bp := writeSidecarFile(t, dir, "b.json",
+		makeSidecar("postgres:16", "", "", 0, "CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID", "SYS_PTRACE"))
+
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"verify", "--baseline", bp,
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--container", "postgres-1"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("expected nonzero exit for over_permissioned outcome")
+	}
+	if got := exitCodeFor(err); got != ExitVerifyOverPermissioned {
+		t.Errorf("exit = %d, want %d", got, ExitVerifyOverPermissioned)
+	}
+	var vr VerifyResult
+	if err := json.Unmarshal(stdout.Bytes(), &vr); err != nil {
+		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
+	}
+	if !equalSlice(vr.UnusedCaps, []string{"SYS_PTRACE"}) {
+		t.Errorf("unused_caps = %v, want [SYS_PTRACE]", vr.UnusedCaps)
 	}
 }
 

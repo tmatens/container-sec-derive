@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale build test vet
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build build test vet
 
 ground-truth: ground-truth-postgres ground-truth-caddy ground-truth-tailscale
 
@@ -34,6 +34,9 @@ ground-truth-tailscale:
 	RUN_ARGS='-e TS_USERSPACE=true' \
 	READY_TIMEOUT=30 \
 	./scripts/bisect_caps.sh > testdata/tailscale/ground_truth.json
+
+synthetic-build:
+	docker build -t csd-synthetic-exerciser:0.1 testdata/synthetic
 
 build:
 	go build -o csd .

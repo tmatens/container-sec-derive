@@ -28,9 +28,11 @@ import (
 
 // Pinned IG release. v0.1 targets a single upstream version; MIN/MAX
 // equal the pin until we've smoke-tested against a widening window.
-// PLAN.md §IG version pinning defines the v1 semantics; v0.1-rc
-// warn-and-continues on mismatch so we learn about drift without
-// breaking fixture-only users.
+// PLAN.md §IG version pinning defines the v1 semantics. Step 33
+// promoted the version-mismatch path from warn-and-continue to a
+// hard ExitSchemaMismatch (checkIGVersion below); the fixture path
+// is unaffected because produceObservation short-circuits to
+// aggregate() before checkIGVersion runs.
 const (
 	PinnedIGVersion      = "v0.51.0"
 	MinIGVersion         = "v0.51.0"
@@ -435,7 +437,9 @@ func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, e
 			errSrc.Close()
 		}
 	} else {
-		checkIGVersion(opts.IGBin, stderr)
+		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+			return nil, verr
+		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
@@ -556,40 +560,47 @@ func finaliseTraceHealth(th *TraceHealth) {
 	}
 }
 
-// checkIGVersion runs `ig version` and warns if the detected release
-// is not PinnedIGVersion. ig v0.51.0 does not support --output json
-// on `version`; the subcommand emits a single plain-text line like
-// "v0.51.0". We take the first whitespace-delimited token so future
-// ig releases that add trailing metadata still parse.
+// checkIGVersion runs `ig version` and returns ExitSchemaMismatch when
+// the detected release is outside [MinIGVersion, MaxTestedIGVersion].
+// ig v0.51.0 does not support --output json on `version`; the
+// subcommand emits a single plain-text line like "v0.51.0". We take
+// the first whitespace-delimited token so future ig releases that
+// add trailing metadata still parse.
 //
-// v0.1-rc is warn-and-continue; PLAN.md §IG version pinning specifies
-// v1 promotes this to a hard SchemaMismatch exit.
-func checkIGVersion(igBin string, stderr io.Writer) {
+// Step 33 promotes this to a hard SchemaMismatch exit per PLAN.md
+// §IG version pinning. Phase A (Steps 11.1..32) was warn-and-continue
+// so we'd learn about drift without breaking fixture-only users; the
+// fixture path doesn't reach this function (produceObservation
+// short-circuits to aggregate() before the version check), so the
+// hard-fail only affects live observe.
+//
+// Failures of `ig version` itself (binary missing, exec error) are
+// NOT treated as SchemaMismatch — observe() will surface ExitIGMissing
+// for the same condition. Returning nil here keeps the version-check
+// out of that error's blast radius.
+func checkIGVersion(igBin string, stderr io.Writer) error {
 	out, err := exec.Command(igBin, "version").Output()
 	if err != nil {
-		// ig may be absent; observe() will surface the proper exit
-		// code. Only note it here if stderr is writable.
 		if stderr != nil {
 			fmt.Fprintf(stderr, "csd: ig version check skipped: %v\n", err)
 		}
-		return
-	}
-	var v struct {
-		Version string
+		return nil
 	}
 	fields := strings.Fields(string(out))
-	if len(fields) > 0 {
-		v.Version = fields[0]
+	if len(fields) == 0 {
+		return nil
 	}
-	if v.Version == "" {
-		return
+	detected := fields[0]
+	if detected == "" {
+		return nil
 	}
-	if v.Version != PinnedIGVersion && stderr != nil {
-		fmt.Fprintf(stderr,
-			"csd: warning: ig %s detected, PINNED_IG_VERSION=%s (tested window %s..%s). Parsing may misalign; see PLAN.md §IG version pinning.\n",
-			v.Version, PinnedIGVersion, MinIGVersion, MaxTestedIGVersion,
+	if detected != PinnedIGVersion {
+		return codedErrorf(ExitSchemaMismatch,
+			"ig %s detected, PINNED_IG_VERSION=%s (tested window %s..%s); refusing to parse — see PLAN.md §IG version pinning",
+			detected, PinnedIGVersion, MinIGVersion, MaxTestedIGVersion,
 		)
 	}
+	return nil
 }
 
 // replicaState accumulates per-replica data as aggregate() streams events.

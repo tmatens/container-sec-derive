@@ -1,0 +1,40 @@
+# CI gate for container-sec-derive.
+#
+# v0.1 surface: vet + test + build, plus the IG version-pin parser
+# replay that PLAN.md v1 success criterion 502 names. The replay is
+# the regular Go test suite — TestRun_ExitCode_SchemaMismatchOnWrongIGVersion
+# (exit_codes_test.go) constructs a fake ig binary that reports
+# v0.50.0 and asserts csd exits with ExitSchemaMismatch and writes no
+# sidecar. Existing fixture-replay tests (golden_test.go,
+# main_test.go) cover the positive side of the pin against
+# testdata/ig-versions/v0.51.0/.
+#
+# All third-party actions are SHA-pinned per CLAUDE.md
+# §Dependency pinning. To bump: re-resolve the SHA from the action's
+# git tag, update both the SHA and the trailing tag comment in the
+# same commit.
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+      - name: go build
+        run: go build -o csd .

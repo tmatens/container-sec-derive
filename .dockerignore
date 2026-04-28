@@ -1,0 +1,43 @@
+# Image build context — only the source files and ig-pin/ are needed.
+# .git/ is the largest unnecessary inclusion; testdata/, docs/, and the
+# ground-truth scripts pull no weight in the image.
+.git/
+.github/
+.gitignore
+.claude/
+
+# Build outputs
+/csd
+/csd_linux_amd64
+/csd_linux_arm64
+/dist/
+/build/
+*.test
+*.out
+*.prof
+*.pprof
+coverage.html
+
+# Repo-level documentation and planning files — image labels point at
+# the GitHub repo, no need to embed prose in the image.
+docs/
+*.md
+LICENSE
+renovate.json
+SESSION_HANDOFF.md
+
+# Test fixtures — the image-build smoke test mounts testdata/ at run
+# time as a read-only volume rather than baking it in.
+testdata/
+
+# Other repo tooling that the image does not need.
+Makefile
+scripts/
+fuzz/
+
+# Editor / OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

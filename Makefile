@@ -7,7 +7,15 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 build test vet
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 build test vet image image-local verify-ig-pin
+
+# IG_VERSION is extracted from main.go's PinnedIGVersion so the image
+# build, the runtime schema check, and the committed ig-pin/ files
+# stay aligned. CSD_VERSION is git-describe with a -dev suffix when
+# the working tree is dirty; the release pipeline overrides it.
+IG_VERSION  := $(shell awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $$2; exit}' main.go)
+CSD_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+IMAGE_REPO  := tmatens/container-sec-derive
 
 ground-truth: ground-truth-postgres ground-truth-caddy ground-truth-tailscale
 
@@ -53,3 +61,28 @@ test:
 
 vet:
 	go vet ./...
+
+# verify-ig-pin re-runs cosign verification against the committed
+# ig-pin/ artifacts. This is a self-consistency check (the committed
+# bundle verifies against the committed pubkey) — the upstream-trust
+# verification happens at pin-bump time inside scripts/refresh-ig-pin.sh
+# using the freshly fetched key. Useful as a paranoia step before
+# tagging a release.
+verify-ig-pin:
+	cosign verify-blob \
+		--key ig-pin/inspektor-gadget.pub \
+		--bundle ig-pin/SHA256SUMS.bundle \
+		ig-pin/SHA256SUMS
+
+# image builds a local single-arch image for development. Multi-arch
+# build + push lives in .github/workflows/image-build.yml; doing it
+# here would require buildx + qemu setup the local dev box may not
+# have. Image is tagged with the resolved CSD_VERSION so a smoke test
+# can `docker run --rm <repo>:<tag> --version` and assert exact match.
+image:
+	docker build \
+		--build-arg IG_VERSION=$(IG_VERSION) \
+		--build-arg CSD_VERSION=$(CSD_VERSION) \
+		-t $(IMAGE_REPO):$(CSD_VERSION) \
+		-t $(IMAGE_REPO):dev \
+		.

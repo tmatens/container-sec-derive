@@ -35,7 +35,13 @@ FROM golang:1.22-bookworm@sha256:3d699e4d15d0f8f13c9195c0632a16702b8cbdece2955af
 # mismatch fails the sha256sum -c step below rather than silently
 # building against a different IG release.
 ARG IG_VERSION=v0.51.0
-ARG TARGETARCH=amd64
+# TARGETARCH must be passed explicitly via --build-arg by both CI
+# (matrix arch per leg of the build) and the Makefile (host arch via
+# `go env GOARCH`). No default: a Dockerfile-level default for
+# TARGETARCH overrides BuildKit's auto-populated value, which would
+# silently download the wrong-arch ig binary on cross-arch builds —
+# the same bug the per-arch CI matrix caught on the first run.
+ARG TARGETARCH
 ARG TARGETOS=linux
 # CSD_VERSION is injected by the Makefile / release pipeline as a
 # git-describe-style string; it surfaces through `csd --version`.
@@ -84,6 +90,10 @@ RUN set -eu; \
     url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"; \
     echo "Fetching ${url}"; \
     curl -fsSL "${url}" -o "/tmp/${artifact}"; \
+    if [ -z "${TARGETARCH}" ]; then \
+        echo "::error::TARGETARCH is empty — pass --build-arg TARGETARCH=<amd64|arm64> (CI does this from the matrix; the Makefile passes go env GOARCH)"; \
+        exit 1; \
+    fi; \
     expected_line="$(grep -E "  ${artifact}$" /pin/SHA256SUMS || true)"; \
     if [ -z "${expected_line}" ]; then \
         echo "::error::no digest for ${artifact} in ig-pin/SHA256SUMS — bump PinnedIGVersion and run scripts/refresh-ig-pin.sh"; \

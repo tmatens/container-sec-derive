@@ -71,9 +71,15 @@ jobs:
           platforms: ${{ matrix.platform }}
           load: true
           push: false
+          # TARGETARCH is passed explicitly so a stale Dockerfile-level
+          # default (which would override BuildKit's auto-populated
+          # value) cannot silently download a wrong-arch ig binary;
+          # see the comment in Dockerfile near `ARG TARGETARCH` and
+          # the smoke step that asserts `ig version` exits 0.
           build-args: |
             IG_VERSION=${{ steps.vars.outputs.ig_version }}
             CSD_VERSION=${{ steps.vars.outputs.csd_version }}
+            TARGETARCH=${{ matrix.arch }}
           tags: tmatens/container-sec-derive:smoke-${{ matrix.arch }}
 
       # Smoke 1: --version output matches the build arg we passed in.

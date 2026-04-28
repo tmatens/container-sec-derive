@@ -15,6 +15,7 @@
 # the working tree is dirty; the release pipeline overrides it.
 IG_VERSION  := $(shell awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $$2; exit}' main.go)
 CSD_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+HOST_ARCH   := $(shell go env GOARCH)
 IMAGE_REPO  := tmatens/container-sec-derive
 
 ground-truth: ground-truth-postgres ground-truth-caddy ground-truth-tailscale
@@ -83,6 +84,7 @@ image:
 	docker build \
 		--build-arg IG_VERSION=$(IG_VERSION) \
 		--build-arg CSD_VERSION=$(CSD_VERSION) \
+		--build-arg TARGETARCH=$(HOST_ARCH) \
 		-t $(IMAGE_REPO):$(CSD_VERSION) \
 		-t $(IMAGE_REPO):dev \
 		.

@@ -1,0 +1,139 @@
+# Container image build verification (Phase A — build only, no push).
+#
+# Triggered on every PR and on push to main. Builds the multi-arch
+# image on native runners (linux/amd64 on ubuntu-24.04, linux/arm64
+# on ubuntu-24.04-arm — emulated arm64 via QEMU crashes Debian's
+# apt-get under the legacy IG fetch path; native runners avoid the
+# whole class of QEMU edge cases per the compose-lint pattern), runs
+# fixture-mode smoke tests against the loaded image, and exits.
+#
+# Phase A intentionally does NOT push, log into a registry, or cosign
+# the manifest. Those land in Phase B once the publishing-permission
+# gate clears (see SESSION_HANDOFF.md). Keeping the publish jobs out
+# of this workflow means there is no path to accidentally publish
+# from this workflow even if a workflow_dispatch fires it: there are
+# no registry secrets in scope and no `permissions: packages: write`.
+#
+# All third-party actions SHA-pinned per CLAUDE.md §Dependency pinning.
+name: image-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Resolve IG_VERSION from main.go so the build arg, the
+      # ig-pin/SHA256SUMS lookup, and the runtime schema check all
+      # reference one source of truth. CSD_VERSION uses the workflow
+      # SHA so the smoke test below can assert an exact match without
+      # depending on tag state.
+      - name: Resolve build args
+        id: vars
+        run: |
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          if [ -z "${ig_version}" ]; then
+            echo "::error::could not extract PinnedIGVersion from main.go"
+            exit 1
+          fi
+          echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
+          echo "csd_version=ci-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build image (${{ matrix.platform }}, load only — no push)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          build-args: |
+            IG_VERSION=${{ steps.vars.outputs.ig_version }}
+            CSD_VERSION=${{ steps.vars.outputs.csd_version }}
+          tags: tmatens/container-sec-derive:smoke-${{ matrix.arch }}
+
+      # Smoke 1: --version output matches the build arg we passed in.
+      # Catches a regression where the -ldflags injection silently
+      # falls off (e.g. someone refactors the Dockerfile to drop the
+      # ARG threading), which would otherwise ship a "csd dev" image
+      # under a real version tag.
+      - name: Smoke — --version matches build arg
+        env:
+          IMG: tmatens/container-sec-derive:smoke-${{ matrix.arch }}
+          EXPECTED_VERSION: ${{ steps.vars.outputs.csd_version }}
+        run: |
+          actual="$(docker run --rm "${IMG}" --version)"
+          expected="csd ${EXPECTED_VERSION}"
+          echo "Expected: ${expected}"
+          echo "Actual:   ${actual}"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::--version mismatch: image reports '${actual}', expected '${expected}'"
+            exit 1
+          fi
+
+      # Smoke 2: bundled ig version matches the pin. Confirms the
+      # builder stage's sha256-verified extract landed in the runtime
+      # image as the binary csd will subprocess. ig v0.51.0's
+      # `ig version` text format is parsed by checkIGVersion at
+      # runtime; assert here that the line at least starts with "v".
+      - name: Smoke — bundled ig version matches PinnedIGVersion
+        env:
+          IMG: tmatens/container-sec-derive:smoke-${{ matrix.arch }}
+          EXPECTED: ${{ steps.vars.outputs.ig_version }}
+        run: |
+          # Override entrypoint to invoke ig directly. ig writes its
+          # version to stderr for `ig version`; capture both streams.
+          actual="$(docker run --rm --entrypoint /usr/local/bin/ig "${IMG}" version 2>&1 | head -1)"
+          echo "Bundled ig version line: ${actual}"
+          if ! printf '%s' "${actual}" | grep -qF "${EXPECTED}"; then
+            echo "::error::bundled ig version line does not contain '${EXPECTED}'"
+            exit 1
+          fi
+
+      # Smoke 3: fixture-mode end-to-end produces the expected
+      # compose-format output. This is the same input/output pair
+      # asserted by TestRun_FixtureMode in main_test.go, but exercised
+      # through the actual container entrypoint so we catch a
+      # regression where something between the binary and the image
+      # (file permissions, working directory, missing /tmp, distroless
+      # runtime quirks) breaks the path.
+      - name: Smoke — fixture mode produces expected compose output
+        env:
+          IMG: tmatens/container-sec-derive:smoke-${{ matrix.arch }}
+        run: |
+          expected=$'cap_drop:\n  - ALL\ncap_add:\n  - CHOWN\n  - DAC_OVERRIDE\n  - FOWNER\n  - SETGID\n  - SETUID'
+          actual="$(docker run --rm \
+            -v "${PWD}/testdata/ig-versions/v0.51.0:/data:ro" \
+            "${IMG}" --fixture /data/sample.ndjson --container postgres-1)"
+          echo "Expected:"
+          printf '%s\n' "${expected}"
+          echo "Actual:"
+          printf '%s\n' "${actual}"
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::fixture-mode output does not match expected compose stanza"
+            exit 1
+          fi

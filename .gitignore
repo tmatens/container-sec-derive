@@ -31,6 +31,10 @@ go.work.sum
 /dist/
 /build/
 SHA256SUMS
+# ig-pin/ is the vendored Inspektor Gadget release pin (see ig-pin/README.md).
+# The committed SHA256SUMS there is intentional — the broad pattern above is a
+# safety net against accidentally committing freshly-generated release artifacts.
+!ig-pin/SHA256SUMS
 *.sbom.json
 *.spdx.json
 *.cdx.json

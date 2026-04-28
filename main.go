@@ -26,6 +26,16 @@ import (
 	"time"
 )
 
+// version is the csd release string. Set at build time via
+//
+//	-ldflags "-X main.version=<value>"
+//
+// Defaults to "dev" for plain `go build`; the release pipeline and
+// the container image build inject `git describe`-style values.
+// Surfaced through `csd --version` so smoke tests (image and binary)
+// can assert the running build matches the published tag.
+var version = "dev"
+
 // Pinned IG release. v0.1 targets a single upstream version; MIN/MAX
 // equal the pin until we've smoke-tested against a widening window.
 // PLAN.md §IG version pinning defines the v1 semantics. Step 33
@@ -205,6 +215,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// no match.
 	if len(args) > 0 && args[0] == "verify" {
 		return runVerify(args[1:], stdout, stderr)
+	}
+	// --version short-circuits all flag parsing; `csd --version` and
+	// `csd version` both work. Image/binary smoke tests parse this
+	// string to assert the running build matches the published tag.
+	if len(args) > 0 && (args[0] == "--version" || args[0] == "-version" || args[0] == "version") {
+		fmt.Fprintf(stdout, "csd %s\n", version)
+		return nil
 	}
 	if len(args) > 0 && args[0] == "observe" {
 		args = args[1:]

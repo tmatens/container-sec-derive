@@ -278,6 +278,26 @@ func TestRun_ObserveSubcommandStripsKeyword(t *testing.T) {
 	}
 }
 
+// TestRun_VersionFlag verifies that --version, -version, and the
+// `version` subcommand all print the build-time-injected version
+// string and short-circuit before flag parsing or required-arg
+// validation. Image and binary smoke tests parse the printed line
+// to assert the running build matches the published tag.
+func TestRun_VersionFlag(t *testing.T) {
+	for _, arg := range []string{"--version", "-version", "version"} {
+		t.Run(arg, func(t *testing.T) {
+			var out, errBuf bytes.Buffer
+			if err := run([]string{arg}, &out, &errBuf); err != nil {
+				t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
+			}
+			got := out.String()
+			if !strings.HasPrefix(got, "csd ") || !strings.HasSuffix(got, "\n") {
+				t.Errorf("unexpected output %q; want \"csd <version>\\n\"", got)
+			}
+		})
+	}
+}
+
 func TestAggregate_EventsRecordedCountsParsedEvents(t *testing.T) {
 	// Step 11 found ig v0.51.0 does not emit a typed trace_health stdout
 	// event; events_recorded is now the aggregator's own count of

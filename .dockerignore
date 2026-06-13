@@ -24,7 +24,6 @@ docs/
 *.md
 LICENSE
 renovate.json
-SESSION_HANDOFF.md
 
 # Test fixtures — the image-build smoke test mounts testdata/ at run
 # time as a read-only volume rather than baking it in.

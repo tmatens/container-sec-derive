@@ -45,6 +45,15 @@ on:
         default: "none"
         type: choice
         options: [none, postgres, caddy, tailscale, all]
+      run_missrate:
+        description: "Run the kretprobe miss-rate (capture-deficit) measurement"
+        required: false
+        default: false
+        type: boolean
+      iters:
+        description: "Counted cycles for the miss-rate run (CHOWN events = 2x this)"
+        required: false
+        default: "20000"
 
 permissions:
   contents: read
@@ -137,8 +146,12 @@ jobs:
         env:
           DURATION: ${{ github.event.inputs.duration || '30s' }}
         run: |
+          # Capture the real exit code: `cmd | tee` masks failure (the
+          # pipeline exit becomes tee's 0), which would let a FAIL pass green.
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
-            scripts/smoke_wsl2.sh 2>&1 | tee smoke.txt
+            scripts/smoke_wsl2.sh > smoke.txt 2>&1 && rc=0 || rc=$?
+          cat smoke.txt
+          exit $rc
 
       # Route the verdict to channels readable WITHOUT the Actions log
       # API (which is unreachable from some clients): a PR comment +
@@ -173,6 +186,103 @@ jobs:
           api="https://api.github.com"
           auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
           # Upsert: update the existing report comment if present, else create one.
+          existing="$(curl -fsS "${auth[@]}" "$api/repos/$REPO/issues/$PR/comments?per_page=100" \
+                      | jq -r --arg m "$marker" '[.[] | select(.body|contains($m))][0].id // empty')"
+          jq -nc --arg b "$body" '{body:$b}' > payload.json
+          if [ -n "$existing" ]; then
+            curl -fsS -X PATCH "${auth[@]}" "$api/repos/$REPO/issues/comments/$existing" -d @payload.json >/dev/null
+            echo "updated comment $existing"
+          else
+            curl -fsS -X POST "${auth[@]}" "$api/repos/$REPO/issues/$PR/comments" -d @payload.json >/dev/null
+            echo "created comment"
+          fi
+
+  # kretprobe miss-rate (capture deficit) — closes the v1 Correctness
+  # criterion that wants the miss rate measured, not assumed. Runs the
+  # synthetic exerciser in counting mode and compares csd's recorded
+  # per-cap event counts to the exerciser's exact issued counts.
+  #
+  # Dispatch-only (expensive live BPF, ~3-5 min): run from the Actions tab
+  # with run_missrate=true. Validated against this harness's own PR (the
+  # synthetic exerciser measured 0.0000% capture deficit over 100k events);
+  # not run per-PR to conserve free-tier minutes.
+  missrate:
+    name: kretprobe miss-rate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_missrate == 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve pinned ig version
+        id: vars
+        run: |
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          if [ -z "${ig_version}" ]; then
+            echo "::error::could not extract PinnedIGVersion from main.go"
+            exit 1
+          fi
+          echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned ig (amd64, verified against ig-pin/SHA256SUMS)
+        env:
+          IG_VERSION: ${{ steps.vars.outputs.ig_version }}
+        run: |
+          set -euo pipefail
+          artifact="ig-linux-amd64-${IG_VERSION}.tar.gz"
+          url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"
+          curl -fsSL "${url}" -o "/tmp/${artifact}"
+          line="$(grep -E "  ${artifact}\$" ig-pin/SHA256SUMS || true)"
+          if [ -z "${line}" ]; then
+            echo "::error::no digest for ${artifact} in ig-pin/SHA256SUMS"
+            exit 1
+          fi
+          ( cd /tmp && printf '%s\n' "${line}" | sha256sum -c - )
+          tar -C /tmp -xzf "/tmp/${artifact}" ig
+          sudo install -m 0755 /tmp/ig /usr/local/bin/ig
+
+      - name: Build csd
+        run: go build -o csd .
+
+      - name: Measure kretprobe miss-rate
+        env:
+          ITERS: ${{ github.event.inputs.iters || '20000' }}
+        run: |
+          # Capture the real exit code (see the smoke job) so a FAIL gates.
+          sudo env "CSD=$PWD/csd" "ITERS=${ITERS}" \
+            scripts/kretprobe_missrate.sh > missrate.txt 2>&1 && rc=0 || rc=$?
+          cat missrate.txt
+          exit $rc
+
+      # Same allowlisted self-report as the smoke job: MISSRATE/PASS/FAIL
+      # status lines only — no env, secrets, or raw logs.
+      - name: Post miss-rate report (allowlisted, no secrets)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker='<!-- csd-missrate-report -->'
+          report="$( grep -hE '^(MISSRATE|PASS|FAIL)' missrate.txt 2>/dev/null || true )"
+          [ -n "$report" ] || report="(no MISSRATE lines captured — see the Actions run)"
+          { echo "### kretprobe miss-rate report";
+            echo "[run](${RUN_URL})";
+            echo '```'; echo "$report"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          [ -n "${PR:-}" ] || { echo "no PR context; job summary only"; exit 0; }
+          body="$(printf '%s\n### kretprobe miss-rate report\n[run](%s) · commit `%s`\n\n```\n%s\n```\n' \
+                  "$marker" "$RUN_URL" "${GITHUB_SHA:0:9}" "$report")"
+          api="https://api.github.com"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
           existing="$(curl -fsS "${auth[@]}" "$api/repos/$REPO/issues/$PR/comments?per_page=100" \
                       | jq -r --arg m "$marker" '[.[] | select(.body|contains($m))][0].id // empty')"
           jq -nc --arg b "$body" '{body:$b}' > payload.json

@@ -10,20 +10,20 @@
 # attaches end-to-end on their kernel.
 #
 # Pass criteria per image:
-#   postgres (hard gate): csd exits 0 AND events_recorded +
-#     init_window_suppressed > 0 — the attach proof (postgres reliably
-#     fires runc-init capable() checks; observed cap set may still be
-#     empty per docs/known-deltas.md).
-#   caddy / tailscale (informational): reported but never fail the build.
-#     Their privileged ops happen pre-attach (caddy bind(:80) at
-#     entrypoint) and their workloads fire no post-attach capable()
-#     checks, so zero events is an expected, documented outcome —
-#     indistinguishable from non-attach by event count, which is exactly
-#     why postgres, not these, is the attach gate.
+#   postgres / caddy / tailscale (informational): reported but never fail
+#     the build. All three can legitimately observe ZERO post-attach cap
+#     events — their privileged ops happen at/around container init
+#     (gosu user-switch, caddy bind(:80)) and their workloads fire no
+#     further capable() checks, per docs/known-deltas.md. Zero events is
+#     indistinguishable from non-attach by event count, so none of them is
+#     a reliable attach gate (postgres was observed firing 748 events one
+#     run and 0 the next on the same runner).
 #   synthetic (hard gate): csd exits 0 AND derived cap set is a superset
-#     of testdata/synthetic/expected.json's expected_caps_minimum (the
-#     pipeline regression fixture; an empty observation here is a real
-#     csd bug, not a workload-shape artifact).
+#     of testdata/synthetic/expected.json's expected_caps_minimum. This is
+#     the sole deterministic gate: the fixture fires a known cap set
+#     continuously post-attach, so it reliably proves BOTH that BPF
+#     attached and that csd's pipeline records what it should. An empty
+#     observation here is a real csd bug, not a workload-shape artifact.
 #
 # Per-image failures are printed and the script exits non-zero with a
 # summary line; one failure does not abort the rest of the matrix.
@@ -74,15 +74,16 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 # run_one <image_label> <docker_image_ref> <run_args> <workload_script> <pass_predicate>
 #   pass_predicate is one of:
 #     "any-events"         hard gate: BPF must have attached (events recorded).
+#                          (Retained for callers that want it; none of the
+#                          reference images use it — see below.)
 #     "any-events-info"    informational: report event counts but never fail the
-#                          build. Used for caddy/tailscale, whose privileged ops
-#                          happen pre-attach (e.g. caddy bind(:80) at entrypoint)
-#                          and whose workloads fire no post-attach capable()
-#                          checks — a legitimate zero-events result per
-#                          docs/known-deltas.md, indistinguishable from non-attach
-#                          by event count alone. postgres (reliable runc-init
-#                          events) is the attach hard-gate; synthetic is the
-#                          pipeline-regression hard-gate.
+#                          build. Used for postgres/caddy/tailscale, whose
+#                          privileged ops happen at/around init (gosu user-switch,
+#                          caddy bind(:80)) and whose workloads fire no further
+#                          post-attach capable() checks — a legitimate zero-events
+#                          result per docs/known-deltas.md, indistinguishable from
+#                          non-attach by event count alone, so none of them is a
+#                          reliable gate. synthetic is the sole hard gate.
 #     "synthetic-superset" hard gate: derived caps ⊇ expected_caps_minimum.
 #
 # Derived caps live at top-level .capabilities[].name (NOT .target.observed_caps,
@@ -149,8 +150,8 @@ run_one() {
         any-events-info)
             # Informational only — never fails the build. Zero events here is a
             # documented, expected outcome (see the predicate comment above and
-            # docs/known-deltas.md), not a csd failure. The attach hard-gate is
-            # postgres; the pipeline hard-gate is synthetic.
+            # docs/known-deltas.md), not a csd failure. The synthetic fixture is
+            # the sole hard gate (both attach proof and pipeline regression).
             if (( recorded + suppressed == 0 )); then
                 echo "INFO ${label}: zero events post-attach — expected per docs/known-deltas.md (pre-attach/silent workload), not a failure"
             else
@@ -188,7 +189,7 @@ want() {
 # already validated against.
 if want postgres; then
     if run_one postgres "postgres:16" "-e POSTGRES_PASSWORD=postgres" \
-            "$(pwd)/testdata/postgres/workload.sh" any-events; then
+            "$(pwd)/testdata/postgres/workload.sh" any-events-info; then
         PASS=$((PASS+1))
     else
         FAIL=$((FAIL+1))

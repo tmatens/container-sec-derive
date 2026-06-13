@@ -50,10 +50,11 @@ permissions:
   contents: read
 
 jobs:
-  # Live observe → assert. Synthetic is a hard assertion (derived caps
-  # must be a superset of expected_caps_minimum); postgres/caddy/
-  # tailscale are attach-proofs (events recorded > 0, observed set may
-  # be empty per docs/known-deltas.md — that is correct, not a miss).
+  # Live observe → assert. Hard gates: postgres (attach proof — events
+  # recorded > 0; observed set may be empty per docs/known-deltas.md) and
+  # synthetic (derived caps ⊇ expected_caps_minimum). caddy/tailscale are
+  # informational — their privileged ops happen pre-attach, so zero events
+  # is expected and must not fail the build (see scripts/smoke_wsl2.sh).
   smoke:
     name: live-bpf smoke
     runs-on: ubuntu-24.04

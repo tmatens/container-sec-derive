@@ -2,5 +2,19 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "config:recommended"
+  ],
+  "packageRules": [
+    {
+      "description": "Automerge low-risk GitHub Actions bumps. Actions are SHA-pinned (CLAUDE.md), CI gates every PR, and minor/patch/digest carry no API breakage. Majors stay manual (e.g. setup-go v5->v6 changes the runner Node).",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
+      "automerge": true
+    },
+    {
+      "description": "Automerge Docker base-image digest pins (same image, new digest). Tag bumps (minor/major) stay manual because they can need toolchain alignment - e.g. a golang tag bump must move go.mod + the release pipeline in lockstep, an alpine bump must be validated against the synthetic build.",
+      "matchManagers": ["dockerfile"],
+      "matchUpdateTypes": ["digest", "pin"],
+      "automerge": true
+    }
   ]
 }

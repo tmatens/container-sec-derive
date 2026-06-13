@@ -151,3 +151,205 @@ jobs:
             dist/csd.spdx.json.cosign.bundle
             dist/csd.cyclonedx.json.cosign.bundle
             dist/SHA256SUMS.cosign.bundle
+
+  # === Step 38 Phase B — Docker Hub image publish (COI-GATED) =============
+  #
+  # Publishes composelint/container-sec-derive to Docker Hub (the
+  # compose-lint family namespace), modeled on compose-lint's
+  # publish.yml: per-arch build pushed BY DIGEST on native runners, a
+  # manifest list stitched + tagged, then cosign keyless SIGN + attest
+  # (SBOM + OpenVEX). The binary/GitHub-release jobs above are ungated —
+  # a Release on this private repo is collaborator-only. Only the public
+  # Docker Hub push is gated.
+  #
+  # !!! HELD FOR EMPLOYER COI CLEARANCE !!!
+  # The `dockerhub` environment is the mechanical gate: add a REQUIRED
+  # REVIEWER to it in repo Settings → Environments, so every image push
+  # pauses for a human approval. No approval => nothing is pushed. The
+  # docker-gate job below is that pause point; docker-build/-publish hang
+  # off it. Do NOT merge this workflow change, or remove the required
+  # reviewer, until COI clears. See the PR body for the full setup
+  # checklist (environment, required reviewer, DOCKERHUB_* secrets).
+  #
+  # All third-party action SHAs reused from this repo's image-build.yml /
+  # ci.yml / the binary jobs above, except the three Docker Hub actions
+  # (login / metadata / scout) whose SHAs are reused from compose-lint's
+  # vetted publish.yml so the family advances in lockstep.
+  docker-gate:
+    name: image publish approval (COI gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: dockerhub
+      url: https://hub.docker.com/r/composelint/container-sec-derive
+    steps:
+      - run: |
+          echo "Approved — publishing composelint/container-sec-derive for ${GITHUB_REF_NAME}."
+          echo "This job exists so the dockerhub environment's required-reviewer rule"
+          echo "gates every image push (the COI control). No approval => no push."
+
+  # Build one image per arch on a native runner and push BY DIGEST (no
+  # tags). Native runners per arch avoid the QEMU-under-emulation apt-get
+  # crash class (same reason as image-build.yml). TARGETARCH is passed
+  # explicitly — the Dockerfile has no default and fails closed if empty.
+  docker-build:
+    name: image build+push by digest (${{ matrix.platform }})
+    needs: docker-gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Derive slug from platform
+        id: slug
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: echo "slug=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Resolve build args
+        id: vars
+        run: |
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          [ -n "${ig_version}" ] || { echo "::error::could not extract PinnedIGVersion from main.go"; exit 1; }
+          echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
+          # csd --version prints "csd <version>"; strip the leading v to
+          # match the tag-without-v convention the verify step asserts.
+          echo "csd_version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            IG_VERSION=${{ steps.vars.outputs.ig_version }}
+            CSD_VERSION=${{ steps.vars.outputs.csd_version }}
+            TARGETARCH=${{ matrix.arch }}
+          outputs: type=image,name=composelint/container-sec-derive,push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ steps.slug.outputs.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Stitch the per-arch digests into a tagged manifest list, then cosign
+  # keyless SIGN the manifest and attach SBOM + OpenVEX attestations.
+  docker-publish:
+    name: image manifest + sign + attest
+    needs: docker-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write   # cosign keyless OIDC
+    environment:
+      name: dockerhub
+      url: https://hub.docker.com/r/composelint/container-sec-derive
+    steps:
+      # Checkout provides .vex/container-sec-derive.openvex.json for the
+      # OpenVEX attestation. Digests land in /tmp/digests (outside the
+      # workspace) so checkout and download-artifact do not collide.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: /tmp/digests
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Extract metadata (tags)
+        id: meta
+        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        with:
+          images: composelint/container-sec-derive
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          tag_flags=()
+          while IFS= read -r t; do tag_flags+=(-t "$t"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digest_refs=()
+          for f in *; do digest_refs+=("composelint/container-sec-derive@sha256:${f}"); done
+          docker buildx imagetools create "${tag_flags[@]}" "${digest_refs[@]}"
+      - name: Inspect manifest digest
+        id: inspect
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          digest="$(docker buildx imagetools inspect \
+            "composelint/container-sec-derive:${VERSION}" \
+            --format '{{json .Manifest}}' | jq -r '.digest')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+      - name: Sign manifest (cosign keyless)
+        env:
+          DIGEST: ${{ steps.inspect.outputs.digest }}
+        run: cosign sign --yes "composelint/container-sec-derive@${DIGEST}"
+      - name: Verify — cosign signature
+        env:
+          DIGEST: ${{ steps.inspect.outputs.digest }}
+        run: |
+          for attempt in 1 2 3; do
+            if cosign verify \
+              --certificate-identity-regexp='https://github.com/tmatens/container-sec-derive/.github/workflows/release\.yml@.*' \
+              --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+              "composelint/container-sec-derive@${DIGEST}"; then
+              exit 0
+            fi
+            echo "attempt ${attempt} failed; waiting 15s for signature propagation..."; sleep 15
+          done
+          echo "::error::cosign verify failed after 3 attempts"; exit 1
+      - name: Verify — published version matches tag
+        env:
+          DIGEST: ${{ steps.inspect.outputs.digest }}
+        run: |
+          expected="csd ${GITHUB_REF_NAME#v}"
+          actual="$(docker run --rm "composelint/container-sec-derive@${DIGEST}" --version)"
+          echo "expected: ${expected}"; echo "actual:   ${actual}"
+          [ "${actual}" = "${expected}" ] || { echo "::error::published image version '${actual}' != tag '${expected}'"; exit 1; }
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: composelint/container-sec-derive@${{ steps.inspect.outputs.digest }}
+          format: spdx-json
+          output-file: image.spdx.json
+      - name: Attest SBOM to image (cosign)
+        env:
+          DIGEST: ${{ steps.inspect.outputs.digest }}
+        run: cosign attest --yes --type spdxjson --predicate image.spdx.json "composelint/container-sec-derive@${DIGEST}"
+      - name: Attest OpenVEX to image (cosign)
+        env:
+          DIGEST: ${{ steps.inspect.outputs.digest }}
+        run: cosign attest --yes --type openvex --predicate .vex/container-sec-derive.openvex.json "composelint/container-sec-derive@${DIGEST}"

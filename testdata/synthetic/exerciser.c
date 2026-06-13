@@ -21,11 +21,21 @@
  *
  * Build: gcc -static -O2 -o /exerciser exerciser.c
  * The static link + scratch base image keeps comm = "exerciser".
+ *
+ * Counting mode (env ITERS>0): used by scripts/kretprobe_missrate.sh.
+ * After an optional WARMUP_MS sleep (so csd can attach its BPF before any
+ * counted op fires), run exactly ITERS cycles with no inter-cycle sleep,
+ * tally the cap-invoking syscalls that SUCCEEDED, print a machine-readable
+ * "TALLY ..." line, and exit. A successful syscall means the kernel
+ * invoked capable() for that cap and it was held -> exactly one
+ * capable=true event, giving the harness an exact ground-truth count.
+ * ITERS unset/0 keeps the legacy infinite 1 Hz loop the smoke fixture uses.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -38,17 +48,23 @@
 
 static const char *TARGET = "/csd-exerciser-target";
 
-static void exercise_chown(void) {
+/* Each exercise_* returns the count of cap-invoking syscalls that
+ * SUCCEEDED this call (one capable=true event per success). Legacy mode
+ * ignores the returns; counting mode accumulates them. */
+
+static int exercise_chown(void) {
+    int n = 0;
     int fd = open(TARGET, O_CREAT | O_WRONLY | O_TRUNC, 0644);
     if (fd >= 0) {
         if (write(fd, "x", 1) < 0) perror("write");
         close(fd);
     } else {
         perror("open target");
-        return;
+        return 0;
     }
-    if (chown(TARGET, 1, 1) < 0) perror("chown 1:1");
-    if (chown(TARGET, 0, 0) < 0) perror("chown 0:0");
+    if (chown(TARGET, 1, 1) == 0) n++; else perror("chown 1:1");
+    if (chown(TARGET, 0, 0) == 0) n++; else perror("chown 0:0");
+    return n;
 }
 
 static void exercise_chmod(void) {
@@ -56,9 +72,10 @@ static void exercise_chmod(void) {
     if (chmod(TARGET, 0644) < 0) perror("chmod 0644");
 }
 
-static void exercise_bind(void) {
+static int exercise_bind(void) {
+    int ok = 0;
     int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s < 0) { perror("socket"); return; }
+    if (s < 0) { perror("socket"); return 0; }
     int one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     struct sockaddr_in a;
@@ -66,26 +83,61 @@ static void exercise_bind(void) {
     a.sin_family = AF_INET;
     a.sin_port = htons(80);
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (bind(s, (struct sockaddr *)&a, sizeof(a)) < 0) perror("bind :80");
+    if (bind(s, (struct sockaddr *)&a, sizeof(a)) == 0) ok = 1; else perror("bind :80");
     close(s);
+    return ok;
 }
 
-static void exercise_setuid(void) {
+/* Returns 1 if the child held both CAP_SETGID and CAP_SETUID (both
+ * setgid/setuid succeeded). The child must fork because setuid(65534)
+ * permanently drops privilege. */
+static int exercise_setuid(void) {
     pid_t p = fork();
     if (p == 0) {
-        if (setgid(65534) < 0) perror("setgid 65534");
-        if (setuid(65534) < 0) perror("setuid 65534");
-        _exit(0);
+        int ok = 1;
+        if (setgid(65534) != 0) { perror("setgid 65534"); ok = 0; }
+        if (setuid(65534) != 0) { perror("setuid 65534"); ok = 0; }
+        _exit(ok ? 0 : 1);
     } else if (p > 0) {
-        waitpid(p, NULL, 0);
-    } else {
-        perror("fork");
+        int st = 0;
+        waitpid(p, &st, 0);
+        return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 1 : 0;
     }
+    perror("fork");
+    return 0;
 }
 
 int main(void) {
     setvbuf(stdout, NULL, _IOLBF, 0);
     fprintf(stdout, "csd-exerciser starting\n");
+
+    const char *iters_env = getenv("ITERS");
+    unsigned long long iters = iters_env ? strtoull(iters_env, NULL, 10) : 0ULL;
+    if (iters > 0ULL) {
+        const char *warm_env = getenv("WARMUP_MS");
+        unsigned long warm_ms = warm_env ? strtoul(warm_env, NULL, 10) : 0UL;
+        if (warm_ms > 0UL) {
+            fprintf(stdout, "warmup_ms=%lu\n", warm_ms);
+            struct timespec ts = { .tv_sec = (time_t)(warm_ms / 1000UL),
+                                   .tv_nsec = (long)(warm_ms % 1000UL) * 1000000L };
+            nanosleep(&ts, NULL);
+        }
+        unsigned long long c_chown = 0, c_bind = 0, c_setgid = 0, c_setuid = 0;
+        fprintf(stdout, "counting iters=%llu\n", iters);
+        for (unsigned long long i = 0; i < iters; i++) {
+            c_chown += (unsigned)exercise_chown();
+            exercise_chmod();
+            c_bind += (unsigned)exercise_bind();
+            int s = exercise_setuid();
+            c_setgid += (unsigned)s;
+            c_setuid += (unsigned)s;
+        }
+        fprintf(stdout,
+                "TALLY chown=%llu bind=%llu setgid=%llu setuid=%llu iters=%llu\n",
+                c_chown, c_bind, c_setgid, c_setuid, iters);
+        return 0;
+    }
+
     int cycle = 0;
     for (;;) {
         exercise_chown();

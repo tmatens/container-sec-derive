@@ -2,28 +2,27 @@
 #
 # Tag-triggered (push: tags: ['v*']). Builds static binaries for
 # linux/amd64 + linux/arm64, generates SHA256SUMS, cosign-signs each
-# artifact (binaries + the SHA256SUMS file itself) keyless via the
-# GitHub OIDC issuer, and uploads everything to a GitHub release.
+# artifact (binaries + the SHA256SUMS file itself), uploads everything to
+# a GitHub Release, and (Phase B) builds + signs the GHCR image.
 #
-# Per PLAN.md §Supply-chain: "Unsigned artifacts are not released."
-# This workflow is the gate. Step 36 added SBOM generation (SPDX +
-# CycloneDX via anchore/sbom-action) alongside the existing cosign
-# signing; vendored ig provenance is recorded as a follow-up alongside
-# container image build/sign + ig vendoring (PLAN.md §IG binary
-# shipping).
+# SIGNING IS KEY-BASED, NOT KEYLESS. The project is unpublished pending an
+# employer COI decision, and "nothing public" includes the public Rekor
+# transparency log. So every cosign call uses --key env://COSIGN_PRIVATE_KEY
+# with --tlog-upload=false and writes NO public log entry. Requires repo
+# secrets COSIGN_PRIVATE_KEY + COSIGN_PASSWORD and a committed cosign.pub
+# (`cosign generate-key-pair`). When the project goes public, switching to
+# keyless (OIDC + Rekor) is a deliberate, reviewable change.
 #
-# All third-party actions are SHA-pinned per CLAUDE.md
-# §Dependency pinning. To bump: re-resolve the SHA from the action's
-# git tag, update both the SHA and the trailing tag comment in the
-# same commit. Reusing actions/checkout + actions/setup-go pins from
-# .github/workflows/ci.yml so the two workflows advance in lockstep.
+# Per PLAN.md §Supply-chain: "Unsigned artifacts are not released." Step 36
+# added SBOM generation (SPDX + CycloneDX via anchore/sbom-action).
 #
-# Verification command (also in README.md):
-#   cosign verify-blob \
-#     --bundle csd_linux_amd64.cosign.bundle \
-#     --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/.github/workflows/release\.yml@.*' \
-#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-#     csd_linux_amd64
+# All third-party actions are SHA-pinned per CLAUDE.md §Dependency pinning.
+# Reusing actions/checkout + actions/setup-go pins from ci.yml so the
+# workflows advance in lockstep.
+#
+# Verify a binary (also in README.md):
+#   cosign verify-blob --key cosign.pub --insecure-ignore-tlog \
+#     --signature csd_linux_amd64.sig csd_linux_amd64
 name: release
 
 on:
@@ -32,7 +31,6 @@ on:
 
 permissions:
   contents: write   # upload to GitHub release
-  id-token: write   # cosign keyless OIDC
 
 jobs:
   build:
@@ -137,19 +135,24 @@ jobs:
           sha256sum csd_linux_amd64 csd_linux_arm64 csd.spdx.json csd.cyclonedx.json | sort > SHA256SUMS
           cat SHA256SUMS
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: cosign sign-blob (each artifact)
+      - name: cosign sign-blob (key-based, no transparency log)
         working-directory: dist
-        # --yes accepts the OIDC flow non-interactively; --bundle
-        # writes a self-contained Sigstore bundle that includes the
-        # signature, certificate, and Rekor inclusion proof so
-        # verifiers do not need to fetch from the transparency log
-        # at verify time. SBOMs are signed alongside binaries with
-        # the same identity so a single verify-blob invocation works
-        # for any release artifact.
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        # Key-based + --tlog-upload=false writes NO public Rekor entry
+        # (the project is unpublished pending COI; nothing public). Each
+        # artifact gets a detached <file>.sig, verified offline with:
+        #   cosign verify-blob --key cosign.pub --insecure-ignore-tlog \
+        #     --signature f.sig f
+        # (--insecure-ignore-tlog just asserts "no transparency-log entry
+        # is expected", which is correct for this no-tlog setup.)
         run: |
           for f in csd_linux_amd64 csd_linux_arm64 csd.spdx.json csd.cyclonedx.json SHA256SUMS; do
             cosign sign-blob --yes \
-              --bundle "${f}.cosign.bundle" \
+              --key env://COSIGN_PRIVATE_KEY \
+              --tlog-upload=false \
+              --output-signature "${f}.sig" \
               "${f}"
           done
           ls -la
@@ -163,58 +166,32 @@ jobs:
             dist/csd.spdx.json
             dist/csd.cyclonedx.json
             dist/SHA256SUMS
-            dist/csd_linux_amd64.cosign.bundle
-            dist/csd_linux_arm64.cosign.bundle
-            dist/csd.spdx.json.cosign.bundle
-            dist/csd.cyclonedx.json.cosign.bundle
-            dist/SHA256SUMS.cosign.bundle
+            dist/csd_linux_amd64.sig
+            dist/csd_linux_arm64.sig
+            dist/csd.spdx.json.sig
+            dist/csd.cyclonedx.json.sig
+            dist/SHA256SUMS.sig
 
-  # === Step 38 Phase B — GHCR image publish (COI-GATED) ==================
+  # === Step 38 Phase B — GHCR image publish (PRIVATE) ====================
   #
   # Publishes ghcr.io/tmatens/container-sec-derive to GitHub Container
   # Registry: per-arch build pushed BY DIGEST on native runners, a tagged
-  # manifest list, then cosign keyless SIGN + attest (SBOM + OpenVEX).
-  # The binary/GitHub-release jobs above are ungated — they ship to a
-  # GitHub Release on this private repo (collaborator-only). The image is
-  # the additional, separately-controlled public surface.
+  # manifest list, then cosign KEY-BASED (no-tlog) sign + attest (SBOM +
+  # OpenVEX). Auth is the ephemeral GITHUB_TOKEN — no Docker Hub secret.
   #
-  # !!! HELD FOR EMPLOYER COI CLEARANCE — do NOT merge until approved !!!
-  # GHCR gives two independent controls:
-  #   1. The `image-publish` deployment environment (add a REQUIRED
-  #      REVIEWER in repo Settings → Environments): every run of these
-  #      jobs pauses for a human, so cutting a v* tag does not push/sign
-  #      the image (and thus writes no public Rekor entry) until approved.
-  #   2. GHCR packages are PRIVATE by default. Even after a push, the
-  #      image is pullable only by repo collaborators until someone flips
-  #      the package visibility to public — the public-exposure step.
-  # Keep BOTH until COI clears. (If the public Rekor metadata that cosign
-  # keyless writes is itself a concern during the hold, switch the sign
-  # step to key-based with --tlog-upload=false, or hold the tag.)
+  # COI posture: per the maintainer's rule, PRIVATE publishing is fine —
+  # only PUBLIC exposure is gated. GHCR packages are PRIVATE by default, so
+  # these jobs publish a private, collaborator-only image and write NO
+  # public Rekor entry (key-based, --tlog-upload=false). THE ONLY PUBLIC /
+  # COI-GATED ACT is flipping the GHCR package visibility to public — a
+  # manual step done only after the COI decision. Keep the package private
+  # until then. (No in-workflow approval gate is needed because the push
+  # itself exposes nothing publicly.)
   #
-  # Auth is the ephemeral GITHUB_TOKEN (no Docker Hub secret). Action SHAs
-  # reuse this repo's existing pins; the two GHCR-only actions (login /
-  # metadata) reuse compose-lint's vetted SHAs for family lockstep.
-  image-gate:
-    name: image publish approval (COI gate)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    environment:
-      name: image-publish
-      url: https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive
-    steps:
-      - run: |
-          echo "Approved — publishing ghcr.io/tmatens/container-sec-derive for ${GITHUB_REF_NAME}."
-          echo "The image-publish environment's required-reviewer rule gates every"
-          echo "image push+sign (the COI control). GHCR keeps the package private"
-          echo "until a human flips its visibility — the separate public-exposure step."
-
-  # Build one image per arch on a native runner and push BY DIGEST (no
-  # tags). Native runners per arch avoid the QEMU-under-emulation apt-get
-  # crash class (same reason as image-build.yml). TARGETARCH is passed
-  # explicitly — the Dockerfile has no default and fails closed if empty.
+  # Action SHAs reuse this repo's existing pins; the two GHCR-only actions
+  # (login / metadata) reuse compose-lint's vetted SHAs for family lockstep.
   image-build:
     name: image build+push by digest (${{ matrix.platform }})
-    needs: image-gate
     strategy:
       fail-fast: false
       matrix:
@@ -279,7 +256,7 @@ jobs:
           retention-days: 1
 
   # Stitch the per-arch digests into a tagged manifest list, then cosign
-  # keyless SIGN the manifest and attach SBOM + OpenVEX attestations.
+  # KEY-BASED (no-tlog) sign the manifest and attach SBOM + OpenVEX.
   image-publish:
     name: image manifest + sign + attest
     needs: image-build
@@ -288,14 +265,11 @@ jobs:
     permissions:
       contents: read
       packages: write   # push manifest list to GHCR
-      id-token: write   # cosign keyless OIDC
-    environment:
-      name: image-publish
-      url: https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive
     steps:
-      # Checkout provides .vex/container-sec-derive.openvex.json for the
-      # OpenVEX attestation. Digests land in /tmp/digests (outside the
-      # workspace) so checkout and download-artifact do not collide.
+      # Checkout provides cosign.pub (for verify) and
+      # .vex/container-sec-derive.openvex.json (for the OpenVEX attest).
+      # Digests land in /tmp/digests (outside the workspace) so checkout
+      # and download-artifact do not collide.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
@@ -337,24 +311,16 @@ jobs:
             "ghcr.io/tmatens/container-sec-derive:${VERSION}" \
             --format '{{json .Manifest}}' | jq -r '.digest')"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-      - name: Sign manifest (cosign keyless)
+      - name: Sign manifest (key-based, no transparency log)
         env:
           DIGEST: ${{ steps.inspect.outputs.digest }}
-        run: cosign sign --yes "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
-      - name: Verify — cosign signature
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: cosign sign --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
+      - name: Verify — cosign signature (offline, against cosign.pub)
         env:
           DIGEST: ${{ steps.inspect.outputs.digest }}
-        run: |
-          for attempt in 1 2 3; do
-            if cosign verify \
-              --certificate-identity-regexp='https://github.com/tmatens/container-sec-derive/.github/workflows/release\.yml@.*' \
-              --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
-              "ghcr.io/tmatens/container-sec-derive@${DIGEST}"; then
-              exit 0
-            fi
-            echo "attempt ${attempt} failed; waiting 15s for signature propagation..."; sleep 15
-          done
-          echo "::error::cosign verify failed after 3 attempts"; exit 1
+        run: cosign verify --key cosign.pub --insecure-ignore-tlog=true "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
       - name: Verify — published version matches tag
         env:
           DIGEST: ${{ steps.inspect.outputs.digest }}
@@ -369,11 +335,15 @@ jobs:
           image: ghcr.io/tmatens/container-sec-derive@${{ steps.inspect.outputs.digest }}
           format: spdx-json
           output-file: image.spdx.json
-      - name: Attest SBOM to image (cosign)
+      - name: Attest SBOM to image (key-based, no tlog)
         env:
           DIGEST: ${{ steps.inspect.outputs.digest }}
-        run: cosign attest --yes --type spdxjson --predicate image.spdx.json "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
-      - name: Attest OpenVEX to image (cosign)
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: cosign attest --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --type spdxjson --predicate image.spdx.json "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
+      - name: Attest OpenVEX to image (key-based, no tlog)
         env:
           DIGEST: ${{ steps.inspect.outputs.digest }}
-        run: cosign attest --yes --type openvex --predicate .vex/container-sec-derive.openvex.json "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: cosign attest --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --type openvex --predicate .vex/container-sec-derive.openvex.json "ghcr.io/tmatens/container-sec-derive@${DIGEST}"

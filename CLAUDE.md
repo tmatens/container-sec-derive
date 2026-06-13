@@ -29,6 +29,16 @@ Subprocess, not library (Decisions item 5). IG schema is pinned per release via 
 
 `go vet ./...`, `go test ./...`, `go build -o csd .`. All must pass.
 
+Live-BPF CI (`.github/workflows/integration.yml`) gates PRs beyond the unit
+suite: a per-PR smoke job runs `scripts/smoke_wsl2.sh` against real containers on
+a hosted runner (synthetic fixture is the deterministic gate; the reference
+images are informational — they can legitimately observe zero post-attach cap
+events per `docs/known-deltas.md`). The kretprobe miss-rate measurement
+(`scripts/kretprobe_missrate.sh`, `make missrate`) is `workflow_dispatch`-only
+(`run_missrate=true`) to conserve minutes. Both jobs post an allowlisted,
+secrets-free result comment on the PR. Locally: `make smoke-wsl2`, `make missrate`
+(need docker + pinned `ig` + root — see `docs/dev-setup.md`).
+
 ## Commit & PR workflow
 
 - One logical change per commit. Imperative subject ≤72 chars. No Conventional Commits prefixes.
@@ -54,5 +64,8 @@ Signed release artifacts only — static binaries (`csd_linux_amd64`, `csd_linux
 - No second observer before v0.1 ships (Decisions item 8).
 - No parser workarounds for IG schema drift; bump the pin and regenerate fixtures instead.
 - No mutable refs in CI.
+- No `cmd | tee log` as the gating command in a CI step — the pipeline's exit
+  becomes `tee`'s `0`, so a real failure passes green (pipefail is not reliably
+  in effect for `run:` steps). Capture the exit code: `cmd > log 2>&1 && rc=0 || rc=$?; cat log; exit $rc`.
 - No private/internal tooling references in a public repo.
 - No restating of PLAN.md content here — link to the section and keep CLAUDE.md tight.

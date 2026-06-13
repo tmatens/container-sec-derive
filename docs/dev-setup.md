@@ -71,6 +71,18 @@ make ground-truth            # all three
 
 Each target writes `testdata/<image>/ground_truth.json`. Each run takes several minutes — one container restart per Docker default capability.
 
+## Live-BPF validation harnesses
+
+Two `make` targets exercise the full observe pipeline against real containers (need Docker + the pinned `ig` + root for BPF). CI runs both via `.github/workflows/integration.yml` — the smoke per-PR, the miss-rate on demand.
+
+```sh
+make smoke-wsl2   # observe each reference image + the synthetic exerciser
+make missrate     # measure the kretprobe capture deficit (miss-rate proxy)
+```
+
+- **`make smoke-wsl2`** (`scripts/smoke_wsl2.sh`) — runs `csd observe` against postgres/caddy/tailscale and the synthetic fixture. The **synthetic fixture is the only hard gate**: it fires a known cap set continuously post-attach, so it reliably proves BPF attached *and* that the pipeline records the expected caps. The three reference images are informational — they can legitimately observe zero post-attach cap events (privileged ops happen at/around init; see `docs/known-deltas.md`), which is indistinguishable from non-attach by event count, so none of them gates. Despite the name it runs on any Linux host, not just WSL2. `ONLY=postgres,synthetic` runs a subset.
+- **`make missrate`** (`scripts/kretprobe_missrate.sh`) — runs the synthetic exerciser in counting mode (`ITERS>0`), which issues an exact, self-reported number of cap-invoking syscalls, and compares that ground truth to csd's recorded per-cap `event_count`. The capture deficit `(issued - recorded)/issued` is an upper bound on the kretprobe miss rate (it also folds in ringbuf drops, asserted ~0, and filter effects, which don't touch the exerciser's comm). Tunables: `ITERS`, `CYCLE_US` (throttle to keep the event rate under the ringbuf drain), `WARMUP_MS`, `DURATION`, `THRESHOLD`.
+
 ## When `ig` is not available
 
 You can do most local development without `ig`:

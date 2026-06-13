@@ -4,7 +4,7 @@ What you need to develop and exercise `csd` end-to-end on a Linux host.
 
 ## Prerequisites
 
-- **Go** 1.22 or newer.
+- **Go** 1.26 or newer.
 - **Docker** (or another OCI runtime reachable via the docker socket). Used by the bisection driver and as the runtime `csd observe` attaches to.
 - **Linux kernel** 5.10+ with BPF + perf enabled. eBPF gadgets need `CAP_BPF` + `CAP_PERFMON` (root works; unprivileged setups must grant both).
 - **Inspektor Gadget (`ig`)** at the version pinned in `main.go`. See below.

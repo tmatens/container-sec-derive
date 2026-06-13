@@ -37,7 +37,7 @@ cd container-sec-derive
 go build -o csd .
 ```
 
-Requires Go 1.22+. Live observation needs Inspektor Gadget (`ig`) at the pinned release — see [docs/dev-setup.md](docs/dev-setup.md) for the install steps. The `--fixture` path (replaying pre-captured NDJSON) does not need `ig`, so most local development works without it.
+Requires Go 1.26+. Live observation needs Inspektor Gadget (`ig`) at the pinned release — see [docs/dev-setup.md](docs/dev-setup.md) for the install steps. The `--fixture` path (replaying pre-captured NDJSON) does not need `ig`, so most local development works without it.
 
 ## Quickstart
 

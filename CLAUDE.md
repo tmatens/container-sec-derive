@@ -1,6 +1,6 @@
 # container-sec-derive
 
-Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.22+, MIT, one-shot CLI. Binary: `csd`. Pre-release — the full v0.1 build order (alpha → beta → rc → release) is implemented and on `main`; v0.1.0 is at the release-cut stage (see Current status). v0.2+ observers are planned but unbuilt.
+Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.26+, MIT, one-shot CLI. Binary: `csd`. Pre-release — the full v0.1 build order (alpha → beta → rc → release) is implemented and on `main`; v0.1.0 is at the release-cut stage (see Current status). v0.2+ observers are planned but unbuilt.
 
 Authoritative design docs — read these before large changes:
 - `PLAN.md` — v1 architecture, decisions, success criteria, threat model

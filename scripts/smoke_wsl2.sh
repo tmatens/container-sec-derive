@@ -10,13 +10,20 @@
 # attaches end-to-end on their kernel.
 #
 # Pass criteria per image:
-#   postgres / caddy / tailscale: csd exits 0 AND the sidecar reports
-#     events_recorded + init_window_suppressed > 0 (proves BPF attached;
-#     observed cap set may be empty per docs/known-deltas.md).
-#   synthetic: csd exits 0 AND derived cap set is a superset of
-#     testdata/synthetic/expected.json's expected_caps_minimum (this is
-#     the pipeline regression fixture; an empty observation here is a
-#     real csd bug, not a workload-shape artifact).
+#   postgres (hard gate): csd exits 0 AND events_recorded +
+#     init_window_suppressed > 0 — the attach proof (postgres reliably
+#     fires runc-init capable() checks; observed cap set may still be
+#     empty per docs/known-deltas.md).
+#   caddy / tailscale (informational): reported but never fail the build.
+#     Their privileged ops happen pre-attach (caddy bind(:80) at
+#     entrypoint) and their workloads fire no post-attach capable()
+#     checks, so zero events is an expected, documented outcome —
+#     indistinguishable from non-attach by event count, which is exactly
+#     why postgres, not these, is the attach gate.
+#   synthetic (hard gate): csd exits 0 AND derived cap set is a superset
+#     of testdata/synthetic/expected.json's expected_caps_minimum (the
+#     pipeline regression fixture; an empty observation here is a real
+#     csd bug, not a workload-shape artifact).
 #
 # Per-image failures are printed and the script exits non-zero with a
 # summary line; one failure does not abort the rest of the matrix.
@@ -65,7 +72,21 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${WORKDIR}"' EXIT
 
 # run_one <image_label> <docker_image_ref> <run_args> <workload_script> <pass_predicate>
-#   pass_predicate is one of: "any-events" | "synthetic-superset"
+#   pass_predicate is one of:
+#     "any-events"         hard gate: BPF must have attached (events recorded).
+#     "any-events-info"    informational: report event counts but never fail the
+#                          build. Used for caddy/tailscale, whose privileged ops
+#                          happen pre-attach (e.g. caddy bind(:80) at entrypoint)
+#                          and whose workloads fire no post-attach capable()
+#                          checks — a legitimate zero-events result per
+#                          docs/known-deltas.md, indistinguishable from non-attach
+#                          by event count alone. postgres (reliable runc-init
+#                          events) is the attach hard-gate; synthetic is the
+#                          pipeline-regression hard-gate.
+#     "synthetic-superset" hard gate: derived caps ⊇ expected_caps_minimum.
+#
+# Derived caps live at top-level .capabilities[].name (NOT .target.observed_caps,
+# which is not a schema field); reads are null-guarded with (.capabilities // []).
 run_one() {
     local label="$1" image_ref="$2" run_args="$3" workload="$4" predicate="$5"
     local container="csd-smoke-${label}"
@@ -112,29 +133,40 @@ run_one() {
         return 1
     fi
 
+    local recorded suppressed caps
+    recorded=$(jq -r '.trace_health.events_recorded // 0' "${sidecar}")
+    suppressed=$(jq -r '.target.init_window_suppressed // 0' "${sidecar}")
+    caps=$(jq -r '[(.capabilities // [])[].name] | join(",")' "${sidecar}")
+
     case "${predicate}" in
         any-events)
-            local recorded suppressed
-            recorded=$(jq -r '.trace_health.events_recorded // 0' "${sidecar}")
-            suppressed=$(jq -r '.target.init_window_suppressed // 0' "${sidecar}")
             if (( recorded + suppressed == 0 )); then
                 echo "FAIL ${label}: BPF did not attach (recorded=${recorded}, init_window_suppressed=${suppressed}); check kernel BTF / WSL2 version"
                 return 1
             fi
-            local caps
-            caps=$(jq -r '.target.observed_caps | join(",")' "${sidecar}")
             echo "PASS ${label}: events=${recorded}, init_suppressed=${suppressed}, observed_caps=[${caps}]"
+            ;;
+        any-events-info)
+            # Informational only — never fails the build. Zero events here is a
+            # documented, expected outcome (see the predicate comment above and
+            # docs/known-deltas.md), not a csd failure. The attach hard-gate is
+            # postgres; the pipeline hard-gate is synthetic.
+            if (( recorded + suppressed == 0 )); then
+                echo "INFO ${label}: zero events post-attach — expected per docs/known-deltas.md (pre-attach/silent workload), not a failure"
+            else
+                echo "PASS ${label}: events=${recorded}, init_suppressed=${suppressed}, observed_caps=[${caps}] (informational)"
+            fi
             ;;
         synthetic-superset)
             local missing
             missing=$(jq -r --slurpfile e testdata/synthetic/expected.json \
-                '($e[0].expected_caps_minimum - .target.observed_caps) | join(",")' \
+                '($e[0].expected_caps_minimum - [(.capabilities // [])[].name]) | join(",")' \
                 "${sidecar}")
             if [[ -n "${missing}" ]]; then
-                echo "FAIL ${label}: missing required caps [${missing}]; observed_caps=$(jq -r '.target.observed_caps | join(",")' "${sidecar}")"
+                echo "FAIL ${label}: missing required caps [${missing}]; observed_caps=[${caps}]"
                 return 1
             fi
-            echo "PASS ${label}: superset check satisfied; observed_caps=$(jq -r '.target.observed_caps | join(",")' "${sidecar}")"
+            echo "PASS ${label}: superset check satisfied; observed_caps=[${caps}]"
             ;;
         *)
             echo "FAIL ${label}: unknown predicate ${predicate}"
@@ -168,7 +200,7 @@ fi
 if want caddy; then
     if run_one caddy "caddy:2" \
             "-e CADDY_ADMIN=0.0.0.0:2019 -p 127.0.0.1:18080:80 -p 127.0.0.1:12019:2019" \
-            "$(pwd)/testdata/caddy/workload.sh" any-events; then
+            "$(pwd)/testdata/caddy/workload.sh" any-events-info; then
         PASS=$((PASS+1))
     else
         FAIL=$((FAIL+1))
@@ -179,7 +211,7 @@ fi
 
 if want tailscale; then
     if run_one tailscale "tailscale/tailscale:stable" "-e TS_USERSPACE=true" \
-            "$(pwd)/testdata/tailscale/workload.sh" any-events; then
+            "$(pwd)/testdata/tailscale/workload.sh" any-events-info; then
         PASS=$((PASS+1))
     else
         FAIL=$((FAIL+1))

@@ -1,0 +1,9 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/tmatens/container-sec-derive/.vex/container-sec-derive.openvex.json",
+  "author": "tmatens",
+  "role": "Project maintainer",
+  "timestamp": "2026-06-13T00:00:00Z",
+  "version": 1,
+  "statements": []
+}

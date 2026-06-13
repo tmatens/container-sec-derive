@@ -33,6 +33,15 @@ name: integration
 on:
   pull_request:
     branches: [main]
+    # Skip the live BPF smoke (~5-8 min) on changes that can't affect the
+    # observer: docs, the Renovate config, license. Anything else (Go code,
+    # workflows, scripts, testdata) still runs it. workflow_dispatch is
+    # unaffected and always runs.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'renovate.json'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
       duration:

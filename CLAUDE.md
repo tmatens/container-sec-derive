@@ -1,15 +1,22 @@
 # container-sec-derive
 
-Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.22+, MIT, one-shot CLI. Binary: `csd`. Pre-alpha — v0.1.0-alpha is the first implemented milestone; v1 is planned but unbuilt.
+Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.22+, MIT, one-shot CLI. Binary: `csd`. Pre-release — the full v0.1 build order (alpha → beta → rc → release) is implemented and on `main`; v0.1.0 is at the release-cut stage (see Current status). v0.2+ observers are planned but unbuilt.
 
 Authoritative design docs — read these before large changes:
 - `PLAN.md` — v1 architecture, decisions, success criteria, threat model
 - `ROADMAP.md` — post-v1 observers (read_only, privileged decomp, devices, egress, etc.)
 - `README.md` — user-facing overview and relationship to compose-lint
 
-## Current milestone (v0.1.0-alpha)
+## Current status (v0.1.0 release cut)
 
-PLAN.md §v0.1 build order: subprocess `ig run trace_capabilities`, parse NDJSON, filter to one container, print distinct cap set. **No formatters, no sidecar, no verify yet.** In-tree: `main.go`, `main_test.go`, `testdata/sample.ndjson`. `--fixture <file>` reads pre-captured NDJSON so the aggregator is exercisable without BPF/ig.
+The full v0.1 build order is implemented and merged (PLAN.md §v0.1 build order, milestones 1–4): subprocess `ig run trace_capabilities` → attribution → aggregator → all seven formatters, JSON evidence sidecar, deterministic confidence rubric, `csd verify` (sidecar-vs-sidecar + run mode), entrypoint cross-check, multi-replica aggregation, IG version-pin CI gate, the postgres/caddy/tailscale/synthetic reference workloads with bisected ground truth, WSL2 smoke matrix, live-BPF integration CI, the cosign/SBOM release pipeline, and the container image build (Step 38 Phase A — build only, no push). `--fixture <file>` still replays pre-captured NDJSON so the pipeline runs without BPF/ig.
+
+**Remaining for v0.1.0 (all gated, not open engineering):**
+- **Step 38 Phase B** — registry publish + cosign-sign the image manifest. Blocked on employer COI clearance.
+- **Cut the `v0.1.0` tag** — first real run of `release.yml`.
+- **kretprobe miss-rate < 0.1% measured** (v1 success criterion, "measured not assumed"). Harness shipped (`scripts/kretprobe_missrate.sh`, `make missrate`, `integration.yml` `run_missrate=true`); the measurement run needs a hosted/privileged BPF runner.
+
+Off the v0.1 critical path: issue #32 (`bisect_caps.sh` 1-minimal→stabilization pass).
 
 ## Architecture (forward-compat — PLAN.md §Architecture)
 

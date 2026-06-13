@@ -63,7 +63,7 @@ secrets-free result comment on the PR. Locally: `make smoke-wsl2`, `make missrat
 
 ## Publishing
 
-Signed release artifacts only — static binaries (`csd_linux_amd64`, `csd_linux_arm64`) and container image (`ghcr.io/tmatens/container-sec-derive`). Cosign keyless via GitHub OIDC. SHA256SUMS (itself cosign-signed) + SBOM (SPDX + CycloneDX) per release. No manual uploads.
+Signed release artifacts only — static binaries (`csd_linux_amd64`, `csd_linux_arm64`) and the container image **`ghcr.io/tmatens/container-sec-derive`** (GHCR; auth via the ephemeral `GITHUB_TOKEN`, no Docker Hub secret). Cosign keyless via GitHub OIDC: the SHA256SUMS (itself cosign-signed) + SBOM (SPDX + CycloneDX) cover the binaries; the image manifest is cosign-signed and carries SBOM + OpenVEX attestations, with a scheduled Docker Scout scan (`scout-scan.yml`) consuming the same VEX. No manual uploads. **Image publish is COI-gated** (`release.yml` Phase B): two controls — the `image-publish` deployment environment (required reviewer) pauses every push+sign, and GHCR packages are private by default until a human flips visibility. (csd ships to GHCR, not Docker Hub like sibling compose-lint, for the private-by-default COI hold + no-extra-secret path; dual-publishing compose-lint to GHCR is a possible later follow-up.)
 
 ## Things to avoid
 

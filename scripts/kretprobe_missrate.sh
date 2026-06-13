@@ -44,7 +44,11 @@ set -uo pipefail
 CSD="${CSD:-./csd}"
 ITERS="${ITERS:-20000}"
 WARMUP_MS="${WARMUP_MS:-12000}"
-DURATION="${DURATION:-180s}"
+# CYCLE_US throttles the exerciser so the cap-event rate stays under the BPF
+# ringbuf drain rate (a tight loop overflows it -> csd exit 21, drops >=10%,
+# and the deficit would measure ringbuf loss, not kretprobe misses).
+CYCLE_US="${CYCLE_US:-2000}"
+DURATION="${DURATION:-240s}"
 THRESHOLD="${THRESHOLD:-0.1}"
 IMG="${IMG:-csd-synthetic-exerciser:0.1}"
 CONTAINER="csd-missrate"
@@ -78,18 +82,24 @@ SIDE="${WORKDIR}/sidecar.json"
 docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 if ! docker run -d --name "${CONTAINER}" \
         --sysctl net.ipv4.ip_unprivileged_port_start=1024 \
-        -e ITERS="${ITERS}" -e WARMUP_MS="${WARMUP_MS}" \
+        -e ITERS="${ITERS}" -e WARMUP_MS="${WARMUP_MS}" -e CYCLE_US="${CYCLE_US}" \
         "${IMG}" >/dev/null; then
     echo "FAIL missrate: docker run failed"; exit 1
 fi
 
 # csd attaches during the warmup, then observes the counted run.
-"${CSD}" --container "${CONTAINER}" --duration "${DURATION}" \
+# --init-window-ms 0 disables the init-noise time filter: the counted ops
+# start ~WARMUP_MS in (long past any container-init noise), so the filter
+# can only do harm here by suppressing genuine early counted events. The
+# runc-comm filter still drops container-init cap checks regardless.
+"${CSD}" --container "${CONTAINER}" --duration "${DURATION}" --init-window-ms 0 \
     --out "${SIDE}" >"${WORKDIR}/csd.log" 2>&1
 rc=$?
-# Exit 20 (target exited early) is expected here: the exerciser finishes
-# its ITERS and exits inside the observation window. Anything else is fatal.
-if [[ ${rc} -ne 0 && ${rc} -ne 20 ]]; then
+# Exit 20 (target exited early) is expected: the exerciser finishes its
+# ITERS and exits inside the window. Exit 21 (drop rate >=10%) still writes
+# the sidecar; let the drop_rate check below report it with actionable
+# guidance rather than a bare "csd exited 21". Anything else is fatal.
+if [[ ${rc} -ne 0 && ${rc} -ne 20 && ${rc} -ne 21 ]]; then
     echo "FAIL missrate: csd exited ${rc}"
     sed -n '1,30p' "${WORKDIR}/csd.log" >&2 || true
     exit 1

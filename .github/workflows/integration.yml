@@ -146,8 +146,12 @@ jobs:
         env:
           DURATION: ${{ github.event.inputs.duration || '30s' }}
         run: |
+          # Capture the real exit code: `cmd | tee` masks failure (the
+          # pipeline exit becomes tee's 0), which would let a FAIL pass green.
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
-            scripts/smoke_wsl2.sh 2>&1 | tee smoke.txt
+            scripts/smoke_wsl2.sh > smoke.txt 2>&1 && rc=0 || rc=$?
+          cat smoke.txt
+          exit $rc
 
       # Route the verdict to channels readable WITHOUT the Actions log
       # API (which is unreachable from some clients): a PR comment +
@@ -252,8 +256,11 @@ jobs:
         env:
           ITERS: ${{ github.event.inputs.iters || '20000' }}
         run: |
+          # Capture the real exit code (see the smoke job) so a FAIL gates.
           sudo env "CSD=$PWD/csd" "ITERS=${ITERS}" \
-            scripts/kretprobe_missrate.sh 2>&1 | tee missrate.txt
+            scripts/kretprobe_missrate.sh > missrate.txt 2>&1 && rc=0 || rc=$?
+          cat missrate.txt
+          exit $rc
 
       # Same allowlisted self-report as the smoke job: MISSRATE/PASS/FAIL
       # status lines only — no env, secrets, or raw logs.

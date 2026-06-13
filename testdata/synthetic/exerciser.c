@@ -122,8 +122,16 @@ int main(void) {
                                    .tv_nsec = (long)(warm_ms % 1000UL) * 1000000L };
             nanosleep(&ts, NULL);
         }
+        /* CYCLE_US throttles the loop so the cap-event rate stays under the
+         * BPF ringbuf drain rate. Without it a tight loop overflows the
+         * ringbuf (csd exits 21, drop rate >=10%) and the deficit would
+         * reflect ringbuf drops, not kretprobe misses. */
+        const char *cyc_env = getenv("CYCLE_US");
+        unsigned long cycle_us = cyc_env ? strtoul(cyc_env, NULL, 10) : 0UL;
+        struct timespec cyc_ts = { .tv_sec = (time_t)(cycle_us / 1000000UL),
+                                   .tv_nsec = (long)(cycle_us % 1000000UL) * 1000L };
         unsigned long long c_chown = 0, c_bind = 0, c_setgid = 0, c_setuid = 0;
-        fprintf(stdout, "counting iters=%llu\n", iters);
+        fprintf(stdout, "counting iters=%llu cycle_us=%lu\n", iters, cycle_us);
         for (unsigned long long i = 0; i < iters; i++) {
             c_chown += (unsigned)exercise_chown();
             exercise_chmod();
@@ -131,6 +139,7 @@ int main(void) {
             int s = exercise_setuid();
             c_setgid += (unsigned)s;
             c_setuid += (unsigned)s;
+            if (cycle_us > 0UL) nanosleep(&cyc_ts, NULL);
         }
         fprintf(stdout,
                 "TALLY chown=%llu bind=%llu setgid=%llu setuid=%llu iters=%llu\n",

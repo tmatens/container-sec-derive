@@ -2,13 +2,13 @@
 # scratch + statically-linked binary; comm shows up as "exerciser"
 # (no shell, no entrypoint script) which keeps Step 21's runc-comm
 # filter from suppressing it.
-FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS build
+FROM alpine:3.24@sha256:a2d49ea686c2adfe3c992e47dc3b5e7fa6e6b5055609400dc2acaeb241c829f4 AS build
 RUN apk add --no-cache gcc musl-dev
 WORKDIR /src
 COPY exerciser.c .
 RUN gcc -static -O2 -Wall -o /exerciser exerciser.c
 
-FROM alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc AS prep
+FROM alpine:3.24@sha256:a2d49ea686c2adfe3c992e47dc3b5e7fa6e6b5055609400dc2acaeb241c829f4 AS prep
 RUN install -m 0644 /dev/null /csd-exerciser-target
 
 FROM scratch

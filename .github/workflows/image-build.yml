@@ -1,6 +1,7 @@
 # Container image build verification (Phase A — build only, no push).
 #
-# Triggered on every PR and on push to main. Builds the multi-arch
+# Triggered on PRs and pushes to main that can affect image content
+# (docs/config-only changes are filtered — see the on: block). Builds the multi-arch
 # image on native runners (linux/amd64 on ubuntu-24.04, linux/arm64
 # on ubuntu-24.04-arm — emulated arm64 via QEMU crashes Debian's
 # apt-get under the legacy IG fetch path; native runners avoid the
@@ -18,10 +19,25 @@
 name: image-build
 
 on:
+  # Skip the build on changes that cannot affect image content: docs, the
+  # Renovate config, license. The build context already excludes these
+  # (see .dockerignore), so a per-arch rebuild + smoke would be pure waste.
+  # Mirrors integration.yml's filter. Code / Dockerfile / workflow / ig-pin
+  # changes still build.
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'renovate.json'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'renovate.json'
+      - 'LICENSE'
 
 permissions:
   contents: read

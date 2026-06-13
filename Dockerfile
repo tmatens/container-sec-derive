@@ -27,7 +27,7 @@
 # build, the defaults below match the host. Cross-arch CI builds use
 # native runners per-arch (per compose-lint's pattern) — emulation in
 # the builder stage is never the hot path.
-FROM golang:1.22-bookworm@sha256:3d699e4d15d0f8f13c9195c0632a16702b8cbdece2955af1c23b37ae5d55a253 AS builder
+FROM golang:1.26-bookworm@sha256:5f68ec6805843bd3981a951ffada82a26a0bd2631045c8f7dba483fa868f5ec5 AS builder
 
 # IG_VERSION must match PinnedIGVersion in main.go; the `make image`
 # target extracts it via awk and passes it through. The committed

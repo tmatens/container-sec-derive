@@ -425,7 +425,7 @@ Locked calls. Reversible if evidence emerges, but the defaults stand.
 
 **Release artifacts:**
 - Static Linux binary (`csd_linux_amd64`, `csd_linux_arm64`) for direct install.
-- Container image (`ghcr.io/tmatens/container-sec-derive:<tag>`) for "I already run compose-lint in Docker, give me the same shape."
+- Container image (`composelint/container-sec-derive:<tag>` on Docker Hub — the compose-lint family namespace) for "I already run compose-lint in Docker, give me the same shape."
 - Both artifacts per release. Users pick based on their workflow.
 
 **Supply-chain controls for v1:**

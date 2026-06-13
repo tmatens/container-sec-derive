@@ -222,7 +222,25 @@ cosign verify-blob \
   csd.spdx.json
 ```
 
-Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`. The container image (`ghcr.io/tmatens/container-sec-derive`) ships in follow-up release-work; this section will grow `cosign verify` examples for it when it lands. Vendored `ig` provenance is not yet recorded in the SBOMs — that lands alongside the container image step.
+Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`.
+
+The container image ships on Docker Hub as **`composelint/container-sec-derive`** (the compose-lint family namespace). The manifest is cosign-signed keyless and carries SBOM + OpenVEX attestations. Verify the signature and inspect the attestations:
+
+```sh
+# Signature (keyless — same OIDC identity as the binaries)
+cosign verify \
+  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  composelint/container-sec-derive:0.1.0
+
+# Attestations (SBOM + OpenVEX)
+cosign verify-attestation --type spdxjson \
+  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  composelint/container-sec-derive:0.1.0
+```
+
+> **Status:** the image publish is **gated on employer COI clearance** (`release.yml` Phase B, behind the `dockerhub` environment) and has not shipped yet — these commands work once the first image publishes. Vendored `ig` provenance is recorded in the image SBOM attestation.
 
 ## License
 

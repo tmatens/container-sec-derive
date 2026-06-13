@@ -63,7 +63,7 @@ secrets-free result comment on the PR. Locally: `make smoke-wsl2`, `make missrat
 
 ## Publishing
 
-Signed release artifacts only — static binaries (`csd_linux_amd64`, `csd_linux_arm64`) and container image (`ghcr.io/tmatens/container-sec-derive`). Cosign keyless via GitHub OIDC. SHA256SUMS (itself cosign-signed) + SBOM (SPDX + CycloneDX) per release. No manual uploads.
+Signed release artifacts only — static binaries (`csd_linux_amd64`, `csd_linux_arm64`) and the container image **`composelint/container-sec-derive`** on Docker Hub (the compose-lint family namespace; matches how the sibling tool ships — see `release.yml` Phase B). Cosign keyless via GitHub OIDC: the SHA256SUMS (itself cosign-signed) + SBOM (SPDX + CycloneDX) cover the binaries; the image manifest is cosign-signed and carries SBOM + OpenVEX attestations, with a scheduled Docker Scout scan (`scout-scan.yml`) consuming the same VEX. No manual uploads. **Image publish is COI-gated** via the `dockerhub` deployment environment (required reviewer) — see Phase B in `release.yml`.
 
 ## Things to avoid
 

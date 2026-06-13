@@ -1,0 +1,168 @@
+# Live-BPF integration tests — observe real running containers.
+#
+# ci.yml covers vet/test/build and the fixture-replay path (no kernel).
+# image-build.yml smokes the container image in fixture mode. Neither
+# exercises the load-bearing claim of the tool: that `ig`'s
+# trace_capabilities kprobe+kretprobe actually attaches and csd records
+# the caps a live container exercises. This workflow closes that gap by
+# running scripts/smoke_wsl2.sh — the existing, host-agnostic harness
+# (PLAN.md §Platform support / v1 success criterion 504) — against the
+# four reference workloads on a GitHub-hosted ubuntu-24.04 runner.
+#
+# Runner fit: GitHub-hosted ubuntu-24.04 is a full VM (not a container),
+# so it carries a modern kernel, BTF at /sys/kernel/btf/vmlinux, and
+# root via sudo — what CAP_BPF + CAP_PERFMON observation needs. BPF
+# attach on hosted runners is plausible (IG's own CI loads BPF there)
+# but NOT assumed: the first run is a `workflow_dispatch` confirmation.
+# If cap_capable cannot attach on the runner kernel, smoke_wsl2.sh
+# reports it as a per-image FAIL ("BPF did not attach … check kernel
+# BTF") rather than a green pass — that failure is itself the signal to
+# move this job to a self-hosted runner (see PLAN.md / ROADMAP).
+#
+# Triggers: pull_request + workflow_dispatch only (NOT push-to-main).
+# Live observation burns ~5-8 hosted minutes/run; dropping the
+# redundant post-merge push run keeps the free-tier 2,000 min/month
+# budget for PRs and on-demand dispatch. The bisection job
+# (make ground-truth-*, ~5-8 min PER image) is workflow_dispatch-only
+# for the same reason — it must never run per-PR.
+#
+# All third-party actions SHA-pinned per CLAUDE.md §Dependency pinning;
+# SHAs are kept in lockstep with ci.yml / image-build.yml / release.yml.
+name: integration
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Per-image observation window (Go duration, e.g. 30s)"
+        required: false
+        default: "30s"
+      bisect_image:
+        description: "Run make ground-truth-<image> and upload the result for diff (none = skip bisection)"
+        required: false
+        default: "none"
+        type: choice
+        options: [none, postgres, caddy, tailscale, all]
+
+permissions:
+  contents: read
+
+jobs:
+  # Live observe → assert. Synthetic is a hard assertion (derived caps
+  # must be a superset of expected_caps_minimum); postgres/caddy/
+  # tailscale are attach-proofs (events recorded > 0, observed set may
+  # be empty per docs/known-deltas.md — that is correct, not a miss).
+  smoke:
+    name: live-bpf smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Single source of truth for the ig version: main.go's
+      # PinnedIGVersion, same extraction as image-build.yml. csd also
+      # enforces this pin at runtime (ExitSchemaMismatch on mismatch),
+      # so installing the wrong version here surfaces as a smoke FAIL.
+      - name: Resolve pinned ig version
+        id: vars
+        run: |
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          if [ -z "${ig_version}" ]; then
+            echo "::error::could not extract PinnedIGVersion from main.go"
+            exit 1
+          fi
+          echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
+
+      # Fetch + verify ig against the committed supply-chain pin, exactly
+      # as the Dockerfile builder stage does: download the per-arch
+      # tarball from the IG release, check its sha256 against the line in
+      # ig-pin/SHA256SUMS (signed at pin-bump time by refresh-ig-pin.sh),
+      # then install to /usr/local/bin (on sudo's secure_path). No
+      # fallback download path — a digest miss fails the job.
+      - name: Install pinned ig (amd64, verified against ig-pin/SHA256SUMS)
+        env:
+          IG_VERSION: ${{ steps.vars.outputs.ig_version }}
+        run: |
+          set -euo pipefail
+          artifact="ig-linux-amd64-${IG_VERSION}.tar.gz"
+          url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"
+          curl -fsSL "${url}" -o "/tmp/${artifact}"
+          line="$(grep -E "  ${artifact}\$" ig-pin/SHA256SUMS || true)"
+          if [ -z "${line}" ]; then
+            echo "::error::no digest for ${artifact} in ig-pin/SHA256SUMS — bump PinnedIGVersion and run scripts/refresh-ig-pin.sh"
+            exit 1
+          fi
+          ( cd /tmp && printf '%s\n' "${line}" | sha256sum -c - )
+          tar -C /tmp -xzf "/tmp/${artifact}" ig
+          sudo install -m 0755 /tmp/ig /usr/local/bin/ig
+          ig version
+
+      - name: Build csd
+        run: go build -o csd .
+
+      # jq + docker are preinstalled on ubuntu-24.04 runners. Run the
+      # matrix under sudo so csd can load BPF (CAP_BPF/CAP_PERFMON) and
+      # reach the docker socket; sudo's secure_path resolves
+      # /usr/local/bin/ig and /usr/bin/jq. cwd is preserved, so the
+      # script's $(pwd)-relative workload paths resolve correctly.
+      - name: Live-BPF smoke matrix
+        env:
+          DURATION: ${{ github.event.inputs.duration || '30s' }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/smoke_wsl2.sh
+
+  # On-demand bisection reproducibility check. Regenerates ground truth
+  # for the chosen image(s) and uploads the JSON as an artifact for a
+  # human to diff against the committed testdata/<image>/ground_truth.json
+  # — it does NOT commit. Bisection does not use BPF (it restarts the
+  # container under shrinking --cap-drop sets and lets the kernel be the
+  # validator), but it does need docker, hence sudo.
+  bisect:
+    name: bisection (${{ github.event.inputs.bisect_image }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.bisect_image != 'none'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run bisection → out/
+        env:
+          TARGET: ${{ github.event.inputs.bisect_image }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          run_one() {
+            name="$1"
+            echo "::group::bisect ${name}"
+            sudo make "ground-truth-${name}"
+            cp "testdata/${name}/ground_truth.json" "out/${name}-ground_truth.json"
+            echo "::endgroup::"
+          }
+          if [ "${TARGET}" = "all" ]; then
+            for n in postgres caddy tailscale; do run_one "$n"; done
+          else
+            run_one "${TARGET}"
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bisection-ground-truth
+          path: out/*.json
+          if-no-files-found: error

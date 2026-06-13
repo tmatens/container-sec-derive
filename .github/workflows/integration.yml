@@ -202,16 +202,15 @@ jobs:
   # synthetic exerciser in counting mode and compares csd's recorded
   # per-cap event counts to the exerciser's exact issued counts.
   #
-  # Dispatch-only in steady state (expensive live BPF, ~3-5 min). The
-  # pull_request clause is TEMPORARY — it validates this harness on its own
-  # PR via the report comment and is removed before merge.
+  # Dispatch-only (expensive live BPF, ~3-5 min): run from the Actions tab
+  # with run_missrate=true. Validated against this harness's own PR (the
+  # synthetic exerciser measured 0.0000% capture deficit over 100k events);
+  # not run per-PR to conserve free-tier minutes.
   missrate:
     name: kretprobe miss-rate
     runs-on: ubuntu-24.04
     timeout-minutes: 25
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_missrate == 'true')
-      || github.event_name == 'pull_request'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_missrate == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

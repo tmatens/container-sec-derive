@@ -429,7 +429,7 @@ Locked calls. Reversible if evidence emerges, but the defaults stand.
 - Both artifacts per release. Users pick based on their workflow.
 
 **Supply-chain controls for v1:**
-- **Signing:** cosign signatures on both binary and image, keyless via Sigstore / GitHub OIDC. Verification command documented in README (`cosign verify ...`). Unsigned artifacts are not released.
+- **Signing:** cosign signatures on both binary and image. While the project is unpublished (employer COI), signing is **key-based with `--tlog-upload=false`** (project key `cosign.pub`; secrets `COSIGN_PRIVATE_KEY`/`COSIGN_PASSWORD`) so nothing hits the public Rekor log — consistent with the COI rule that only *public* exposure is gated. Verification command documented in README (`cosign verify --key cosign.pub --insecure-ignore-tlog …`). When the project goes public, switching to keyless (Sigstore / GitHub OIDC + Rekor) is a deliberate, reviewable change. Unsigned artifacts are not released.
 - **SBOM:** generated with `syft` at release time, published alongside artifacts in SPDX + CycloneDX JSON. Listed in the release checksums manifest.
 - **Checksums:** `SHA256SUMS` per release, itself cosign-signed.
 - **Vendored `ig` provenance:** the vendored IG binary is fetched at release time from IG's official release artifacts, verified against IG's own cosign signature, and pinned to a specific upstream release SHA. Both the IG version and its upstream digest are recorded in our SBOM and in the release's `SHA256SUMS` file. Release automation fails closed if IG's signature does not verify — no fallback download path, no "I'll just grab the latest" escape hatch.

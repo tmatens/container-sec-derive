@@ -2,7 +2,7 @@
 
 Runtime observation tool that derives the minimum container security configuration an image actually needs by watching it run.
 
-> **Status:** v0.1.0 release-work. v0.1 alpha / beta / rc shipped (capability observation, sidecar, seven formatters, `verify`, reference-image bisections, IG version-pin CI gate, WSL2 smoke matrix, cosign keyless release pipeline, SPDX + CycloneDX SBOMs). Container image build + vendored `ig` and full docs walkthrough remain before the v0.1.0 tag. See [PLAN.md](PLAN.md) §v0.1 build order.
+> **Status:** v0.1.0 release-work. v0.1 alpha / beta / rc shipped (capability observation, sidecar, seven formatters, `verify`, reference-image bisections, IG version-pin CI gate, WSL2 smoke matrix, cosign release pipeline, SPDX + CycloneDX SBOMs). Container image build + vendored `ig` and full docs walkthrough remain before the v0.1.0 tag. See [PLAN.md](PLAN.md) §v0.1 build order.
 
 ## What it does
 
@@ -193,54 +193,54 @@ A long-running daemon shape (v2) with these privileges is its own security decis
 
 ## Verifying release artifacts
 
-Releases publish two static binaries (`csd_linux_amd64`, `csd_linux_arm64`), a `SHA256SUMS` manifest, and a Sigstore bundle (`<file>.cosign.bundle`) per artifact. Bundles are produced by `.github/workflows/release.yml` using cosign keyless signing via the GitHub OIDC issuer; each bundle is self-contained (signature + certificate + Rekor inclusion proof) so verification does not need to fetch from the transparency log.
+Releases publish two static binaries (`csd_linux_amd64`, `csd_linux_arm64`), a `SHA256SUMS` manifest, and a detached cosign signature (`<file>.sig`) per artifact. Signatures are produced by `.github/workflows/release.yml` using **cosign key-based signing with no transparency-log upload** (`--tlog-upload=false`) — so nothing is written to the public Rekor log while the project is unpublished. Verify offline against the committed project public key `cosign.pub`:
 
 ```sh
-# Per-binary
+# Per-binary (--insecure-ignore-tlog just asserts "no Rekor entry is expected")
 cosign verify-blob \
-  --bundle csd_linux_amd64.cosign.bundle \
-  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --key cosign.pub \
+  --insecure-ignore-tlog \
+  --signature csd_linux_amd64.sig \
   csd_linux_amd64
 
 # Or verify the manifest first, then check the binary against it
 cosign verify-blob \
-  --bundle SHA256SUMS.cosign.bundle \
-  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --key cosign.pub \
+  --insecure-ignore-tlog \
+  --signature SHA256SUMS.sig \
   SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Each release also publishes two SBOMs — `csd.spdx.json` (SPDX 2.3 JSON) and `csd.cyclonedx.json` (CycloneDX JSON) — generated from the source tree at release time and listed in `SHA256SUMS`. Both are cosign-signed under the same identity as the binaries, so the same verify command works:
+Each release also publishes two SBOMs — `csd.spdx.json` (SPDX 2.3 JSON) and `csd.cyclonedx.json` (CycloneDX JSON) — generated from the source tree at release time and listed in `SHA256SUMS`. Both are signed with the same key, so the same verify command works:
 
 ```sh
 cosign verify-blob \
-  --bundle csd.spdx.json.cosign.bundle \
-  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --key cosign.pub \
+  --insecure-ignore-tlog \
+  --signature csd.spdx.json.sig \
   csd.spdx.json
 ```
 
 Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`.
 
-The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/container-sec-derive`**. The manifest is cosign-signed keyless and carries SBOM + OpenVEX attestations. Verify the signature and the attestations:
+The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/container-sec-derive`**. The manifest is cosign-signed (same key, no transparency log) and carries SBOM + OpenVEX attestations. Verify the signature and the attestations against `cosign.pub`:
 
 ```sh
-# Signature (keyless — same OIDC identity as the binaries)
+# Signature
 cosign verify \
-  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --key cosign.pub \
+  --insecure-ignore-tlog \
   ghcr.io/tmatens/container-sec-derive:0.1.0
 
 # Attestations (SBOM + OpenVEX)
 cosign verify-attestation --type spdxjson \
-  --certificate-identity-regexp 'https://github.com/tmatens/container-sec-derive/\.github/workflows/release\.yml@.*' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --key cosign.pub \
+  --insecure-ignore-tlog \
   ghcr.io/tmatens/container-sec-derive:0.1.0
 ```
 
-> **Status:** the image publish is **gated on employer COI clearance** (`release.yml` Phase B, behind the `image-publish` environment; the GHCR package stays private until visibility is flipped) and has not shipped yet — these commands work once the first image publishes. The image SBOM attestation records the vendored `ig` provenance.
+> **Status:** these commands work once the first signed release ships. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision. The image SBOM attestation records the vendored `ig` provenance.
 
 ## License
 

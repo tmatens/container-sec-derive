@@ -1,0 +1,55 @@
+# Docker Scout (scheduled) — continuous CVE scan of the published image.
+#
+# Mirrors compose-lint's scout-scan.yml: scan the published Docker Hub
+# image for CVEs and apply the same OpenVEX document the release pipeline
+# attaches as an attestation, so a vuln we've assessed as not_affected
+# does not spuriously fail the scan. High-severity stays warning-only.
+#
+# HELD WITH PHASE B: this scans composelint/container-sec-derive:latest,
+# which does not exist until the COI-gated image publish runs. Until then
+# the schedule is intentionally OFF (workflow_dispatch only) so it does
+# not fail daily against a missing image. Uncomment the `schedule:` block
+# once the first image has published.
+#
+# All third-party action SHAs reused from release.yml / compose-lint's
+# vetted scout-scan.yml.
+name: Docker Scout (scheduled)
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 6 * * *"   # enable once the image is published (Phase B)
+
+permissions:
+  contents: read
+
+jobs:
+  scout:
+    name: scout cves
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Check out so .vex/container-sec-derive.openvex.json is on disk
+      # for the vex-location input below.
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Scout — CVEs (VEX-filtered)
+        uses: docker/scout-action@cd72f264beff1cd72735de31148b9d3244a0234a # v1.21.0
+        with:
+          command: cves
+          image: composelint/container-sec-derive:latest
+          # Apply the same OpenVEX document the published image carries as
+          # an attestation, so an assessed not_affected CVE is suppressed.
+          vex-location: .vex/container-sec-derive.openvex.json
+          # Scout's default vex-author allowlist is `<.*@docker.com>`;
+          # widen it so our own maintainer-authored VEX is honored.
+          vex-author: .*
+          # Warning-only: surface CVEs without failing the run (this is a
+          # monitoring scan, not a release gate).
+          exit-code: false
+          only-severities: critical,high

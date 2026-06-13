@@ -11,8 +11,8 @@
  * process, csd records them.
  *
  * Cycle (one per second):
- *   chown(target, 1, 1)        -> CAP_CHOWN
- *   chown(target, 0, 0)        -> CAP_CHOWN
+ *   chown(target, 1, -1)       -> CAP_CHOWN  (uid-only: one check per call)
+ *   chown(target, 0, -1)       -> CAP_CHOWN
  *   chmod(target, 04755)       -> CAP_FSETID (suid bit on root-owned)
  *   chmod(target, 0644)
  *   bind(:80) loopback         -> CAP_NET_BIND_SERVICE
@@ -62,8 +62,12 @@ static int exercise_chown(void) {
         perror("open target");
         return 0;
     }
-    if (chown(TARGET, 1, 1) == 0) n++; else perror("chown 1:1");
-    if (chown(TARGET, 0, 0) == 0) n++; else perror("chown 0:0");
+    /* Change only the uid (gid = -1 = "no change"). chown() with both
+     * ATTR_UID and ATTR_GID fires CAP_CHOWN twice (once per field), which
+     * breaks the 1 syscall -> 1 cap-event mapping the miss-rate harness
+     * relies on; uid-only keeps it exactly 1:1. CAP_CHOWN still fires. */
+    if (chown(TARGET, 1, (gid_t)-1) == 0) n++; else perror("chown uid=1");
+    if (chown(TARGET, 0, (gid_t)-1) == 0) n++; else perror("chown uid=0");
     return n;
 }
 

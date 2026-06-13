@@ -11,10 +11,11 @@ Authoritative design docs — read these before large changes:
 
 The full v0.1 build order is implemented and merged (PLAN.md §v0.1 build order, milestones 1–4): subprocess `ig run trace_capabilities` → attribution → aggregator → all seven formatters, JSON evidence sidecar, deterministic confidence rubric, `csd verify` (sidecar-vs-sidecar + run mode), entrypoint cross-check, multi-replica aggregation, IG version-pin CI gate, the postgres/caddy/tailscale/synthetic reference workloads with bisected ground truth, WSL2 smoke matrix, live-BPF integration CI, the cosign/SBOM release pipeline, and the container image build (Step 38 Phase A — build only, no push). `--fixture <file>` still replays pre-captured NDJSON so the pipeline runs without BPF/ig.
 
-**Remaining for v0.1.0 (all gated, not open engineering):**
+**Remaining for v0.1.0 (both gated, not open engineering):**
 - **Step 38 Phase B** — registry publish + cosign-sign the image manifest. Blocked on employer COI clearance.
 - **Cut the `v0.1.0` tag** — first real run of `release.yml`.
-- **kretprobe miss-rate < 0.1% measured** (v1 success criterion, "measured not assumed"). Harness shipped (`scripts/kretprobe_missrate.sh`, `make missrate`, `integration.yml` `run_missrate=true`); the measurement run needs a hosted/privileged BPF runner.
+
+The **kretprobe miss-rate < 0.1%** criterion is **measured-green** (2026-06-13, `integration.yml` `run_missrate=true`, run 27473114281): capture deficit ≤ 0.1% via the synthetic counting-mode exerciser (the one reference workload that issues an exact, countable cap stream; postgres/caddy observe `[]` post-attach). Harness: `scripts/kretprobe_missrate.sh` / `make missrate`.
 
 Off the v0.1 critical path: issue #32 (`bisect_caps.sh` 1-minimal→stabilization pass).
 

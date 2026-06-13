@@ -53,11 +53,28 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: '0'
         # -trimpath strips local file paths from the binary;
-        # -ldflags "-s -w" strips symbol/debug tables. Reproducibility
-        # status is documented in docs/wsl2.md / future docs/releases.md
-        # — we are pinned + trimmed, not yet bit-for-bit.
+        # -ldflags "-s -w" strips symbol/debug tables; -X main.version
+        # stamps the release version (tag without the leading v) so
+        # `csd --version` reports e.g. "csd 0.1.0" instead of the "dev"
+        # default. The container image injects the same value (Dockerfile
+        # / release.yml Phase B), so binary and image report identically.
+        # Reproducibility status is documented in docs/wsl2.md — we are
+        # pinned + trimmed, not yet bit-for-bit.
         run: |
-          go build -trimpath -ldflags "-s -w" -o "csd_linux_${GOARCH}" .
+          version="${GITHUB_REF_NAME#v}"
+          go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "csd_linux_${GOARCH}" .
+      # Smoke the stamped version on the native arch only — the arm64
+      # binary is cross-compiled and cannot exec on the amd64 runner.
+      # Catches a regression where the -X injection falls off and a real
+      # tag ships binaries self-reporting "dev".
+      - name: verify stamped version (amd64)
+        if: matrix.arch == 'amd64'
+        run: |
+          expected="csd ${GITHUB_REF_NAME#v}"
+          actual="$(./csd_linux_amd64 --version)"
+          echo "expected: ${expected}"
+          echo "actual:   ${actual}"
+          [ "${actual}" = "${expected}" ] || { echo "::error::binary version '${actual}' != tag '${expected}'"; exit 1; }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: csd-linux-${{ matrix.arch }}

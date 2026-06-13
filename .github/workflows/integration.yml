@@ -48,6 +48,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write # post the allowlisted diagnostic report as a PR comment
 
 jobs:
   # Live observe → assert. Hard gates: postgres (attach proof — events
@@ -110,17 +111,78 @@ jobs:
       - name: Build csd
         run: go build -o csd .
 
+      # Fixed-fact preflight so a failure self-classifies (BTF absent →
+      # CO-RE can't attach; ig version mismatch → SchemaMismatch). These
+      # are hard-coded facts, NOT an env dump — no secrets can appear.
+      - name: Preflight (kernel / BTF / ig)
+        run: |
+          {
+            echo "preflight: kernel=$(uname -r)"
+            if [ -e /sys/kernel/btf/vmlinux ]; then
+              echo "preflight: BTF=present"
+            else
+              echo "preflight: BTF=ABSENT (cap_capable CO-RE cannot attach)"
+            fi
+            echo "preflight: ig=$(ig version 2>&1 | head -1)"
+          } | tee preflight.txt
+
       # jq + docker are preinstalled on ubuntu-24.04 runners. Run the
       # matrix under sudo so csd can load BPF (CAP_BPF/CAP_PERFMON) and
       # reach the docker socket; sudo's secure_path resolves
       # /usr/local/bin/ig and /usr/bin/jq. cwd is preserved, so the
       # script's $(pwd)-relative workload paths resolve correctly.
+      # Output is teed to smoke.txt for the report step; a nonzero exit
+      # still fails the job (the gate), and always() lets the report run.
       - name: Live-BPF smoke matrix
         env:
           DURATION: ${{ github.event.inputs.duration || '30s' }}
         run: |
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
-            scripts/smoke_wsl2.sh
+            scripts/smoke_wsl2.sh 2>&1 | tee smoke.txt
+
+      # Route the verdict to channels readable WITHOUT the Actions log
+      # API (which is unreachable from some clients): a PR comment +
+      # the job summary. SECURITY: the report is a strict ALLOWLIST —
+      # the fixed preflight facts plus the smoke script's own
+      # PASS/FAIL/INFO/summary lines, extracted by grep. It never echoes
+      # env, secrets, tokens, docker-pull noise, or raw workload logs, so
+      # no sensitive data leaves the runner. The only credential used is
+      # the ephemeral, scoped GITHUB_TOKEN, which is never printed.
+      - name: Post diagnostic report (allowlisted, no secrets)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker='<!-- csd-integration-report -->'
+          # Allowlist: fixed preflight facts + known-safe status lines.
+          # Anything not matching these prefixes (env, logs, noise) is dropped.
+          report="$( { cat preflight.txt 2>/dev/null || true; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-wsl2:)' smoke.txt 2>/dev/null || true; } )"
+          [ -n "$report" ] || report="(no status lines captured — see the Actions run)"
+          { echo "### Live-BPF integration report";
+            echo "[run](${RUN_URL})";
+            echo '```'; echo "$report"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # PR comment is the machine-readable channel; skip on dispatch (no PR).
+          [ -n "${PR:-}" ] || { echo "no PR context; job summary only"; exit 0; }
+          body="$(printf '%s\n### Live-BPF integration report\n[run](%s) · commit `%s`\n\n```\n%s\n```\n' \
+                  "$marker" "$RUN_URL" "${GITHUB_SHA:0:9}" "$report")"
+          api="https://api.github.com"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json")
+          # Upsert: update the existing report comment if present, else create one.
+          existing="$(curl -fsS "${auth[@]}" "$api/repos/$REPO/issues/$PR/comments?per_page=100" \
+                      | jq -r --arg m "$marker" '[.[] | select(.body|contains($m))][0].id // empty')"
+          jq -nc --arg b "$body" '{body:$b}' > payload.json
+          if [ -n "$existing" ]; then
+            curl -fsS -X PATCH "${auth[@]}" "$api/repos/$REPO/issues/comments/$existing" -d @payload.json >/dev/null
+            echo "updated comment $existing"
+          else
+            curl -fsS -X POST "${auth[@]}" "$api/repos/$REPO/issues/$PR/comments" -d @payload.json >/dev/null
+            echo "created comment"
+          fi
 
   # On-demand bisection reproducibility check. Regenerates ground truth
   # for the chosen image(s) and uploads the JSON as an artifact for a

@@ -23,6 +23,33 @@ type fsRecommendation struct {
 	VolumeCovered []string `json:"volume_covered"`
 }
 
+// pseudoFSPrefixes are kernel virtual-filesystem mount points. Writes under
+// them are not container-rootfs writes: /proc and /sys are procfs/sysfs (a
+// read-only rootfs does not cover them and they cannot be backed by tmpfs), and
+// /dev is a runtime-managed devtmpfs (/dev/shm is already tmpfs). The v0.2 fs
+// observer's read_only/tmpfs recommendation concerns the rootfs only.
+var pseudoFSPrefixes = []string{"/proc", "/sys", "/dev"}
+
+// isRootfsWrite reports whether p is a write the read_only/tmpfs recommendation
+// can act on: an absolute path not under a kernel pseudo-filesystem. It filters
+// two classes the live #86 run surfaced as noise in the postgres observation:
+//   - pseudo-fs writes (e.g. /proc/<pid>/task/<tid>/attr/apparmor, /dev/shm) —
+//     separate mounts a read-only rootfs doesn't touch; recommending tmpfs for
+//     them is meaningless.
+//   - relative paths (e.g. "base/5") — an openat with a dirfd that ig couldn't
+//     resolve to an absolute fpath; it cannot be turned into a tmpfs entry.
+func isRootfsWrite(p string) bool {
+	if !strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, pre := range pseudoFSPrefixes {
+		if p == pre || strings.HasPrefix(p, pre+"/") {
+			return false
+		}
+	}
+	return true
+}
+
 // correlateWrites classifies the observed write paths against the container's
 // mount destinations. Writes at or below a mount are volume-covered; the rest
 // are rootfs writes whose parent directories become tmpfs candidates (grouped

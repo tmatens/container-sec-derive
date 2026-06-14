@@ -1,0 +1,14 @@
+{
+  "image": "csd-synthetic-exerciser:0.1",
+  "workload": "testdata/synthetic/workload.sh",
+  "observer": "fs",
+  "expected_writable_paths": [
+    "/csd-exerciser-target"
+  ],
+  "runtime_requirements": {
+    "docker_run_args": "(none required for the fs observer)",
+    "why": "The exerciser opens /csd-exerciser-target with O_CREAT|O_WRONLY|O_TRUNC and write(2)s a byte every cycle, so trace_open records a write-intent open continuously post-attach. Unlike the cap gate, no sysctl is needed — the write fires regardless. The container declares no volumes, so the file's parent (/) is an unbacked rootfs write and the recommendation reports read_only:true with / as a tmpfs candidate.",
+    "expected_tmpfs_dir": "/"
+  },
+  "notes": "Synthetic regression fixture for the v0.2 read-only-filesystem observer, the fs analog of expected.json. Role: prove that when a userspace process performs write-intent opens post-attach, `csd --observe fs` records the path. `csd --observe fs --container <synthetic>` must produce a writable_paths entry whose path is /csd-exerciser-target (disposition tmpfs_candidate, since the container has no volume covering /). This is the sole deterministic fs gate: postgres/caddy/tailscale can legitimately observe zero post-attach writes (their writes happen pre-attach, at container/entrypoint init), the same workload-shape caveat docs/known-deltas.md records for caps. Confidence grades low by design (sparse single-path observation), so this run is never a contributable profile — it is a pipeline attach+record regression check only."
+}

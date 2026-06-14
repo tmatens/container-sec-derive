@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 missrate build test vet image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs missrate build test vet image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from main.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -53,6 +53,14 @@ synthetic-build:
 # docker + ig + the built csd binary.
 smoke-wsl2: build
 	./scripts/smoke_wsl2.sh
+
+# fs smoke matrix — see scripts/smoke_fs.sh. Runs `csd --observe fs`
+# against each reference image; the synthetic exerciser is the
+# deterministic hard gate (writable_paths must include the file it
+# writes every cycle). Same docker + ig + privileged-host needs as
+# smoke-wsl2.
+smoke-fs: build
+	./scripts/smoke_fs.sh
 
 # missrate measures the kretprobe capture deficit (upper bound on the
 # kretprobe miss rate) against the synthetic exerciser in counting mode.

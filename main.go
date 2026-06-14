@@ -54,6 +54,14 @@ const (
 	// PinnedIGVersion so the gadget image and the ig binary advance
 	// together; bumping the pin means re-pulling this tag.
 	TraceCapabilitiesGadget = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:" + PinnedIGVersion
+
+	// TraceOpenGadget is the OCI reference for the trace_open gadget, the
+	// signal source for the v0.2 read-only-filesystem observer: it traces
+	// open/openat and reports the open flags (so write-intent opens can be
+	// filtered) and the symlink-resolved full path (with --paths). Tagged
+	// to PinnedIGVersion in lockstep with TraceCapabilitiesGadget — bumping
+	// the pin re-pulls both. See ROADMAP §v0.2 and the design in issue #77.
+	TraceOpenGadget = "ghcr.io/inspektor-gadget/gadget/trace_open:" + PinnedIGVersion
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -161,18 +169,26 @@ type aggregateOpts struct {
 }
 
 func (o aggregateOpts) matches(ev capEvent) bool {
+	return o.matchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage)
+}
+
+// matchesRuntime is the observer-agnostic target selection shared by the
+// capability and file-write observers — their events carry the same runtime
+// attribution fields (containerId / containerName / containerImageName), so
+// the container/image/id-prefix selection logic lives here once.
+func (o aggregateOpts) matchesRuntime(containerID, containerName, image string) bool {
 	if o.Container == "" && o.Image == "" {
 		return true
 	}
 	if o.Container != "" {
-		if ev.Runtime.ContainerID == o.Container || ev.Runtime.ContainerName == o.Container {
+		if containerID == o.Container || containerName == o.Container {
 			return true
 		}
-		if len(o.Container) >= 6 && strings.HasPrefix(ev.Runtime.ContainerID, o.Container) {
+		if len(o.Container) >= 6 && strings.HasPrefix(containerID, o.Container) {
 			return true
 		}
 	}
-	if o.Image != "" && ev.Runtime.ContainerImage == o.Image {
+	if o.Image != "" && image == o.Image {
 		return true
 	}
 	return false

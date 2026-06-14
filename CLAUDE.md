@@ -1,19 +1,19 @@
 # container-sec-derive
 
-Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.26+, MIT, one-shot CLI. Binary: `csd`. Pre-release — the full v0.1 build order (alpha → beta → rc → release) is implemented and on `main`; v0.1.0 is at the release-cut stage (see Current status). v0.2+ observers are planned but unbuilt.
+Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.26+, MIT, one-shot CLI. Binary: `csd`. **v0.1.0 released** (first signed release — signed binaries + private GHCR image; see Current status). v0.2+ observers are planned but unbuilt.
 
 Authoritative design docs — read these before large changes:
 - `PLAN.md` — v1 architecture, decisions, success criteria, threat model
 - `ROADMAP.md` — post-v1 observers (read_only, privileged decomp, devices, egress, etc.)
 - `README.md` — user-facing overview and relationship to compose-lint
 
-## Current status (v0.1.0 release cut)
+## Current status (v0.1.0 released)
 
-The full v0.1 build order is implemented and merged (PLAN.md §v0.1 build order, milestones 1–4): subprocess `ig run trace_capabilities` → attribution → aggregator → all seven formatters, JSON evidence sidecar, deterministic confidence rubric, `csd verify` (sidecar-vs-sidecar + run mode), entrypoint cross-check, multi-replica aggregation, IG version-pin CI gate, the postgres/caddy/tailscale/synthetic reference workloads with bisected ground truth, WSL2 smoke matrix, live-BPF integration CI, the cosign/SBOM release pipeline, and the container image build (Step 38 Phase A — build only, no push). `--fixture <file>` still replays pre-captured NDJSON so the pipeline runs without BPF/ig.
+**v0.1.0 shipped 2026-06-14** (release run 27483911054, all jobs green): the GitHub Release carries signed static binaries (`linux/amd64`, `linux/arm64`), signed SPDX + CycloneDX SBOMs, and a signed `SHA256SUMS`; the multi-arch container image is published to **private** `ghcr.io/tmatens/container-sec-derive` (`0.1.0`, `0.1`), manifest cosign-signed (key-based, no public Rekor), verified against `cosign.pub`, with SBOM + OpenVEX attestations. Release chain: #70 (Phase B publish) → #73 (pin cosign 2.x — 3.x dropped `--tlog-upload=false`) → #74 (image-SBOM upload flags) → tag `v0.1.0`.
 
-**Remaining for v0.1.0 (both gated, not open engineering):**
-- **Step 38 Phase B** — registry publish + cosign-sign the image manifest. Blocked on employer COI clearance.
-- **Cut the `v0.1.0` tag** — first real run of `release.yml`.
+The full v0.1 build order is implemented and merged (PLAN.md §v0.1 build order, milestones 1–4): subprocess `ig run trace_capabilities` → attribution → aggregator → all seven formatters, JSON evidence sidecar, deterministic confidence rubric, `csd verify` (sidecar-vs-sidecar + run mode), entrypoint cross-check, multi-replica aggregation, IG version-pin CI gate, the postgres/caddy/tailscale/synthetic reference workloads with bisected ground truth, WSL2 smoke matrix, live-BPF integration CI, the cosign/SBOM release pipeline, and the container image build + publish (Step 38 Phase A build + Phase B publish/sign/attest). `--fixture <file>` still replays pre-captured NDJSON so the pipeline runs without BPF/ig.
+
+**COI:** the image is published **private**; the only remaining COI-gated act is flipping GHCR package visibility to public (manual, post-clearance) — and at that point switching cosign back to keyless (OIDC + Rekor) is a deliberate, reviewable change.
 
 The **kretprobe miss-rate < 0.1%** criterion is **measured-green** (2026-06-13, `integration.yml` `run_missrate=true`, run 27473114281): capture deficit ≤ 0.1% via the synthetic counting-mode exerciser (the one reference workload that issues an exact, countable cap stream; postgres/caddy observe `[]` post-attach). Harness: `scripts/kretprobe_missrate.sh` / `make missrate`.
 

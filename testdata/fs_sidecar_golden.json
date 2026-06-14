@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.1",
+  "image": "postgres:16",
+  "observed_at": "2026-04-19T12:00:00Z",
+  "duration_seconds": 600,
+  "tool_version": "0.2.0",
+  "target": {
+    "mode": "container",
+    "selector": "postgres-1",
+    "replicas_observed": 1,
+    "per_replica_event_counts": {
+      "abc123def456789": 3
+    },
+    "per_replica_caps": {},
+    "replica_cap_disagreement": [],
+    "restarts": [],
+    "follow_restart": false,
+    "target_exited_early": false,
+    "init_window_suppressed": 0,
+    "distinct_comms": 0
+  },
+  "capabilities": [],
+  "expected_caps_from_entrypoint": [],
+  "coverage_warnings": [],
+  "writable_paths": [
+    {
+      "path": "/var/lib/postgresql/data/base/1/1259",
+      "event_count": 1,
+      "disposition": "volume_covered",
+      "comm_samples": [
+        "postgres"
+      ]
+    },
+    {
+      "path": "/var/log/postgresql/postgresql.log",
+      "event_count": 1,
+      "disposition": "tmpfs_candidate",
+      "comm_samples": [
+        "postgres"
+      ]
+    },
+    {
+      "path": "/var/run/postgresql/.s.PGSQL.5432.lock",
+      "event_count": 1,
+      "disposition": "tmpfs_candidate",
+      "comm_samples": [
+        "postgres"
+      ]
+    }
+  ],
+  "fs_recommendation": {
+    "read_only": true,
+    "tmpfs_paths": [
+      "/var/log/postgresql",
+      "/var/run/postgresql"
+    ],
+    "volume_covered": [
+      "/var/lib/postgresql/data/base/1/1259"
+    ]
+  },
+  "trace_health": {
+    "events_recorded": 3,
+    "events_dropped": 0,
+    "drop_rate": 0
+  },
+  "confidence": {
+    "level": "low",
+    "factors": [
+      "low: write-event count 3 \u003c 100; tmpfs list may be incomplete",
+      "moderate: no workload script provided (startup + idle only)",
+      "deferred: steady-state detection not yet implemented",
+      "deferred: target-exited-early signal not yet wired"
+    ]
+  },
+  "caveat": "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
+}

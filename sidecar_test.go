@@ -8,11 +8,11 @@ import (
 
 func TestNewSidecar_Constants(t *testing.T) {
 	s := NewSidecar()
-	if s.SchemaVersion != "1.0" {
-		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.0")
+	if s.SchemaVersion != "1.1" {
+		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.1")
 	}
-	if s.ToolVersion != "0.1.0-beta" {
-		t.Errorf("ToolVersion = %q, want %q", s.ToolVersion, "0.1.0-beta")
+	if s.ToolVersion != "0.2.0" {
+		t.Errorf("ToolVersion = %q, want %q", s.ToolVersion, "0.2.0")
 	}
 	if !strings.Contains(s.Caveat, "not a correctness proof") && !strings.Contains(s.Caveat, "Not a correctness proof") {
 		t.Errorf("Caveat missing the correctness-proof framing: %q", s.Caveat)

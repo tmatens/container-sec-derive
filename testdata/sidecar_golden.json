@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "image": "postgres:16",
   "observed_at": "2026-04-19T12:00:00Z",
   "duration_seconds": 600,
-  "tool_version": "0.1.0-beta",
+  "tool_version": "0.2.0",
   "target": {
     "mode": "container",
     "selector": "postgres-1",

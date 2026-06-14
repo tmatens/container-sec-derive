@@ -321,10 +321,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// the PR-B follow-on, hence the format guard below.
 	if *observe == ObserveFS {
 		switch *format {
-		case FormatCompose, FormatJSON:
+		case FormatCompose, FormatJSON, FormatDockerRun, FormatK8s, FormatOCI:
 			// implemented for fs
 		default:
-			return codedErrorf(ExitUsage, "--observe %s does not yet support --format %s (supported: %s, %s; the other formatters are a follow-on)", ObserveFS, *format, FormatCompose, FormatJSON)
+			return codedErrorf(ExitUsage, "--observe %s does not yet support --format %s (supported: %s, %s, %s, %s, %s; compose-patch + compose-lint-profile are a follow-on)", ObserveFS, *format, FormatCompose, FormatJSON, FormatDockerRun, FormatK8s, FormatOCI)
 		}
 		s, err := produceFSObservation(fsPipelineOpts{
 			AggregateOpts: aggregateOpts{
@@ -349,6 +349,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatJSON:
 			if err := writeJSON(stdout, s); err != nil {
 				return fmt.Errorf("write json: %w", err)
+			}
+		case FormatDockerRun:
+			if err := writeFSDockerRun(stdout, *s.FSRecommendation); err != nil {
+				return fmt.Errorf("write fs docker-run: %w", err)
+			}
+		case FormatK8s:
+			if err := writeFSK8s(stdout, *s.FSRecommendation); err != nil {
+				return fmt.Errorf("write fs k8s: %w", err)
+			}
+		case FormatOCI:
+			if err := writeFSOCI(stdout, *s.FSRecommendation); err != nil {
+				return fmt.Errorf("write fs oci: %w", err)
 			}
 		}
 		if *outPath != "" {

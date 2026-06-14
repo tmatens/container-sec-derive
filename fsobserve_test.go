@@ -247,10 +247,10 @@ func TestRun_ObserveFSOutAndWorkload(t *testing.T) {
 	}
 }
 
-// TestRun_ObserveFSRejectsUnsupportedFormat: formats beyond compose/json are
-// still gated until PR-B wires them.
+// TestRun_ObserveFSRejectsUnsupportedFormat: compose-patch and
+// compose-lint-profile remain gated for the fs observer until PR-B2 wires them.
 func TestRun_ObserveFSRejectsUnsupportedFormat(t *testing.T) {
-	for _, f := range []string{"k8s", "docker-run", "oci"} {
+	for _, f := range []string{"compose-patch", "compose-lint-profile"} {
 		var out, errBuf bytes.Buffer
 		err := run([]string{"--observe", "fs", "--format", f, "--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
 		if exitCodeFor(err) != ExitUsage {

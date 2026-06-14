@@ -408,17 +408,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// and the compose formatter; the remaining five formatters are follow-on
 	// PRs, hence the format guard.
 	if *observe == ObserveDevices {
-		switch *format {
-		case FormatCompose, FormatJSON, FormatDockerRun, FormatK8s, FormatOCI:
-			// implemented in this increment
-		default:
-			return codedErrorf(ExitUsage, "--format %s not yet implemented for --observe %s; use %s, %s, %s, %s, or %s", *format, ObserveDevices, FormatJSON, FormatCompose, FormatDockerRun, FormatK8s, FormatOCI)
-		}
-		if *allowExploratory {
-			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
-		}
-		if *composeIn != "" || *composeService != "" {
+		// All seven formatters are now implemented for devices. compose-patch
+		// needs --compose-in/--service (validated below, shared shape with the
+		// cap/fs paths); compose-lint-profile honors --allow-exploratory.
+		if *format == FormatComposePatch {
+			if *composeIn == "" || *composeService == "" {
+				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+			}
+			if _, statErr := os.Stat(*composeIn); statErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+			}
+		} else if *composeIn != "" || *composeService != "" {
 			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		}
+		if *allowExploratory && *format != FormatComposeLintEntry {
+			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		s, err := produceDeviceObservation(devicePipelineOpts{
 			AggregateOpts: aggregateOpts{
@@ -454,6 +458,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatOCI:
 			if err := writeDeviceOCI(stdout, *s.DeviceRecommendation); err != nil {
 				return fmt.Errorf("write device oci: %w", err)
+			}
+		case FormatComposePatch:
+			raw, readErr := os.ReadFile(*composeIn)
+			if readErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+			}
+			if err := writeDeviceComposePatch(stdout, *s.DeviceRecommendation, raw, *composeIn, *composeService); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write device compose-patch: %w", err))
+			}
+		case FormatComposeLintEntry:
+			if err := writeDeviceComposeLintProfile(stdout, s, *allowExploratory); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write device compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {

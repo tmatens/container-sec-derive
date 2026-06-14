@@ -109,6 +109,44 @@ Independent of our own roadmap — places where work we'd do for ourselves also 
 
 ---
 
+## Maturity — parity with compose-lint
+
+`csd` should reach the same project maturity as its sibling **compose-lint** (a
+mature, security-focused OSS repo) as it approaches end state. The engineering
+infrastructure is already at parity — SHA-pinned CI, a signed multi-arch release
+(cosign + SPDX/CycloneDX SBOMs + OpenVEX), digest-pinned + cosign-verified
+vendored `ig`, Renovate, a `.vex` directory, live-BPF integration CI, and (as of
+v0.2) fuzz targets. The gaps are in **community, governance, process, and
+security-automation surface**. Tracked below; none block an observer release,
+but together they are the difference between "works" and "mature."
+
+**Process & docs (started v0.2):**
+
+- ✅ **`CHANGELOG.md`** (Keep a Changelog) + a per-PR `[Unreleased]` convention.
+- ✅ **`docs/RELEASING.md`** release checklist and **`.github/pull_request_template.md`**.
+- **`CONTRIBUTING.md`** — the contribution bar (signed + DCO commits, stdlib-only
+  runtime deps, the four-layer observer contract, ground-truth + test
+  expectations, no-AI-attribution) currently lives only in `CLAUDE.md`.
+- **`SECURITY.md`** — a vulnerability-disclosure policy. Table stakes for a
+  security tool that runs root-equivalent.
+- **`AGENTS.md`** — the agent-contribution guide (csd is agent-developed).
+- **`.github/ISSUE_TEMPLATE/`** (bug / feature / new-observer-proposal),
+  **`CODEOWNERS`**, **`CODE_OF_CONDUCT.md`**, and **`GOVERNANCE.md` /
+  `MAINTAINERS.md`** mirroring compose-lint's set.
+- **`release-prep.yml`** — automate the `[Unreleased]` → `[X.Y.Z]` changelog
+  rename + version bumps + release PR (compose-lint has this; csd does it by
+  hand per `docs/RELEASING.md`).
+
+**Security automation:**
+
+- **OpenSSF Scorecard** workflow (`scorecard.yml`) — a measurable, public
+  supply-chain posture score, the same signal compose-lint publishes.
+- **CodeQL** (`codeql.yml`) — Go static analysis on PRs (csd is pure Go;
+  CodeQL covers it).
+- **Continuous fuzzing (ClusterFuzzLite)** — v0.2 added Go fuzz *targets*; wiring
+  them into a `cflite-pr` / `cflite-batch` flow (as compose-lint does) turns
+  one-off seeds into ongoing coverage of the `ig`/`docker` output parsers.
+
 ## Out of scope
 
 - **Enforcement.** This tool only observes and recommends. Use AppArmor / seccomp / Pod Security Standards for runtime enforcement. We may *generate* enforcement artifacts (k8s SecurityContext, AppArmor profiles) but do not apply them.

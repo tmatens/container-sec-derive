@@ -196,8 +196,10 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 
 ## Documentation
 
+- [CHANGELOG.md](CHANGELOG.md) — notable changes per release ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 - [PLAN.md](PLAN.md) — v1 architecture, decisions, success criteria, threat model, exit codes, confidence rubric.
-- [ROADMAP.md](ROADMAP.md) — post-v1 observers (read-only, privileged decomp, devices, egress, …).
+- [ROADMAP.md](ROADMAP.md) — post-v1 observers (read-only, privileged decomp, devices, egress, …) and the maturity-parity track.
+- [docs/RELEASING.md](docs/RELEASING.md) — the release checklist (version bumps, changelog, tagging, the signed pipeline).
 - [docs/architecture.md](docs/architecture.md) — diagrams of the four-layer pipeline, the three-phase workflow, the workload-coverage cross-checks, and the privilege/supply-chain posture.
 - [docs/dev-setup.md](docs/dev-setup.md) — local development prerequisites, installing `ig`, smoke-running `csd observe`, bisecting a new reference image.
 - [docs/known-deltas.md](docs/known-deltas.md) — every documented difference between observed cap sets and bisected ground truth, with cause and disposition.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,7 +75,7 @@ func TestLoadMountsFixture(t *testing.T) {
 // volume must yield read_only:true, the data write volume-covered, and the
 // log/run-dir writes as tmpfs candidates.
 func TestProduceFSObservationFixture(t *testing.T) {
-	rec, err := produceFSObservation(fsPipelineOpts{
+	s, err := produceFSObservation(fsPipelineOpts{
 		AggregateOpts: aggregateOpts{Container: "postgres-1"},
 		Fixture:       "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
 		MountsFixture: "testdata/postgres/mounts.json",
@@ -82,8 +83,9 @@ func TestProduceFSObservationFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rec.ReadOnly {
-		t.Error("ReadOnly = false, want true")
+	rec := s.FSRecommendation
+	if rec == nil || !rec.ReadOnly {
+		t.Fatalf("FSRecommendation = %+v, want ReadOnly=true", rec)
 	}
 	wantTmpfs := []string{"/var/log/postgresql", "/var/run/postgresql"}
 	if strings.Join(rec.TmpfsPaths, ",") != strings.Join(wantTmpfs, ",") {
@@ -93,25 +95,59 @@ func TestProduceFSObservationFixture(t *testing.T) {
 	if strings.Join(rec.VolumeCovered, ",") != strings.Join(wantCovered, ",") {
 		t.Errorf("VolumeCovered = %v, want %v", rec.VolumeCovered, wantCovered)
 	}
+
+	// writable_paths carries every observed write with its disposition.
+	dispByPath := map[string]string{}
+	for _, wp := range s.WritablePaths {
+		dispByPath[wp.Path] = wp.Disposition
+	}
+	if dispByPath["/var/lib/postgresql/data/base/1/1259"] != DispositionVolumeCovered {
+		t.Errorf("data write disposition = %q, want volume_covered", dispByPath["/var/lib/postgresql/data/base/1/1259"])
+	}
+	if dispByPath["/var/log/postgresql/postgresql.log"] != DispositionTmpfsCandidate {
+		t.Errorf("log write disposition = %q, want tmpfs_candidate", dispByPath["/var/log/postgresql/postgresql.log"])
+	}
+	if got := len(s.WritablePaths); got != 3 {
+		t.Errorf("writable_paths len = %d, want 3", got)
+	}
+	// trace_health: 3 write events recorded, none dropped, in fixture mode.
+	if s.TraceHealth.EventsRecorded != 3 || s.TraceHealth.DropRate != 0 {
+		t.Errorf("trace_health = %+v, want 3 recorded / 0 drop", s.TraceHealth)
+	}
+	// The capability scaffolding stays empty on an fs run.
+	if len(s.Capabilities) != 0 {
+		t.Errorf("Capabilities = %v, want empty on an fs run", s.Capabilities)
+	}
+	// Confidence is scored (3 events < 100 + no workload → low).
+	if s.Confidence.Level != ConfidenceLow {
+		t.Errorf("confidence = %q, want low (sparse + no workload)", s.Confidence.Level)
+	}
 }
 
 // TestProduceFSObservationNoMountsFixture: hermetic fixture mode with no
 // --mounts-fixture has no mount config, so every write becomes a tmpfs
 // candidate (the data write is no longer volume-covered).
 func TestProduceFSObservationNoMountsFixture(t *testing.T) {
-	rec, err := produceFSObservation(fsPipelineOpts{
+	s, err := produceFSObservation(fsPipelineOpts{
 		AggregateOpts: aggregateOpts{Container: "postgres-1"},
 		Fixture:       "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	rec := s.FSRecommendation
 	if len(rec.VolumeCovered) != 0 {
 		t.Errorf("VolumeCovered = %v, want empty (no mounts supplied)", rec.VolumeCovered)
 	}
 	want := []string{"/var/lib/postgresql/data/base/1", "/var/log/postgresql", "/var/run/postgresql"}
 	if strings.Join(rec.TmpfsPaths, ",") != strings.Join(want, ",") {
 		t.Errorf("TmpfsPaths = %v, want %v", rec.TmpfsPaths, want)
+	}
+	// With no mounts, every observed write is a tmpfs candidate.
+	for _, wp := range s.WritablePaths {
+		if wp.Disposition != DispositionTmpfsCandidate {
+			t.Errorf("path %s disposition = %q, want tmpfs_candidate (no mounts)", wp.Path, wp.Disposition)
+		}
 	}
 }
 
@@ -147,28 +183,78 @@ func TestRun_ObserveUnrecognized(t *testing.T) {
 	}
 }
 
-func TestRun_ObserveFSRejectsNonComposeFormat(t *testing.T) {
+// TestRun_ObserveFSJSON: `--observe fs --format json` emits the canonical
+// sidecar with the fs section populated and the cap section empty.
+func TestRun_ObserveFSJSON(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	err := run([]string{"--observe", "fs", "--format", "json", "--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit code = %d, want %d (EX_USAGE)", exitCodeFor(err), ExitUsage)
+	err := run([]string{
+		"--observe", "fs", "--format", "json",
+		"--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
+		"--mounts-fixture", "testdata/postgres/mounts.json",
+		"--container", "postgres-1",
+	}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
+	}
+	var s Sidecar
+	if err := json.Unmarshal(out.Bytes(), &s); err != nil {
+		t.Fatalf("sidecar JSON did not parse: %v\n%s", err, out.String())
+	}
+	if s.FSRecommendation == nil || !s.FSRecommendation.ReadOnly {
+		t.Errorf("fs_recommendation = %+v, want ReadOnly=true", s.FSRecommendation)
+	}
+	if len(s.WritablePaths) != 3 {
+		t.Errorf("writable_paths len = %d, want 3", len(s.WritablePaths))
+	}
+	if len(s.Capabilities) != 0 {
+		t.Errorf("capabilities = %v, want empty on an fs run", s.Capabilities)
+	}
+	// A caps-only run must NOT carry the fs keys; assert they're omitted.
+	if strings.Contains(out.String(), "fs_recommendation") == false {
+		t.Error("expected fs_recommendation key in fs JSON output")
 	}
 }
 
-func TestRun_ObserveFSRejectsOutAndWorkload(t *testing.T) {
+// TestRun_ObserveFSOutAndWorkload: --out writes the sidecar and --workload is
+// recorded + lifts the no-workload confidence penalty.
+func TestRun_ObserveFSOutAndWorkload(t *testing.T) {
 	dir := t.TempDir()
 	wl := filepath.Join(dir, "wl.sh")
 	if err := os.WriteFile(wl, []byte("#!/bin/sh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{
-		{"--observe", "fs", "--out", filepath.Join(dir, "s.json"), "--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson", "--container", "postgres-1"},
-		{"--observe", "fs", "--workload", wl, "--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson", "--container", "postgres-1"},
-	} {
+	outFile := filepath.Join(dir, "s.json")
+	var out, errBuf bytes.Buffer
+	err := run([]string{
+		"--observe", "fs", "--out", outFile, "--workload", wl,
+		"--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
+		"--mounts-fixture", "testdata/postgres/mounts.json",
+		"--container", "postgres-1",
+	}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
+	}
+	data, readErr := os.ReadFile(outFile)
+	if readErr != nil {
+		t.Fatalf("sidecar not written: %v", readErr)
+	}
+	var s Sidecar
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatalf("sidecar file did not parse: %v", err)
+	}
+	if s.Workload != wl {
+		t.Errorf("sidecar workload = %q, want %q", s.Workload, wl)
+	}
+}
+
+// TestRun_ObserveFSRejectsUnsupportedFormat: formats beyond compose/json are
+// still gated until PR-B wires them.
+func TestRun_ObserveFSRejectsUnsupportedFormat(t *testing.T) {
+	for _, f := range []string{"k8s", "docker-run", "oci"} {
 		var out, errBuf bytes.Buffer
-		err := run(args, &out, &errBuf)
+		err := run([]string{"--observe", "fs", "--format", f, "--fixture", "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
 		if exitCodeFor(err) != ExitUsage {
-			t.Errorf("args %v: exit code = %d, want %d (EX_USAGE)", args, exitCodeFor(err), ExitUsage)
+			t.Errorf("format %s: exit code = %d, want %d (EX_USAGE)", f, exitCodeFor(err), ExitUsage)
 		}
 	}
 }

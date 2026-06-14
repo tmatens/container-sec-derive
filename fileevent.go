@@ -149,6 +149,28 @@ type writeObservation struct {
 	Paths      []string            // sorted union of write-intent paths
 	PerReplica map[string][]string // replica id (or name) -> sorted write paths
 	EventCount int                 // write-intent events counted post-filter
+
+	// PerReplicaCount is the write-event count per replica (the cap
+	// aggregator's per_replica_event_counts analog), populated alongside
+	// PerReplica so reviewers can see uneven coverage across replicas.
+	PerReplicaCount map[string]int
+	// Stats is per-path detail (event count + comm samples) feeding the
+	// sidecar's writable_paths section — the WritablePath analog of capStats.
+	Stats map[string]*writeStats
+	// Dropped is ig's ringbuf-lost-sample count for the live observe path
+	// (set by observeWrites); 0 in fixture mode. Feeds trace_health.
+	Dropped int
+	// Image is the first observed container image (populates Sidecar.Image
+	// when --image was not the selector), mirroring the cap aggregator.
+	Image string
+}
+
+// writeStats collapses N write opens for one path into the numbers the
+// sidecar's writable_paths section needs. Mirrors capStats but thinner —
+// the fs observer has no per-path timing requirement yet.
+type writeStats struct {
+	eventCount  int
+	commSamples map[string]struct{}
 }
 
 // aggregateWrites reads trace_open NDJSON from r, keeps events that match the
@@ -160,7 +182,10 @@ type writeObservation struct {
 func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error) {
 	union := map[string]struct{}{}
 	perReplica := map[string]map[string]struct{}{}
+	perReplicaCount := map[string]int{}
+	stats := map[string]*writeStats{}
 	count := 0
+	image := ""
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scan.Scan() {
@@ -183,6 +208,9 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 			continue
 		}
 		count++
+		if image == "" {
+			image = ev.Runtime.ContainerImage
+		}
 		union[p] = struct{}{}
 		rid := ev.Runtime.ContainerID
 		if rid == "" {
@@ -192,14 +220,27 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 			perReplica[rid] = map[string]struct{}{}
 		}
 		perReplica[rid][p] = struct{}{}
+		perReplicaCount[rid]++
+		st := stats[p]
+		if st == nil {
+			st = &writeStats{commSamples: map[string]struct{}{}}
+			stats[p] = st
+		}
+		st.eventCount++
+		if comm := strings.TrimSpace(ev.Proc.Comm); comm != "" {
+			st.commSamples[comm] = struct{}{}
+		}
 	}
 	if err := scan.Err(); err != nil {
 		return nil, err
 	}
 	obs := &writeObservation{
-		Paths:      sortedKeys(union),
-		PerReplica: map[string][]string{},
-		EventCount: count,
+		Paths:           sortedKeys(union),
+		PerReplica:      map[string][]string{},
+		EventCount:      count,
+		PerReplicaCount: perReplicaCount,
+		Stats:           stats,
+		Image:           image,
 	}
 	for rid, set := range perReplica {
 		obs.PerReplica[rid] = sortedKeys(set)

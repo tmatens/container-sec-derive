@@ -96,7 +96,7 @@ Every layer in the pipeline runs under the same blast radius.
 flowchart LR
     subgraph Trust["Trust boundary: root-equivalent on host"]
         csd["csd binary<br/>(cosign-signed,<br/>SBOM per release)"]
-        ig["vendored ig binary<br/>(pinned upstream SHA,<br/>cosign-verified at release)"]
+        ig["vendored ig binary<br/>(pinned upstream SHA,<br/>cosign-verified at pin time)"]
     end
     sock[("/var/run/docker.sock")]
     pidns[("--pid=host")]

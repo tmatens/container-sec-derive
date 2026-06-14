@@ -44,9 +44,9 @@ var version = "dev"
 // is unaffected because produceObservation short-circuits to
 // aggregate() before checkIGVersion runs.
 const (
-	PinnedIGVersion      = "v0.51.0"
-	MinIGVersion         = "v0.51.0"
-	MaxTestedIGVersion   = "v0.51.0"
+	PinnedIGVersion    = "v0.51.0"
+	MinIGVersion       = "v0.51.0"
+	MaxTestedIGVersion = "v0.51.0"
 
 	// TraceCapabilitiesGadget is the OCI reference ig pulls to run the
 	// trace_capabilities gadget. ig v0.51.0 is fully image-based: a bare
@@ -62,6 +62,16 @@ const (
 	// to PinnedIGVersion in lockstep with TraceCapabilitiesGadget — bumping
 	// the pin re-pulls both. See ROADMAP §v0.2 and the design in issue #77.
 	TraceOpenGadget = "ghcr.io/inspektor-gadget/gadget/trace_open:" + PinnedIGVersion
+)
+
+// --observe selector values. caps is the v0.1 capability observer (default);
+// fs is the v0.2 read-only-filesystem + tmpfs observer. PLAN.md §Architecture:
+// observers share the four-layer pipeline, so the selector chooses the signal
+// source (trace_capabilities vs trace_open) and the formatter family, not a
+// separate code path per CLI.
+const (
+	ObserveCaps = "caps"
+	ObserveFS   = "fs"
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -246,17 +256,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("csd", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var (
-		container    = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
-		image        = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
-		allMatching  = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
-		fixture        = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
-		fixtureErr     = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
-		inspectFixture = fs.String("inspect-fixture", "", "read pre-captured image-inspection JSON from this file instead of running `docker inspect`")
-		duration     = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
-		igBin        = fs.String("ig", "ig", "path to the ig binary")
-		initWindowMs = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
-		outPath      = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
-		format       = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci)")
+		container        = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
+		image            = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
+		allMatching      = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
+		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities) or fs (read-only filesystem + tmpfs)")
+		mountsFixture    = fs.String("mounts-fixture", "", "fs observer only: read container mount destinations from this `docker inspect` .Mounts JSON instead of running docker inspect")
+		fixture          = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
+		fixtureErr       = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
+		inspectFixture   = fs.String("inspect-fixture", "", "read pre-captured image-inspection JSON from this file instead of running `docker inspect`")
+		duration         = fs.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
+		igBin            = fs.String("ig", "ig", "path to the ig binary")
+		initWindowMs     = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
+		outPath          = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
+		format           = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci)")
 		allowExploratory = fs.Bool("allow-exploratory", false, "compose-lint-profile only: emit under exploratory: even when the acceptance contract is not met")
 		workload         = fs.String("workload", "", "path to the user-supplied workload script that exercised the container; recorded on the sidecar and required by the compose-lint-profile gate")
 		composeIn        = fs.String("compose-in", "", "compose-patch only: path to the user's compose file to diff against")
@@ -282,6 +294,47 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// implemented
 	default:
 		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
+	}
+	switch *observe {
+	case ObserveCaps, ObserveFS:
+		// recognized
+	default:
+		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s", *observe, ObserveCaps, ObserveFS)
+	}
+	if *observe != ObserveFS && *mountsFixture != "" {
+		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
+	}
+	// The v0.2 fs observer is a distinct signal source (trace_open) producing a
+	// read_only/tmpfs recommendation rather than a *Sidecar, so it takes its
+	// own produce→format path and returns before the capability formatter
+	// switch. This increment wires the live signal + the compose formatter
+	// only; the remaining six formatters and the JSON sidecar + confidence
+	// rubric are the deferred follow-on (issue #77), hence the guards below.
+	if *observe == ObserveFS {
+		if *format != FormatCompose {
+			return codedErrorf(ExitUsage, "--observe %s currently supports only --format %s (the other formatters are a follow-on); got %q", ObserveFS, FormatCompose, *format)
+		}
+		if *outPath != "" || *workload != "" {
+			return codedErrorf(ExitUsage, "--out and --workload are not yet supported with --observe %s (the JSON sidecar + confidence rubric are a follow-on)", ObserveFS)
+		}
+		rec, err := produceFSObservation(fsPipelineOpts{
+			AggregateOpts: aggregateOpts{
+				Container:   *container,
+				Image:       *image,
+				AllMatching: *allMatching,
+			},
+			Fixture:       *fixture,
+			MountsFixture: *mountsFixture,
+			IGBin:         *igBin,
+			Duration:      *duration,
+		}, stderr)
+		if err != nil {
+			return err
+		}
+		if err := writeFSCompose(stdout, rec); err != nil {
+			return fmt.Errorf("write fs compose: %w", err)
+		}
+		return nil
 	}
 	if *allowExploratory && *format != FormatComposeLintEntry {
 		return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
@@ -559,9 +612,9 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 	}
 
 	var (
-		wg      sync.WaitGroup
-		lost    int
-		lostMu  sync.Mutex
+		wg     sync.WaitGroup
+		lost   int
+		lostMu sync.Mutex
 	)
 	wg.Add(1)
 	go func() {

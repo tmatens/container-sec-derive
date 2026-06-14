@@ -11,8 +11,11 @@ the relevant entry.
 
 ## [Unreleased]
 
-The privileged-mode decomposition observer (v0.3, device-decomposition first;
-design in issue #92). In progress — landing across several PRs.
+## [0.3.0] - 2026-06-14
+
+The privileged-mode decomposition observer (v0.3): a device-decomposition
+observer plus the full `privileged: true` → `cap_add` + `devices` synthesis.
+Design in issue #92.
 
 ### Added
 
@@ -127,6 +130,7 @@ First signed release — the capability observer.
   no public Rekor) with SBOM + OpenVEX attestations, built on a digest-pinned,
   cosign-verified vendored `ig`.
 
-[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tmatens/container-sec-derive/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tmatens/container-sec-derive/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/tmatens/container-sec-derive/releases/tag/v0.1.0

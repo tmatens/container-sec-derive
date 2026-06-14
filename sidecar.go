@@ -18,6 +18,16 @@ const (
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
+	// PrivilegedSecurityOptCaveat names the dimension the v0.3 privileged
+	// decomposition does NOT recover. `privileged: true` relaxes caps +
+	// devices + masked-path bypass + AppArmor unconfined + seccomp unconfined;
+	// csd observes only the caps + devices halves (no AppArmor/seccomp denial
+	// gadget at the pinned IG). A container that genuinely relies on relaxed
+	// MAC will break if privileged: true is dropped on the strength of this
+	// decomposition alone, so the gap is surfaced explicitly — in the JSON
+	// (privileged_decomposition.security_opt), in every text formatter header,
+	// and as a stderr advisory — rather than left to the generic Caveat.
+	PrivilegedSecurityOptCaveat = "AppArmor/seccomp (security_opt) not observed; this decomposition covers caps + devices only. Verify the workload does not rely on unconfined MAC before dropping privileged: true."
 )
 
 // Confidence levels. String values match PLAN.md §Confidence scoring.
@@ -191,14 +201,22 @@ type DevicePath struct {
 // privilegedDecomposition is the v0.3 headline conclusion of the
 // --observe privileged composition: `privileged: true` is not required, and the
 // minimum non-privileged equivalent is the observed cap set plus the observed
-// device nodes. security_opt (AppArmor/seccomp unconfined) is out of scope for
-// v0.3 (no denial gadget at the pinned IG), so SecurityOpt is intentionally
-// absent — a privileged container may still rely on relaxed MAC that csd does
-// not yet observe, which the caveat covers.
+// device nodes. The decomposition is PARTIAL: security_opt (AppArmor/seccomp
+// unconfined) is out of scope for v0.3 (no denial gadget at the pinned IG), so
+// Partial is always true at v0.3 and SecurityOpt carries
+// PrivilegedSecurityOptCaveat — naming the uncovered dimension to any JSON
+// consumer, not just the stdout reader. When a denial gadget lands and the MAC
+// dimension is observed, Partial flips false and SecurityOpt empties.
 type privilegedDecomposition struct {
 	DropPrivileged bool     `json:"drop_privileged"`
 	CapAdd         []string `json:"cap_add"`
 	Devices        []string `json:"devices"`
+	// Partial: the decomposition recovers caps + devices but not the
+	// AppArmor/seccomp (MAC) dimension privileged: true also relaxes.
+	Partial bool `json:"partial"`
+	// SecurityOpt names the uncovered dimension (PrivilegedSecurityOptCaveat
+	// at v0.3); "" once csd observes the MAC dimension.
+	SecurityOpt string `json:"security_opt"`
 }
 
 // TraceHealth surfaces the IG ringbuf drop counter (PLAN.md §Event-loss

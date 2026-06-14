@@ -106,6 +106,15 @@ Choosing an observer:
 
 Under `--observe fs`, the same seven `--format` values emit the read-only/tmpfs equivalent (e.g. `compose` → `read_only: true` + `tmpfs:`, `docker-run` → `--read-only --tmpfs`, `k8s` → `readOnlyRootFilesystem` + in-memory volumes). Mount correlation under `--image` inspects each observed replica; live mounts otherwise come from the `--container` target.
 
+> **`--observe privileged` is a *partial* decomposition.** `privileged: true`
+> also relaxes AppArmor/seccomp (the `security_opt` dimension), which csd does
+> not yet observe (no denial gadget at the pinned IG). The recommendation
+> covers only the caps + devices dimensions, so before you drop `privileged: true`
+> confirm the workload does not rely on an unconfined AppArmor/seccomp profile.
+> csd flags this on every run: a `partial`/`security_opt` field in the
+> `privileged_decomposition` JSON, a `# WARNING (partial decomposition): …`
+> header in the text formats, and a stderr advisory.
+
 Selecting a target:
 
 | Flag | Meaning |

@@ -704,6 +704,13 @@ func emitAdvisoryWarnings(s *Sidecar, stderr io.Writer) {
 			strings.Join(s.Target.ReplicaCapDisagreement, ", "),
 		)
 	}
+	// The privileged decomposition is partial at v0.3 (caps + devices only,
+	// not AppArmor/seccomp). Warn on every format — including compose-patch
+	// and json, whose output bodies don't carry the `#` caveat comment — so a
+	// user never acts on "drop privileged: true" without seeing the gap.
+	if s.PrivilegedDecomposition != nil && s.PrivilegedDecomposition.Partial {
+		fmt.Fprintf(stderr, "csd: warning: %s\n", s.PrivilegedDecomposition.SecurityOpt)
+	}
 }
 
 // noteWSL2IfDetected emits a one-line stderr advisory pointing at

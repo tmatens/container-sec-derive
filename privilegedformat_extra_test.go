@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -16,6 +17,50 @@ func privSidecar() *Sidecar {
 		DerivedCaps: []string{"CAP_NET_ADMIN"},
 	}
 	return s
+}
+
+// TestPrivilegedDecompositionFlagsPartial asserts the v0.3 decomposition is
+// marked partial and carries the security_opt caveat — the safety signal that
+// keeps a JSON consumer from reading "drop privileged: true" as complete.
+func TestPrivilegedDecompositionFlagsPartial(t *testing.T) {
+	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
+	dev := writeTemp(t, "dev.ndjson", privDevFixture)
+	s, err := producePrivilegedObservation(privilegedPipelineOpts{
+		AggregateOpts: aggregateOpts{Container: "gpu-1", InitWindowMs: 0},
+		Fixture:       caps,
+		DeviceFixture: dev,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pd := s.PrivilegedDecomposition
+	if !pd.Partial {
+		t.Error("decomposition must be marked partial at v0.3")
+	}
+	if pd.SecurityOpt != PrivilegedSecurityOptCaveat {
+		t.Errorf("security_opt = %q, want the caveat constant", pd.SecurityOpt)
+	}
+}
+
+// TestPrivilegedTextFormattersWarn asserts every human-facing privileged
+// formatter surfaces the partial-decomposition / security_opt caveat.
+func TestPrivilegedTextFormattersWarn(t *testing.T) {
+	const sentinel = "security_opt"
+	formatters := map[string]func(io.Writer, *Sidecar) error{
+		"compose":    writePrivilegedCompose,
+		"docker-run": writePrivilegedDockerRun,
+		"k8s":        writePrivilegedK8s,
+		"oci":        writePrivilegedOCI,
+	}
+	for name, fn := range formatters {
+		var b strings.Builder
+		if err := fn(&b, privSidecar()); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !strings.Contains(b.String(), sentinel) {
+			t.Errorf("%s output omits the %q caveat:\n%s", name, sentinel, b.String())
+		}
+	}
 }
 
 func TestWritePrivilegedDockerRun(t *testing.T) {

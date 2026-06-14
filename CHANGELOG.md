@@ -11,6 +11,21 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **`--observe privileged` now flags its decomposition as partial.** The v0.3
+  decomposition recovers only the caps + devices dimensions of `privileged: true`;
+  the AppArmor/seccomp (`security_opt`) dimension is not observed (no denial
+  gadget at the pinned IG). That gap is now surfaced explicitly so a user cannot
+  act on "drop `privileged: true`" without seeing it: the `privileged_decomposition`
+  JSON block gains `partial` (bool) and `security_opt` (the caveat string) fields,
+  every text formatter prints a `# WARNING (partial decomposition): …` header
+  (an `org.containersecderive.security-opt` annotation for `oci`, a
+  `partial_decomposition: true` derivation note for `compose-lint-profile`), and a
+  stderr advisory fires for every format — including `json` and `compose-patch`,
+  whose bodies carry no comment. No schema-version bump: the new fields live
+  inside the already-1.2 `privileged_decomposition` block, absent on caps/fs runs.
+
 ## [0.3.0] - 2026-06-14
 
 The privileged-mode decomposition observer (v0.3): a device-decomposition

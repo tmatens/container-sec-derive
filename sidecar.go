@@ -8,11 +8,13 @@ import "time"
 // consumers (including the compose-lint contribution flow) reject unknown
 // majors. See PLAN.md §Output schema. v0.2 bumped 1.0 → 1.1 for the additive,
 // omitempty fs fields (writable_paths, fs_recommendation,
-// replica_write_path_disagreement) — a 1.0 capability sidecar is byte-identical
-// under 1.1, and a 1.1-aware consumer knows the document may carry the fs block.
+// replica_write_path_disagreement); v0.3 bumps 1.1 → 1.2 for the additive,
+// omitempty device fields (device_paths, device_recommendation,
+// replica_device_disagreement) — a caps or fs sidecar is byte-identical under
+// 1.2, and a 1.2-aware consumer knows the document may carry the device block.
 const (
-	SchemaVersion = "1.1"
-	ToolVersion   = "0.2.0"
+	SchemaVersion = "1.2"
+	ToolVersion   = "0.3.0"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
@@ -58,6 +60,14 @@ type Sidecar struct {
 	// and these carry the observation.
 	WritablePaths    []WritablePath    `json:"writable_paths,omitempty"`
 	FSRecommendation *fsRecommendation `json:"fs_recommendation,omitempty"`
+
+	// v0.3 device-decomposition observer section. Both fields are
+	// omitempty + nil on a capability or fs run, so those sidecars serialize
+	// byte-identically to pre-v0.3 (PLAN.md §Output schema). On an
+	// `--observe devices` run the capability and fs scaffolding stay empty
+	// and these carry the observation.
+	DevicePaths          []DevicePath          `json:"device_paths,omitempty"`
+	DeviceRecommendation *deviceRecommendation `json:"device_recommendation,omitempty"`
 
 	TraceHealth TraceHealth `json:"trace_health"`
 	Confidence  Confidence  `json:"confidence"`
@@ -110,6 +120,12 @@ type Target struct {
 	// on single-replica fs runs; populated by the multi-replica fs
 	// correlation (PR-C) and read by computeFSConfidence.
 	ReplicaWritePathDisagreement []string `json:"replica_write_path_disagreement,omitempty"`
+	// ReplicaDeviceDisagreement is the v0.3 device analog: device nodes
+	// observed on fewer than all replicas under --all-matching. omitempty +
+	// nil on caps/fs runs and single-replica device runs; populated by the
+	// multi-replica device correlation (PR5) and read by
+	// computeDeviceConfidence.
+	ReplicaDeviceDisagreement []string `json:"replica_device_disagreement,omitempty"`
 }
 
 // Restart records a single exit-during-observation event. Attribution is
@@ -151,6 +167,18 @@ const (
 	DispositionVolumeCovered  = "volume_covered"
 	DispositionTmpfsCandidate = "tmpfs_candidate"
 )
+
+// DevicePath is one distinct non-default device node opened by the v0.3 device
+// observer, the privileged-decomposition analog of WritablePath. The aggregator
+// collapses N opens of one node into a single entry with an event count and
+// comm samples for reviewer auditability. There is no Disposition field: a
+// device node is not volume-correlated — it is either granted (in the
+// recommendation) or not.
+type DevicePath struct {
+	Path        string   `json:"path"`
+	EventCount  int      `json:"event_count"`
+	CommSamples []string `json:"comm_samples,omitempty"`
+}
 
 // TraceHealth surfaces the IG ringbuf drop counter (PLAN.md §Event-loss
 // reporting). Always emitted; never hidden. drop_rate >= 1% downgrades

@@ -1,0 +1,47 @@
+# Go vulnerability scanning for container-sec-derive.
+#
+# govulncheck checks the module + the pinned Go toolchain's standard library
+# against the Go vulnerability database, using call-graph reachability analysis
+# so it reports only vulnerabilities actually reachable from csd's code (low
+# false-positive rate). csd is stdlib-only at runtime, so in practice this
+# tracks Go stdlib / toolchain CVEs — exactly the surface a root-equivalent
+# binary cares about. Runs on PRs (gating), push to main, and weekly (so a
+# newly-published advisory against unchanged code still surfaces).
+#
+# Complementary to codeql.yml: govulncheck = known-CVE reachability;
+# CodeQL = pattern-based static analysis.
+#
+# Pinning (CLAUDE.md §Dependency pinning): every `uses:` is SHA-pinned with a
+# trailing tag comment. govulncheck is pinned to an immutable version tag below
+# (its module download is checksum-verified by the Go toolchain) — bump the
+# version and this comment together.
+name: govulncheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly; offset from codeql.yml so the two don't contend for runners.
+    - cron: "41 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+          "$(go env GOPATH)/bin/govulncheck" ./...

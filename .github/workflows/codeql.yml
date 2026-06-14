@@ -1,0 +1,83 @@
+# CodeQL static analysis for container-sec-derive (Go + GitHub Actions).
+#
+# ARTIFACT MODE — private-repo posture. csd is a private repo without GitHub
+# Advanced Security, so code scanning is disabled and SARIF cannot be uploaded
+# to the Security tab. We therefore run the analysis with `upload: false` and
+# publish the SARIF as a workflow artifact for manual review. The analysis
+# still fails the build on extraction/analysis errors (it does NOT fail on
+# findings — those live in the artifact, same as a normal CodeQL run).
+#
+# WHEN THE REPO GOES PUBLIC (or GHAS is enabled): set `upload: always` on the
+# analyze step, add `security-events: write` to the job permissions, drop the
+# upload-artifact step, and CodeQL alerts land in the Security tab and on PRs
+# automatically. (This is the same COI-gated flip as OpenSSF Scorecard and
+# cosign keyless — see ROADMAP §Maturity.)
+#
+# Pinning (CLAUDE.md §Dependency pinning): every `uses:` is SHA-pinned with a
+# trailing tag comment.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly run catches new CodeQL queries / advisories on unchanged code.
+    - cron: "27 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # codeql-action/analyze prechecks this scope even though `upload: never`
+      # means nothing is actually pushed to Code Scanning (so no GHAS is
+      # exercised on this private repo). Granting the scope is harmless; the
+      # action just doesn't use it.
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      # Put the go.mod toolchain on PATH so CodeQL's Go autobuilder compiles
+      # with the same version CI uses, not CodeQL's bundled Go.
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        with:
+          category: "/language:${{ matrix.language }}"
+          # Private repo, no GHAS — see the header. `upload` is an enum
+          # (always|failure-only|never), not a boolean; `never` keeps the SARIF
+          # local (written to `output`) instead of pushing it to Code Scanning.
+          # Flip to `always` when the repo is public / GHAS is enabled.
+          upload: never
+          upload-database: false
+          output: sarif-results
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codeql-${{ matrix.language }}-sarif
+          path: sarif-results
+          retention-days: 7

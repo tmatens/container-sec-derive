@@ -36,6 +36,15 @@ design in issue #92). In progress — landing across several PRs.
   ambiguity error for more than one replica without `--all-matching`, a
   per-replica device union, and `replica_device_disagreement` fed to confidence
   and the compose-lint contract.
+- **`--observe privileged`**: composes the capability and device observers (two
+  concurrent `ig` gadget streams live; `--fixture` + `--device-fixture`
+  hermetically) and emits the minimum non-privileged equivalent — drop
+  `privileged: true`, add the observed `cap_add` + `devices`. The sidecar gains
+  a `privileged_decomposition` block; confidence is the worse of the two
+  observers' grades, with factors tagged `[caps]`/`[devices]`. `security_opt`
+  (AppArmor/seccomp) is out of scope for v0.3 (no denial gadget at the pinned
+  IG). `json` and `compose` output land in this increment; the remaining
+  formatters follow. Implements **CL-0002**.
 
 ### Changed
 

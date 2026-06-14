@@ -69,6 +69,14 @@ type Sidecar struct {
 	DevicePaths          []DevicePath          `json:"device_paths,omitempty"`
 	DeviceRecommendation *deviceRecommendation `json:"device_recommendation,omitempty"`
 
+	// v0.3 privileged-mode decomposition (the --observe privileged composition).
+	// omitempty + nil on every single-observer run; present only when both the
+	// capability and device observers ran together and csd synthesized the
+	// minimum non-privileged equivalent. The Capabilities + DeviceRecommendation
+	// blocks above carry the full evidence; this block is the headline
+	// conclusion (drop privileged: true → cap_add + devices).
+	PrivilegedDecomposition *privilegedDecomposition `json:"privileged_decomposition,omitempty"`
+
 	TraceHealth TraceHealth `json:"trace_health"`
 	Confidence  Confidence  `json:"confidence"`
 	Caveat      string      `json:"caveat"`
@@ -178,6 +186,19 @@ type DevicePath struct {
 	Path        string   `json:"path"`
 	EventCount  int      `json:"event_count"`
 	CommSamples []string `json:"comm_samples,omitempty"`
+}
+
+// privilegedDecomposition is the v0.3 headline conclusion of the
+// --observe privileged composition: `privileged: true` is not required, and the
+// minimum non-privileged equivalent is the observed cap set plus the observed
+// device nodes. security_opt (AppArmor/seccomp unconfined) is out of scope for
+// v0.3 (no denial gadget at the pinned IG), so SecurityOpt is intentionally
+// absent — a privileged container may still rely on relaxed MAC that csd does
+// not yet observe, which the caveat covers.
+type privilegedDecomposition struct {
+	DropPrivileged bool     `json:"drop_privileged"`
+	CapAdd         []string `json:"cap_add"`
+	Devices        []string `json:"devices"`
 }
 
 // TraceHealth surfaces the IG ringbuf drop counter (PLAN.md §Event-loss

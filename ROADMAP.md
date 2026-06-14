@@ -142,10 +142,20 @@ but together they are the difference between "works" and "mature."
 
 **Security automation:**
 
-- **OpenSSF Scorecard** workflow (`scorecard.yml`) — a measurable, public
-  supply-chain posture score, the same signal compose-lint publishes.
-- **CodeQL** (`codeql.yml`) — Go static analysis on PRs (csd is pure Go;
-  CodeQL covers it).
+- ✅ **`govulncheck.yml`** — Go vulnerability scanning with call-graph
+  reachability, gating PRs + push + weekly. Works on the private repo (no GHAS
+  needed) since it reports to the job log, not the Security tab.
+- ✅ **CodeQL** (`codeql.yml`) — Go + GitHub-Actions static analysis, gating
+  PRs + push + weekly. Runs in **artifact mode** (`upload: false` → SARIF
+  artifact) because csd is a **private repo without GitHub Advanced Security**,
+  so code scanning / the Security tab are unavailable. **COI-gated flip:** when
+  the repo goes public (or GHAS is enabled), switch `upload: true` + add
+  `security-events: write` and alerts land in the Security tab + PRs.
+- **OpenSSF Scorecard** (`scorecard.yml`) — **deferred, COI-gated.** Its value
+  (the published supply-chain score + SARIF in the Security tab) needs a
+  **public** repo; `publish_results` on a private repo would also leak the
+  repo's existence (same reason the README badges are static). Add it at the
+  public flip alongside the CodeQL `upload` change.
 - **Continuous fuzzing (ClusterFuzzLite)** — v0.2 added Go fuzz *targets*; wiring
   them into a `cflite-pr` / `cflite-batch` flow (as compose-lint does) turns
   one-off seeds into ongoing coverage of the `ig`/`docker` output parsers.

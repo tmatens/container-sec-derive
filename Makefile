@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 missrate build test vet image image-local verify-ig-pin
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 missrate build test vet image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from main.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -80,6 +80,13 @@ verify-ig-pin:
 		--key ig-pin/inspektor-gadget.pub \
 		--bundle ig-pin/SHA256SUMS.bundle \
 		ig-pin/SHA256SUMS
+
+# ig-provenance prints the vendored-ig provenance predicate (IG version +
+# upstream per-arch digests + the cosign-verified pin) to stdout. release.yml
+# attests this to the image manifest; TestIGProvenancePredicate gates it at PR
+# time. Run it to eyeball what will be attested.
+ig-provenance:
+	@./scripts/gen-ig-provenance.sh
 
 # image builds a local single-arch image for development. Multi-arch
 # build + push lives in .github/workflows/image-build.yml; doing it

@@ -362,3 +362,23 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: cosign attest --yes --key env://COSIGN_PRIVATE_KEY --tlog-upload=false --type openvex --predicate .vex/container-sec-derive.openvex.json "ghcr.io/tmatens/container-sec-derive@${DIGEST}"
+      # Vendored `ig` provenance: IG version + upstream per-arch tarball digests
+      # + the cosign-verified pin, emitted deterministically from ig-pin/ (no
+      # network). syft's image SBOM catalogs ig as a Go binary but not its
+      # upstream artifact digests or that the pin is cosign-verified; this
+      # records that explicitly. Predicate is gated at PR time by
+      # TestIGProvenancePredicate; only this attest call needs a release run.
+      - name: Generate ig provenance predicate
+        run: ./scripts/gen-ig-provenance.sh > ig-provenance.json
+      - name: Attest ig provenance to image (key-based, no tlog)
+        env:
+          DIGEST: ${{ steps.inspect.outputs.digest }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign attest --yes \
+            --key env://COSIGN_PRIVATE_KEY \
+            --tlog-upload=false \
+            --type https://github.com/tmatens/container-sec-derive/attestations/ig-provenance/v1 \
+            --predicate ig-provenance.json \
+            "ghcr.io/tmatens/container-sec-derive@${DIGEST}"

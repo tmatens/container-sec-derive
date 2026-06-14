@@ -42,8 +42,12 @@ type privilegedPipelineOpts struct {
 // the two observers' grades (computePrivilegedConfidence).
 //
 // security_opt is out of scope for v0.3 (no AppArmor/seccomp denial gadget at
-// the pinned IG); the standing Caveat covers the residual that relaxed MAC,
-// which csd does not yet observe, may still be load-bearing.
+// the pinned IG), so the decomposition is flagged Partial and carries
+// PrivilegedSecurityOptCaveat. That gap is surfaced explicitly — in the JSON
+// block, in every text formatter header (privilegedCaveatComment), and via the
+// stderr advisory in emitAdvisoryWarnings — so a user cannot read the headline
+// "drop privileged: true" without also seeing that the relaxed-MAC dimension is
+// unobserved and may still be load-bearing.
 func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer) (*Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
@@ -151,6 +155,8 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 		DropPrivileged: true,
 		CapAdd:         s.CapNames(),
 		Devices:        devices,
+		Partial:        true,
+		SecurityOpt:    PrivilegedSecurityOptCaveat,
 	}
 
 	s.ObservedAt = observedAt

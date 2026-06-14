@@ -17,12 +17,27 @@ import (
 // JSON needs no privileged variant — writeJSON already serializes the full
 // sidecar (capabilities + device_recommendation + privileged_decomposition).
 
+// privilegedCaveatComment writes the partial-decomposition warning as a
+// `#`-prefixed line (safe in compose/k8s/docker-run output). It names the
+// AppArmor/seccomp dimension the decomposition does NOT recover so a user
+// pasting the minimum config still sees that relaxed MAC, if relied upon, is
+// not covered. Kept out of the compose-patch unified diff (a `#` line there
+// would not be a valid hunk); that path relies on the JSON block + stderr
+// advisory instead.
+func privilegedCaveatComment(w io.Writer) error {
+	_, err := fmt.Fprintf(w, "# WARNING (partial decomposition): %s\n", PrivilegedSecurityOptCaveat)
+	return err
+}
+
 // writePrivilegedCompose emits the compose decomposition of `privileged: true`:
 // a drop-privileged header, then the capability stanza (cap_drop: [ALL] +
 // cap_add), then the device stanza (devices:). The result pastes under a
 // service in place of `privileged: true`.
 func writePrivilegedCompose(w io.Writer, s *Sidecar) error {
 	if _, err := fmt.Fprintln(w, "# privileged: true is not required; drop it and apply the minimum below:"); err != nil {
+		return err
+	}
+	if err := privilegedCaveatComment(w); err != nil {
 		return err
 	}
 	if err := writeCompose(w, s); err != nil {
@@ -41,6 +56,9 @@ func writePrivilegedCompose(w io.Writer, s *Sidecar) error {
 // cleanly (both are flag strings), so this reuses both single-observer writers.
 func writePrivilegedDockerRun(w io.Writer, s *Sidecar) error {
 	if _, err := fmt.Fprintln(w, "# privileged: true is not required; drop it and apply the minimum below:"); err != nil {
+		return err
+	}
+	if err := privilegedCaveatComment(w); err != nil {
 		return err
 	}
 	if err := writeDockerRun(w, s); err != nil {
@@ -63,6 +81,9 @@ func writePrivilegedDockerRun(w io.Writer, s *Sidecar) error {
 // SecurityContext grant).
 func writePrivilegedK8s(w io.Writer, s *Sidecar) error {
 	if _, err := fmt.Fprintln(w, "# privileged: true is not required; the minimum non-privileged equivalent is below."); err != nil {
+		return err
+	}
+	if err := privilegedCaveatComment(w); err != nil {
 		return err
 	}
 	var devices []string
@@ -129,7 +150,8 @@ func writePrivilegedOCI(w io.Writer, s *Sidecar) error {
 		derivedCaps = s.DeviceRecommendation.DerivedCaps
 	}
 	annotations := map[string]string{
-		"org.containersecderive.privileged": "not-required; minimum equivalent is process.capabilities + the devices below",
+		"org.containersecderive.privileged":   "not-required; minimum equivalent is process.capabilities + the devices below",
+		"org.containersecderive.security-opt": PrivilegedSecurityOptCaveat,
 	}
 	if len(devices) > 0 {
 		annotations["org.containersecderive.observed-devices"] = strings.Join(devices, ",")
@@ -277,6 +299,7 @@ func writePrivilegedComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory
 	fmt.Fprintf(w, "%sderivation:\n", bodyIndent)
 	fmt.Fprintf(w, "%s  tool: container-sec-derive\n", bodyIndent)
 	fmt.Fprintf(w, "%s  observer: privileged\n", bodyIndent)
+	fmt.Fprintf(w, "%s  partial_decomposition: true # %s\n", bodyIndent, PrivilegedSecurityOptCaveat)
 	fmt.Fprintf(w, "%s  tool_version: %s\n", bodyIndent, s.ToolVersion)
 	fmt.Fprintf(w, "%s  schema_version: %q\n", bodyIndent, s.SchemaVersion)
 	fmt.Fprintf(w, "%s  duration_seconds: %d\n", bodyIndent, s.DurationSeconds)

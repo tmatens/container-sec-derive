@@ -93,6 +93,47 @@ func TestRun_ReplicaDisagreementWarnsToStderr(t *testing.T) {
 	}
 }
 
+func TestRun_PrivilegedPartialDecompositionWarnsToStderr(t *testing.T) {
+	// A --observe privileged run must always warn that the decomposition is
+	// partial (caps + devices only, no AppArmor/seccomp). json's body carries
+	// no `#` caveat, so the stderr advisory is the only guardrail for it —
+	// assert it fires here.
+	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
+	dev := writeTemp(t, "dev.ndjson", privDevFixture)
+	var out, errBuf bytes.Buffer
+	err := run([]string{
+		"--observe", "privileged",
+		"--container", "gpu-1",
+		"--fixture", caps,
+		"--device-fixture", dev,
+		"--init-window-ms", "0",
+		"--format", "json",
+	}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
+	}
+	stderrStr := errBuf.String()
+	if !strings.Contains(stderrStr, "csd: warning:") || !strings.Contains(stderrStr, "security_opt") {
+		t.Errorf("expected partial-decomposition security_opt warning on stderr, got:\n%s", stderrStr)
+	}
+}
+
+func TestRun_NonPrivilegedNoSecurityOptWarning(t *testing.T) {
+	// A plain caps run has no privileged_decomposition, so the security_opt
+	// advisory must stay silent — it is scoped to --observe privileged.
+	var out, errBuf bytes.Buffer
+	err := run([]string{
+		"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--container", "postgres-1",
+	}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
+	}
+	if strings.Contains(errBuf.String(), "security_opt") {
+		t.Errorf("non-privileged run produced spurious security_opt warning:\n%s", errBuf.String())
+	}
+}
+
 func TestRun_SingleReplicaNoDisagreementWarning(t *testing.T) {
 	// --container against a single replica must never emit a
 	// disagreement warning (it's structurally undefined for n=1).

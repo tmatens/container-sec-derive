@@ -409,10 +409,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// PRs, hence the format guard.
 	if *observe == ObserveDevices {
 		switch *format {
-		case FormatCompose, FormatJSON:
+		case FormatCompose, FormatJSON, FormatDockerRun, FormatK8s, FormatOCI:
 			// implemented in this increment
 		default:
-			return codedErrorf(ExitUsage, "--format %s not yet implemented for --observe %s; use %s or %s", *format, ObserveDevices, FormatJSON, FormatCompose)
+			return codedErrorf(ExitUsage, "--format %s not yet implemented for --observe %s; use %s, %s, %s, %s, or %s", *format, ObserveDevices, FormatJSON, FormatCompose, FormatDockerRun, FormatK8s, FormatOCI)
 		}
 		if *allowExploratory {
 			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
@@ -442,6 +442,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatJSON:
 			if err := writeJSON(stdout, s); err != nil {
 				return fmt.Errorf("write json: %w", err)
+			}
+		case FormatDockerRun:
+			if err := writeDeviceDockerRun(stdout, *s.DeviceRecommendation); err != nil {
+				return fmt.Errorf("write device docker-run: %w", err)
+			}
+		case FormatK8s:
+			if err := writeDeviceK8s(stdout, *s.DeviceRecommendation); err != nil {
+				return fmt.Errorf("write device k8s: %w", err)
+			}
+		case FormatOCI:
+			if err := writeDeviceOCI(stdout, *s.DeviceRecommendation); err != nil {
+				return fmt.Errorf("write device oci: %w", err)
 			}
 		}
 		if *outPath != "" {

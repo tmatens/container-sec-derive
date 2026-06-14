@@ -271,13 +271,13 @@ The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/con
 cosign verify \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.1.0
+  ghcr.io/tmatens/container-sec-derive:0.3.0
 
 # Attestations (SBOM + OpenVEX)
 cosign verify-attestation --type spdxjson \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.1.0
+  ghcr.io/tmatens/container-sec-derive:0.3.0
 
 # Vendored ig provenance — IG version, upstream per-arch tarball digests, and
 # the cosign-verified pin (predicate sourced from ig-pin/)
@@ -285,10 +285,10 @@ cosign verify-attestation \
   --type https://github.com/tmatens/container-sec-derive/attestations/ig-provenance/v1 \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.1.0
+  ghcr.io/tmatens/container-sec-derive:0.3.0
 ```
 
-> **Status:** live as of `v0.1.0` — these commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
+> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.3.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
 
 ## License
 

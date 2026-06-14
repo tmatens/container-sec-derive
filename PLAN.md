@@ -163,17 +163,21 @@ Opt-in follow:
 
 ### Output schema
 
-JSON evidence sidecar (canonical artifact; all formatters derive from this):
+JSON evidence sidecar (canonical artifact; all formatters derive from this).
+The example below is a **`--observe caps`** run; it is byte-identical across
+versions except `schema_version`/`tool_version`, because the v0.2/v0.3 observer
+blocks are `omitempty` and absent on a caps run (see *Schema evolution policy*
+below for the additive blocks an `fs`/`devices`/`privileged` run adds):
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.2",
   "image": "postgres:16",
   "image_digest": "sha256:...",
   "observed_at": "2026-04-19T15:00:00Z",
   "duration_seconds": 600,
   "workload": "exercises/postgres.sh",
-  "tool_version": "0.1.0",
+  "tool_version": "0.3.0",
   "kernel_version": "6.8.0-...",
   "target": {
     "mode": "container | image | all-matching",
@@ -223,7 +227,7 @@ JSON evidence sidecar (canonical artifact; all formatters derive from this):
 
 **Schema evolution policy.** `schema_version` follows semver-on-schema: additive, non-breaking field additions within a major (`1.x`); removals or semantic changes bump the major. Formatters accept any `1.x` and ignore unknown fields. Consumers (including the compose-lint contribution flow) must reject unknown majors. Every release ships a `schema_version` test fixture asserting the shape hasn't silently drifted.
 
-The schema is observer-agnostic-ish: future observers add their own top-level array (e.g., `"writable_paths"`) alongside `"capabilities"`. Formatters select the relevant section. Adding a new observer's top-level block is an additive change within the current major.
+The schema is observer-agnostic-ish: each observer adds its own top-level block alongside `"capabilities"`, all `omitempty` so a run that didn't use an observer serializes without its block. This has happened twice so far, both additive within major `1`: `1.1` added the v0.2 fs blocks (`writable_paths`, `fs_recommendation`, `target.replica_write_path_disagreement`); `1.2` added the v0.3 device + privileged blocks (`device_paths`, `device_recommendation`, `privileged_decomposition`, `target.replica_device_disagreement`). Formatters select the relevant section. Adding a new observer's top-level block is an additive change within the current major.
 
 **Per-replica disagreement.** `replica_cap_disagreement` lists any cap observed on fewer than all replicas under `--all-matching`. Non-empty disagreement forces confidence to at most `moderate`; a disagreement of > 1 cap forces `low` (see rubric). This prevents the tool from silently emitting the union of replica cap sets as if every replica needed every cap.
 
@@ -432,7 +436,7 @@ Locked calls. Reversible if evidence emerges, but the defaults stand.
 - **Signing:** cosign signatures on both binary and image. While the project is unpublished (employer COI), signing is **key-based with `--tlog-upload=false`** (project key `cosign.pub`; secrets `COSIGN_PRIVATE_KEY`/`COSIGN_PASSWORD`) so nothing hits the public Rekor log — consistent with the COI rule that only *public* exposure is gated. Verification command documented in README (`cosign verify --key cosign.pub --insecure-ignore-tlog …`). When the project goes public, switching to keyless (Sigstore / GitHub OIDC + Rekor) is a deliberate, reviewable change. Unsigned artifacts are not released.
 - **SBOM:** generated with `syft` at release time, published alongside artifacts in SPDX + CycloneDX JSON. Listed in the release checksums manifest.
 - **Checksums:** `SHA256SUMS` per release, itself cosign-signed.
-- **Vendored `ig` provenance:** the vendored IG binary is fetched at release time from IG's official release artifacts, verified against IG's own cosign signature, and pinned to a specific upstream release SHA. The IG version and its upstream per-arch digests are recorded as a dedicated cosign **attestation on the image** — the `ig-provenance` predicate (type `…/attestations/ig-provenance/v1`), emitted deterministically from the committed pin by `scripts/gen-ig-provenance.sh` and attested in `release.yml`; this is preferred over mutating syft's image SBOM (which catalogs `ig` as a Go binary but not the upstream artifact digests or that the pin is cosign-verified). The predicate is gated at PR time by `TestIGProvenancePredicate`. Release automation fails closed if IG's signature does not verify — no fallback download path, no "I'll just grab the latest" escape hatch.
+- **Vendored `ig` provenance:** the vendored IG binary is pinned to a specific upstream release SHA. Its cosign signature is verified **at pin time** by `scripts/refresh-ig-pin.sh` (against IG's freshly fetched key), which commits the verified `SHA256SUMS` under `ig-pin/`; the image build then re-fetches the tarball at build time and verifies it offline with `sha256sum -c` against that committed, cosign-verified-at-pin-time manifest — no cosign runs in the builder. The IG version and its upstream per-arch digests are recorded as a dedicated cosign **attestation on the image** — the `ig-provenance` predicate (type `…/attestations/ig-provenance/v1`), emitted deterministically from the committed pin by `scripts/gen-ig-provenance.sh` and attested in `release.yml`; this is preferred over mutating syft's image SBOM (which catalogs `ig` as a Go binary but not the upstream artifact digests or that the pin is cosign-verified). The predicate is gated at PR time by `TestIGProvenancePredicate`. Both stages fail closed — cosign at pin time, `sha256sum -c` at build — with no fallback download path and no "I'll just grab the latest" escape hatch.
 - **Reproducible builds:** goal, not hard requirement for v1. Pinned Go toolchain, `-trimpath`, vendored IG binary at a pinned SHA. Document current reproducibility status honestly in `docs/releases.md` rather than overclaiming — specifically, "signed" and "reproducible" are distinct properties and must not be conflated in release notes.
 
 **Threat model (one paragraph, not a full assessment):** if a compromised `csd` runs against a target container, it can read the target's process state and attach arbitrary eBPF programs with the privileges granted. It also has whatever the mounted container-runtime socket exposes — which, for the Docker and Podman sockets, is full container-create-and-mutate authority regardless of whether the bind mount is `:ro` (the `:ro` constrains the socket file, not the API). `csd observe` is coded to issue only read calls; `csd verify` creates a container under the proposed config to re-run the workload and therefore exercises the write surface deliberately. Either way, the *capability* granted to the process is root-equivalent on the host. Users treating `csd` as "untrusted until verified" should run it against throwaway infrastructure first and verify signatures before production use. Short statement: this tool's blast radius equals any other privileged BPF + Docker-API tool on the host.

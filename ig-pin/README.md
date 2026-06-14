@@ -1,10 +1,13 @@
 # `ig-pin/` — vendored Inspektor Gadget release pin
 
 This directory pins the exact upstream Inspektor Gadget release that
-csd's container image bundles. It exists so the image build can verify
-the bundled `ig` binary fully offline at build time, without trusting
-whatever is at `https://github.com/inspektor-gadget/inspektor-gadget/...`
-on the day the build runs.
+csd's container image bundles. The cosign signature is verified **at pin
+time** (`scripts/refresh-ig-pin.sh`), producing a committed, reviewed
+`SHA256SUMS`; the image build then verifies the bundled `ig` binary
+against that committed manifest fully offline — **no cosign runs in the
+builder** — without trusting whatever is at
+`https://github.com/inspektor-gadget/inspektor-gadget/...` on the day the
+build runs.
 
 The pinned IG version itself lives in `main.go` as `PinnedIGVersion`
 (it doubles as csd's runtime schema-compatibility check); this directory
@@ -13,25 +16,36 @@ pins the *artifact integrity* for that version.
 ## Files
 
 - **`inspektor-gadget.pub`** — IG's long-lived cosign public key, vetted
-  and committed at pin time. The Dockerfile uses this key (not whatever
-  is at the upstream URL today) to verify the bundled `SHA256SUMS`.
+  and committed at pin time. `scripts/refresh-ig-pin.sh` verifies the
+  manifest against the *freshly fetched* copy of this key; the committed
+  copy makes a key rotation visible as a diff in the pin-bump commit. It
+  is **not** consumed by the Dockerfile.
 - **`SHA256SUMS`** — IG's release manifest for the pinned version, listing
-  sha256 digests for every artifact in the release.
+  sha256 digests for every artifact in the release. This is the file the
+  Dockerfile trusts at build time (it was cosign-verified at pin time).
 - **`SHA256SUMS.bundle`** — IG's cosign signature bundle covering
-  `SHA256SUMS`, sufficient for `cosign verify-blob --key ... --bundle ...`.
+  `SHA256SUMS`. Used by `cosign verify-blob` at pin time (in
+  `refresh-ig-pin.sh`); committed for auditability. The Dockerfile does
+  not read it.
 
 ## Build-time verification flow (Dockerfile)
 
-1. `cosign verify-blob --key ig-pin/inspektor-gadget.pub --bundle ig-pin/SHA256SUMS.bundle ig-pin/SHA256SUMS`
-   — confirms the committed manifest was signed by IG.
-2. Download `ig-linux-${TARGETARCH}-${PinnedIGVersion}.tar.gz` from the
-   GitHub release.
-3. `sha256sum -c <(grep "ig-linux-${TARGETARCH}-${PinnedIGVersion}.tar.gz$" ig-pin/SHA256SUMS)`
-   — confirms the downloaded binary matches the manifest.
-4. Extract; copy the `ig` binary into the final image.
+The build does **not** re-run cosign — the manifest was already
+cosign-verified at pin time and committed. It only confirms the freshly
+downloaded binary matches that committed, reviewed manifest:
 
-A failure at any step is non-recoverable: the build aborts. There is no
-fallback download path (PLAN.md §Supply-chain).
+1. Copy the committed `ig-pin/SHA256SUMS` into the build stage.
+2. Download `ig-linux-${TARGETARCH}-${IG_VERSION}.tar.gz` from the
+   GitHub release.
+3. `sha256sum -c` the download against the matching line in
+   `SHA256SUMS` (the build errors if the arch line is absent).
+4. Extract; install the `ig` binary into the final image.
+
+The cosign link in the chain lives one step earlier, at pin time (see
+*Refresh procedure*): cosign-verified manifest → committed `SHA256SUMS`
+→ `sha256sum -c` at build. A failure at any build step is
+non-recoverable: the build aborts. There is no fallback download path
+(PLAN.md §Supply-chain).
 
 ## Refresh procedure
 

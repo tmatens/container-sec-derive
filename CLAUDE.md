@@ -58,6 +58,7 @@ secrets-free result comment on the PR. Locally: `make smoke-wsl2`, `make missrat
 - All commits SSH-signed. Verify: `git log --format='%h %G? %s'` — every commit shows `G`.
 - All changes via PR, squash-merge to main.
 - **Update the docs your change touches in the same PR**, so the entry-point docs never trail `main`: keep the CLAUDE.md status section current, update the PLAN.md build order, tick PLAN.md success-criteria boxes (only with evidence, never on intent), and bump ROADMAP if a phase moved. Don't reference uncommitted/ephemeral files from committed prose.
+- **Add a `CHANGELOG.md` `[Unreleased]` entry for any version-visible change** (new observer/formatter/flag, behavior change, schema bump, security fix). Format is [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) — group under `Added`/`Changed`/`Fixed`/`Removed`/`Security`. Pure refactors, test-only, and internal-doc PRs don't need an entry. The release process versions the `[Unreleased]` section; see `docs/RELEASING.md`.
 
 ## Dependency pinning
 

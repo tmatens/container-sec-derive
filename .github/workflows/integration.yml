@@ -179,6 +179,25 @@ jobs:
           cat smoke_fs.txt
           exit $rc
 
+      # First end-to-end exercise of the v0.3 device-decomposition
+      # (--observe devices) and privileged-mode decomposition
+      # (--observe privileged) observers. The device observer reuses the
+      # trace_open gadget (attach already proven by the fs smoke above); what
+      # this adds is the device classifier on a real stream and the privileged
+      # composition's CONCURRENT two-gadget live path (trace_capabilities +
+      # trace_open in one window). Hardware-free hard gate: the synthetic
+      # exerciser is run with a mapped non-default /dev node
+      # (--device /dev/null:/dev/csd-exerciser-dev) it opens every cycle, so no
+      # GPU/tun/kvm is needed on the runner (scripts/smoke_device.sh).
+      - name: Live-BPF device smoke matrix
+        env:
+          DURATION: ${{ github.event.inputs.duration || '30s' }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/smoke_device.sh > smoke_device.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_device.txt
+          exit $rc
+
       # Route the verdict to channels readable WITHOUT the Actions log
       # API (which is unreachable from some clients): a PR comment +
       # the job summary. SECURITY: the report is a strict ALLOWLIST —
@@ -203,7 +222,9 @@ jobs:
                        echo '-- caps observer --'; \
                        grep -hE '^(PASS|FAIL|INFO|smoke-wsl2:)' smoke.txt 2>/dev/null || true; \
                        echo '-- fs observer --'; \
-                       grep -hE '^(PASS|FAIL|INFO|smoke-fs:)' smoke_fs.txt 2>/dev/null || true; } )"
+                       grep -hE '^(PASS|FAIL|INFO|smoke-fs:)' smoke_fs.txt 2>/dev/null || true; \
+                       echo '-- devices / privileged observer --'; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-device:)' smoke_device.txt 2>/dev/null || true; } )"
           [ -n "$report" ] || report="(no status lines captured — see the Actions run)"
           { echo "### Live-BPF integration report";
             echo "[run](${RUN_URL})";

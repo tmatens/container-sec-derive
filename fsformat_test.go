@@ -1,0 +1,47 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestWriteFSCompose(t *testing.T) {
+	t.Run("read_only only when no rootfs writes", func(t *testing.T) {
+		var b strings.Builder
+		if err := writeFSCompose(&b, fsRecommendation{ReadOnly: true}); err != nil {
+			t.Fatal(err)
+		}
+		if got := b.String(); got != "read_only: true\n" {
+			t.Errorf("got %q, want just read_only: true", got)
+		}
+	})
+
+	t.Run("read_only + tmpfs list", func(t *testing.T) {
+		var b strings.Builder
+		rec := fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
+		if err := writeFSCompose(&b, rec); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		for _, want := range []string{
+			"read_only: true\n",
+			"tmpfs:\n",
+			"  - /var/log/postgresql\n",
+			"  - /var/run/postgresql\n",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("output missing %q\n--- got ---\n%s", want, out)
+			}
+		}
+		// The review note must be a YAML comment so the stanza stays paste-ready.
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if strings.Contains(line, "review") && !strings.HasPrefix(strings.TrimSpace(line), "#") {
+				t.Errorf("review note is not a comment: %q", line)
+			}
+		}
+		// read_only must precede tmpfs.
+		if strings.Index(out, "read_only") > strings.Index(out, "tmpfs:") {
+			t.Error("read_only should precede tmpfs")
+		}
+	})
+}

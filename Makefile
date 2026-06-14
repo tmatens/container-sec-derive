@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs missrate build test vet image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device missrate build test vet image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from main.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -61,6 +61,14 @@ smoke-wsl2: build
 # smoke-wsl2.
 smoke-fs: build
 	./scripts/smoke_fs.sh
+
+# device smoke — see scripts/smoke_device.sh. Runs `csd --observe devices`
+# and `csd --observe privileged` against the synthetic exerciser run with a
+# mapped non-default /dev node (`--device /dev/null:/dev/csd-exerciser-dev`):
+# hardware-free, deterministic hard gates for the device classifier and the
+# privileged composition's concurrent two-gadget live path.
+smoke-device: build
+	./scripts/smoke_device.sh
 
 # missrate measures the kretprobe capture deficit (upper bound on the
 # kretprobe miss rate) against the synthetic exerciser in counting mode.

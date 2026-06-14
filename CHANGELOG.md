@@ -51,6 +51,13 @@ design in issue #92). In progress — landing across several PRs.
   `cap_drop`/`cap_add`/`devices`), and `compose-lint-profile` (`observer:
   privileged`, behind the union of the cap + device acceptance contracts).
   Implements **CL-0002**.
+- Live integration-CI smoke for the device + privileged observers
+  (`scripts/smoke_device.sh`, `make smoke-device`): a hardware-free hard gate
+  that runs the synthetic exerciser with a mapped non-default `/dev` node
+  (`--device /dev/null:/dev/csd-exerciser-dev`) and asserts both `--observe
+  devices` (records the node) and `--observe privileged` (records the node **and**
+  caps — proving the concurrent two-gadget live path). The synthetic exerciser
+  gained a device-open in its legacy loop (miss-rate counting mode untouched).
 
 ### Changed
 

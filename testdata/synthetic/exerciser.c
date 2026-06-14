@@ -48,6 +48,22 @@
 
 static const char *TARGET = "/csd-exerciser-target";
 
+/* Non-default /dev node the v0.3 device smoke maps in via
+ * `docker run --device /dev/null:/dev/csd-exerciser-dev`. Opening it fires a
+ * trace_open on a /dev path the device observer must record — a hardware-free,
+ * deterministic device gate. A no-op (ENOENT) when the harness did not map it,
+ * so the cap/fs/miss-rate smokes that don't map it are unaffected. */
+static const char *DEVICE_TARGET = "/dev/csd-exerciser-dev";
+
+/* Open the mapped device node, if present. Legacy-loop only (never counting
+ * mode), so the kretprobe miss-rate tally stays exactly 1 syscall : 1 cap
+ * event. Opening a /dev/null-backed node needs no capability, so it perturbs
+ * no cap observation either. */
+static void exercise_device(void) {
+    int fd = open(DEVICE_TARGET, O_RDONLY);
+    if (fd >= 0) close(fd);
+}
+
 /* Each exercise_* returns the count of cap-invoking syscalls that
  * SUCCEEDED this call (one capable=true event per success). Legacy mode
  * ignores the returns; counting mode accumulates them. */
@@ -157,6 +173,7 @@ int main(void) {
         exercise_chmod();
         exercise_bind();
         exercise_setuid();
+        exercise_device();
         if (cycle % 5 == 0) {
             fprintf(stdout, "cycle=%d\n", cycle);
         }

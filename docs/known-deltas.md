@@ -81,3 +81,25 @@ Captured 2026-04-27 against `ig v0.51.0` on a Linux 6.17 host with the Step 21 `
 - **Cause:** tailscale's `netcheck` opens a raw ICMP socket (`SOCK_RAW`, IPPROTO_ICMP) for low-latency DERP probing when `CAP_NET_RAW` is held. When the cap is dropped, the kernel returns `-EPERM` on `socket()` and tailscale falls back to UDP probes — netcheck still completes, the workload still passes. Bisection's "drop the cap, see if the workload fails" mechanic therefore reports NET_RAW as not required (the fallback is always available). Observation captures the binary's *attempt* on the privileged path, which is the more accurate description of the cap surface tailscale actually uses when it is allowed to. This is an opportunistic-cap pattern: the binary always tries the privileged path first, only falls back when denied. Bisection's structural limit is that it cannot distinguish "cap is required" from "cap improves the path the binary chose."
 - **Reproduction:** `bash /tmp/observe-tailscale.sh`.
 - **Disposition:** `documented`. Both observations are correct, and they answer different questions. Bisection answers "what is the minimum set the workload provably needs?" Observation answers "what is the cap surface the binary actually exercises when allowed?" The compose-lint contribution gate on `csd observe` profiles already requires confidence ≥moderate; this `low`-confidence run cannot ship as a recommendation. A user who wants the strictly-minimum tailscale profile uses the bisected `[]`; a user who wants tailscale to take its preferred fast path adds `NET_RAW` deliberately. PLAN.md §Foot-guns "Opportunistic-cap divergence" generalizes the pattern; future work on a `--required-vs-used` annotation in the sidecar would surface this distinction in-band rather than only in this doc.
+
+## `csd --observe fs` writable-path observations (v0.2)
+
+The v0.2 read-only-filesystem observer (`--observe fs`) inherits the same
+attach-window caveat the capability observer has: `ig run trace_open` only
+sees opens that fire *after* its BPF programs load, so writes a container
+performs during image/entrypoint init are invisible. There is no bisection
+analog for writable paths (you cannot "drop a path and see if the workload
+fails"), so the fs ground truth is an exercised-write expectation, validated
+by `scripts/smoke_fs.sh` in `integration.yml`.
+
+### synthetic exerciser — deterministic gate `[/csd-exerciser-target]`
+
+- **Reference image:** `testdata/synthetic/` (`csd-synthetic-exerciser:0.1`); ground truth `testdata/synthetic/fs_expected.json`.
+- **Expected:** `csd --observe fs` derives a `writable_paths` entry for `/csd-exerciser-target` (disposition `tmpfs_candidate`; the container declares no volume, so the file's parent `/` is an unbacked rootfs write and `fs_recommendation` is `read_only: true` + `tmpfs: [/]`).
+- **Why deterministic:** the exerciser opens `/csd-exerciser-target` with `O_CREAT|O_WRONLY|O_TRUNC` and `write(2)`s a byte every cycle (`exerciser.c`), so trace_open records a write-intent open continuously post-attach — unlike the cap gate it needs no sysctl. This is the **sole hard gate** of the fs smoke: an empty observation here is a real csd pipeline bug.
+- **Confidence:** `low` by design (a single sparse write path); this run is a pipeline attach+record regression check, never a contributable profile.
+
+### postgres / caddy / tailscale — informational
+
+- **Expected:** sparse or empty post-attach write sets. postgres's data-dir and socket/lock writes happen during entrypoint init (`initdb`, `gosu` user-switch) before ig attaches; caddy writes its config/state at startup; tailscale (userspace mode) keeps state in memory. Whatever each *does* write post-attach during its workload is reported informationally by `scripts/smoke_fs.sh` and never fails the build — the same workload-shape caveat the capability observer carries above. A user wanting a trustworthy read_only/tmpfs profile for these images runs a longer window with a workload that exercises steady-state writes, and reviews the `low`-confidence sidecar before contributing.
+- **Disposition:** `documented`. The fs observer is correct; the limit is workload coverage + the attach window, identical in shape to the capability deltas above. A future restart-aware mode (attach ig, then `docker start`) would close the attach-window half for both observers.

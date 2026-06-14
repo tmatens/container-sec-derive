@@ -77,7 +77,7 @@ jobs:
   smoke:
     name: live-bpf smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -162,6 +162,23 @@ jobs:
           cat smoke.txt
           exit $rc
 
+      # First end-to-end exercise of the v0.2 trace_open (--observe fs) path
+      # on real containers — the fixture-replay unit tests can't cover ig
+      # attach + write capture. Same sudo/secure_path/exit-code-capture
+      # pattern as the cap smoke. Hard gate: the synthetic exerciser, which
+      # opens /csd-exerciser-target O_CREAT|O_WRONLY|O_TRUNC every cycle, must
+      # appear in the derived writable_paths (scripts/smoke_fs.sh).
+      # postgres/caddy/tailscale are informational (writes happen largely
+      # pre-attach, per docs/known-deltas.md).
+      - name: Live-BPF fs smoke matrix
+        env:
+          DURATION: ${{ github.event.inputs.duration || '30s' }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/smoke_fs.sh > smoke_fs.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_fs.txt
+          exit $rc
+
       # Route the verdict to channels readable WITHOUT the Actions log
       # API (which is unreachable from some clients): a PR comment +
       # the job summary. SECURITY: the report is a strict ALLOWLIST —
@@ -183,7 +200,10 @@ jobs:
           # Allowlist: fixed preflight facts + known-safe status lines.
           # Anything not matching these prefixes (env, logs, noise) is dropped.
           report="$( { cat preflight.txt 2>/dev/null || true; \
-                       grep -hE '^(PASS|FAIL|INFO|smoke-wsl2:)' smoke.txt 2>/dev/null || true; } )"
+                       echo '-- caps observer --'; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-wsl2:)' smoke.txt 2>/dev/null || true; \
+                       echo '-- fs observer --'; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-fs:)' smoke_fs.txt 2>/dev/null || true; } )"
           [ -n "$report" ] || report="(no status lines captured — see the Actions run)"
           { echo "### Live-BPF integration report";
             echo "[run](${RUN_URL})";

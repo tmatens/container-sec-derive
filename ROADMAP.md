@@ -16,7 +16,7 @@ See [PLAN.md](PLAN.md). Observes `cap_capable()`, emits minimum `cap_drop` / `ca
 
 The single highest-value future observer. `read_only: true` is borderline-impossible to derive statically; users currently iterate by hand.
 
-> **Status: in progress** (design + alpha). Design and scope decisions in **issue #77**. The IG-gadget survey settled the signal on **`trace_open`** (exposes open flags + symlink-resolved path); there is no built-in `unlink`/`rename` gadget at the pinned IG version, so the first cut scopes to write-intent opens. The observer foundation — `trace_open` event model, write-intent classifier, and write-path aggregator (`fileevent.go`) — has landed; volume correlation, the `read_only`/`tmpfs` decision, and formatter/sidecar output follow.
+> **Status: in progress** (design + alpha). Design and scope decisions in **issue #77**. The IG-gadget survey settled the signal on **`trace_open`** (exposes open flags + symlink-resolved path); there is no built-in `unlink`/`rename` gadget at the pinned IG version, so the first cut scopes to write-intent opens. Landed so far: the `trace_open` event model + write-intent classifier + write-path aggregator (`fileevent.go`), and the volume-correlation / `read_only`+`tmpfs` decision layer (`fsdecision.go`). Still to come: live mount-config acquisition + pipeline wiring, formatter (`read_only`/`tmpfs`) + sidecar/confidence output, then CL-0007 + reference ground truth + integration CI.
 
 - **Signal:** eBPF on `openat()` with `O_WRONLY` / `O_CREAT`, plus `unlink`, `rename`, paths outside bind-mounted volumes.
 - **Aggregation:** group writes by directory prefix; emit `tmpfs:` entries with size hints (peak observed bytes per path).

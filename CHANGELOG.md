@@ -32,6 +32,10 @@ design in issue #92). In progress — landing across several PRs.
   comm samples) and a `device_recommendation` block (the per-node `devices:`
   list plus conservative derived-capability hints), with a device-scoped
   confidence rubric (no event-count floor — device opens are inherently sparse).
+- Multi-replica device correlation under `--image`/`--all-matching`: an
+  ambiguity error for more than one replica without `--all-matching`, a
+  per-replica device union, and `replica_device_disagreement` fed to confidence
+  and the compose-lint contract.
 
 ### Changed
 

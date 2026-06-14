@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sort"
 	"sync"
 	"syscall"
 	"time"
@@ -78,8 +79,7 @@ func produceDeviceObservation(opts devicePipelineOpts, stderr io.Writer) (*Sidec
 // capability and fs scaffolding is left at NewSidecar's empty defaults; the
 // device section (device_paths + device_recommendation) carries the
 // observation. PLAN.md §Output schema: one observer per run populates its own
-// block. Multi-replica device-set disagreement is wired in PR5; this function
-// leaves Target.ReplicaDeviceDisagreement empty for now.
+// block.
 func deviceToSidecar(dev *deviceObservation, opts aggregateOpts) *Sidecar {
 	s := NewSidecar()
 	s.Target.Mode = opts.modeLabel()
@@ -107,6 +107,34 @@ func deviceToSidecar(dev *deviceObservation, opts aggregateOpts) *Sidecar {
 		dp = append(dp, entry)
 	}
 	s.DevicePaths = dp
+
+	// Cross-replica device-set disagreement under --all-matching: any union
+	// device node not observed on every replica. The device analog of
+	// ReplicaCapDisagreement / ReplicaWritePathDisagreement; undefined (left
+	// empty) with <2 replicas. Feeds computeDeviceConfidence. A non-empty list
+	// means the workload exercised replicas unevenly — the union recommendation
+	// grants devices some replica never opened, which a reviewer should weigh.
+	if len(dev.PerReplica) > 1 {
+		perReplicaSets := make(map[string]map[string]struct{}, len(dev.PerReplica))
+		for rid, devices := range dev.PerReplica {
+			set := make(map[string]struct{}, len(devices))
+			for _, d := range devices {
+				set[d] = struct{}{}
+			}
+			perReplicaSets[rid] = set
+		}
+		var dis []string
+		for _, d := range dev.Devices {
+			for _, set := range perReplicaSets {
+				if _, ok := set[d]; !ok {
+					dis = append(dis, d)
+					break
+				}
+			}
+		}
+		sort.Strings(dis)
+		s.Target.ReplicaDeviceDisagreement = dis
+	}
 
 	s.TraceHealth.EventsRecorded = dev.EventCount
 	s.TraceHealth.EventsDropped = dev.Dropped

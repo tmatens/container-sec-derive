@@ -43,8 +43,14 @@ design in issue #92). In progress — landing across several PRs.
   a `privileged_decomposition` block; confidence is the worse of the two
   observers' grades, with factors tagged `[caps]`/`[devices]`. `security_opt`
   (AppArmor/seccomp) is out of scope for v0.3 (no denial gadget at the pinned
-  IG). `json` and `compose` output land in this increment; the remaining
-  formatters follow. Implements **CL-0002**.
+  IG). All seven formatters emit the decomposition: `json`, `compose` /
+  `docker-run` (drop-privileged header + cap + device flags), `k8s` (one merged
+  `securityContext` with `privileged: false` + capabilities, plus device-plugin
+  guidance), `oci` (merged `process.capabilities` + device `annotations`),
+  `compose-patch` (one diff that removes `privileged: true` and inserts
+  `cap_drop`/`cap_add`/`devices`), and `compose-lint-profile` (`observer:
+  privileged`, behind the union of the cap + device acceptance contracts).
+  Implements **CL-0002**.
 
 ### Changed
 

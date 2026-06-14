@@ -498,17 +498,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// This PR wires the JSON sidecar and the compose formatter; the remaining
 	// five formatters are the follow-on PR, hence the format guard.
 	if *observe == ObservePrivileged {
-		switch *format {
-		case FormatCompose, FormatJSON:
-			// implemented in this increment
-		default:
-			return codedErrorf(ExitUsage, "--format %s not yet implemented for --observe %s; use %s or %s", *format, ObservePrivileged, FormatJSON, FormatCompose)
-		}
-		if *allowExploratory {
-			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
-		}
-		if *composeIn != "" || *composeService != "" {
+		// All seven formatters are implemented for privileged. compose-patch
+		// needs --compose-in/--service; compose-lint-profile honors
+		// --allow-exploratory (shared shape with the cap/fs/device paths).
+		if *format == FormatComposePatch {
+			if *composeIn == "" || *composeService == "" {
+				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+			}
+			if _, statErr := os.Stat(*composeIn); statErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+			}
+		} else if *composeIn != "" || *composeService != "" {
 			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		}
+		if *allowExploratory && *format != FormatComposeLintEntry {
+			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		s, err := producePrivilegedObservation(privilegedPipelineOpts{
 			AggregateOpts: aggregateOpts{
@@ -536,6 +540,30 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatJSON:
 			if err := writeJSON(stdout, s); err != nil {
 				return fmt.Errorf("write json: %w", err)
+			}
+		case FormatDockerRun:
+			if err := writePrivilegedDockerRun(stdout, s); err != nil {
+				return fmt.Errorf("write privileged docker-run: %w", err)
+			}
+		case FormatK8s:
+			if err := writePrivilegedK8s(stdout, s); err != nil {
+				return fmt.Errorf("write privileged k8s: %w", err)
+			}
+		case FormatOCI:
+			if err := writePrivilegedOCI(stdout, s); err != nil {
+				return fmt.Errorf("write privileged oci: %w", err)
+			}
+		case FormatComposePatch:
+			raw, readErr := os.ReadFile(*composeIn)
+			if readErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+			}
+			if err := writePrivilegedComposePatch(stdout, s, raw, *composeIn, *composeService); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write privileged compose-patch: %w", err))
+			}
+		case FormatComposeLintEntry:
+			if err := writePrivilegedComposeLintProfile(stdout, s, *allowExploratory); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write privileged compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {

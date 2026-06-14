@@ -18,9 +18,9 @@ import (
 // tmpfs *candidates*; a human reviews whether any belongs in a real volume.
 // csd never silently turns data writes into tmpfs.
 type fsRecommendation struct {
-	ReadOnly      bool
-	TmpfsPaths    []string
-	VolumeCovered []string
+	ReadOnly      bool     `json:"read_only"`
+	TmpfsPaths    []string `json:"tmpfs_paths"`
+	VolumeCovered []string `json:"volume_covered"`
 }
 
 // correlateWrites classifies the observed write paths against the container's

@@ -45,9 +45,20 @@ type Sidecar struct {
 	Capabilities               []Capability `json:"capabilities"`
 	ExpectedCapsFromEntrypoint []string     `json:"expected_caps_from_entrypoint"`
 	CoverageWarnings           []string     `json:"coverage_warnings"`
-	TraceHealth                TraceHealth  `json:"trace_health"`
-	Confidence                 Confidence   `json:"confidence"`
-	Caveat                     string       `json:"caveat"`
+
+	// v0.2 read-only-filesystem observer section. Both fields are
+	// omitempty + nil on a capability run, so a `--observe caps` sidecar
+	// serializes byte-identically to pre-v0.2 (PLAN.md §Output schema:
+	// "future observers add their own top-level block ... formatters
+	// select the relevant section"). On an `--observe fs` run the
+	// capability scaffolding (Capabilities/ExpectedCaps/...) stays empty
+	// and these carry the observation.
+	WritablePaths    []WritablePath    `json:"writable_paths,omitempty"`
+	FSRecommendation *fsRecommendation `json:"fs_recommendation,omitempty"`
+
+	TraceHealth TraceHealth `json:"trace_health"`
+	Confidence  Confidence  `json:"confidence"`
+	Caveat      string      `json:"caveat"`
 
 	// crossCheckStatus is an internal (unserialized) handoff from the
 	// observe/run path to computeConfidence. Empty = skipped (e.g.
@@ -90,6 +101,12 @@ type Target struct {
 	// a private aggregator field) so reviewers can audit the rubric input
 	// from the sidecar alone.
 	DistinctComms int `json:"distinct_comms"`
+	// ReplicaWritePathDisagreement is the v0.2 fs analog of
+	// ReplicaCapDisagreement: write paths observed on fewer than all
+	// replicas under --all-matching. omitempty + nil on a capability run and
+	// on single-replica fs runs; populated by the multi-replica fs
+	// correlation (PR-C) and read by computeFSConfidence.
+	ReplicaWritePathDisagreement []string `json:"replica_write_path_disagreement,omitempty"`
 }
 
 // Restart records a single exit-during-observation event. Attribution is
@@ -111,6 +128,26 @@ type Capability struct {
 	LastSeenOffsetMs  int64    `json:"last_seen_offset_ms"`
 	CommSamples       []string `json:"comm_samples"`
 }
+
+// WritablePath is one distinct write-intent path observed by the v0.2 fs
+// observer, the read-only-filesystem analog of Capability. The aggregator
+// collapses N write opens per path into a single entry with an event count
+// and comm samples for reviewer auditability. Disposition records how the
+// decision layer classified the path against the container's mounts:
+// "volume_covered" (at/below an existing bind/volume mount — left as-is) or
+// "tmpfs_candidate" (a rootfs write the recommendation routes to tmpfs).
+type WritablePath struct {
+	Path        string   `json:"path"`
+	EventCount  int      `json:"event_count"`
+	Disposition string   `json:"disposition"`
+	CommSamples []string `json:"comm_samples,omitempty"`
+}
+
+// WritablePath disposition values.
+const (
+	DispositionVolumeCovered  = "volume_covered"
+	DispositionTmpfsCandidate = "tmpfs_candidate"
+)
 
 // TraceHealth surfaces the IG ringbuf drop counter (PLAN.md §Event-loss
 // reporting). Always emitted; never hidden. drop_rate >= 1% downgrades

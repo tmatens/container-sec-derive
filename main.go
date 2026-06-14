@@ -304,20 +304,29 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *observe != ObserveFS && *mountsFixture != "" {
 		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
 	}
+	// Workload is recorded on the sidecar and surfaced as a confidence factor
+	// (both observers); the compose-lint contribution gate also requires the
+	// file to be readable. Validate before either observe path so a typo'd
+	// path fails fast (EX_USAGE) rather than after a full observation window.
+	if *workload != "" {
+		if _, err := os.Stat(*workload); err != nil {
+			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
+		}
+	}
 	// The v0.2 fs observer is a distinct signal source (trace_open) producing a
-	// read_only/tmpfs recommendation rather than a *Sidecar, so it takes its
-	// own produce→format path and returns before the capability formatter
-	// switch. This increment wires the live signal + the compose formatter
-	// only; the remaining six formatters and the JSON sidecar + confidence
-	// rubric are the deferred follow-on (issue #77), hence the guards below.
+	// read_only/tmpfs recommendation in the Sidecar's fs section, so it takes
+	// its own produce→format path and returns before the capability formatter
+	// switch. PR-A wires the JSON sidecar (+ --out, --workload, confidence,
+	// drop abort) and the compose formatter; the remaining five formatters are
+	// the PR-B follow-on, hence the format guard below.
 	if *observe == ObserveFS {
-		if *format != FormatCompose {
-			return codedErrorf(ExitUsage, "--observe %s currently supports only --format %s (the other formatters are a follow-on); got %q", ObserveFS, FormatCompose, *format)
+		switch *format {
+		case FormatCompose, FormatJSON:
+			// implemented for fs
+		default:
+			return codedErrorf(ExitUsage, "--observe %s does not yet support --format %s (supported: %s, %s; the other formatters are a follow-on)", ObserveFS, *format, FormatCompose, FormatJSON)
 		}
-		if *outPath != "" || *workload != "" {
-			return codedErrorf(ExitUsage, "--out and --workload are not yet supported with --observe %s (the JSON sidecar + confidence rubric are a follow-on)", ObserveFS)
-		}
-		rec, err := produceFSObservation(fsPipelineOpts{
+		s, err := produceFSObservation(fsPipelineOpts{
 			AggregateOpts: aggregateOpts{
 				Container:   *container,
 				Image:       *image,
@@ -327,12 +336,32 @@ func run(args []string, stdout, stderr io.Writer) error {
 			MountsFixture: *mountsFixture,
 			IGBin:         *igBin,
 			Duration:      *duration,
+			Workload:      *workload,
 		}, stderr)
 		if err != nil {
 			return err
 		}
-		if err := writeFSCompose(stdout, rec); err != nil {
-			return fmt.Errorf("write fs compose: %w", err)
+		switch *format {
+		case FormatCompose:
+			if err := writeFSCompose(stdout, *s.FSRecommendation); err != nil {
+				return fmt.Errorf("write fs compose: %w", err)
+			}
+		case FormatJSON:
+			if err := writeJSON(stdout, s); err != nil {
+				return fmt.Errorf("write json: %w", err)
+			}
+		}
+		if *outPath != "" {
+			if err := writeSidecar(s, *outPath); err != nil {
+				return fmt.Errorf("write sidecar: %w", err)
+			}
+		}
+		if s.TraceHealth.DropRate >= DropRateAbort {
+			return codedErrorf(ExitDropRateExcessive,
+				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
+				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
+			)
 		}
 		return nil
 	}
@@ -351,15 +380,6 @@ func run(args []string, stdout, stderr io.Writer) error {
 		}
 	} else if *composeIn != "" || *composeService != "" {
 		return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
-	}
-	// Workload is recorded on the sidecar and surfaced as a confidence
-	// factor; the compose-lint contribution gate also requires the file to
-	// be readable. Validate at flag-parse time so a typo'd path fails fast
-	// (EX_USAGE) rather than after a full observation window.
-	if *workload != "" {
-		if _, err := os.Stat(*workload); err != nil {
-			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
-		}
 	}
 
 	s, err := produceObservation(observePipelineOpts{

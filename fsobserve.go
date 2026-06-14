@@ -27,21 +27,21 @@ type fsPipelineOpts struct {
 	MountsFixture string // docker-inspect .Mounts JSON; empty → live docker inspect (or none in fixture mode)
 	IGBin         string
 	Duration      time.Duration
+	Workload      string // --workload path recorded on the sidecar + fed to fs confidence
 }
 
 // produceFSObservation runs the fixture-or-live fs observe path end-to-end and
-// returns the read_only/tmpfs recommendation. It is the fs-observer analog of
-// produceObservation: same fixture-vs-live branch shape (fixture short-circuits
-// to aggregateWrites before the live-only ig version check), same typed-exit
-// translation. The write paths come from trace_open; the mount config comes
-// from acquireMounts; correlateWrites joins them into the recommendation.
+// returns a fully populated *Sidecar with the read_only/tmpfs recommendation,
+// writable_paths evidence, trace_health, and fs confidence already scored. It
+// is the fs-observer analog of produceObservation: same fixture-vs-live branch
+// shape (fixture short-circuits to aggregateWrites before the live-only ig
+// version check), same typed-exit translation. The write paths come from
+// trace_open; the mount config comes from acquireMounts; fsToSidecar joins them.
 //
-// Scope (issue #77, this increment): the sidecar + confidence integration and
-// the remaining six formatters are deliberately not here — this wires the pure
-// core (fileevent/fsdecision/fsformat) to live signal sources for the compose
-// formatter only. Multi-replica fs correlation under --image is also deferred;
-// see acquireMounts.
-func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (fsRecommendation, error) {
+// Scope (issue #77): multi-replica fs correlation under --image is deferred to
+// PR-C; see acquireMounts.
+func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*Sidecar, error) {
+	observedAt := time.Now().UTC()
 	var (
 		writes *writeObservation
 		err    error
@@ -49,14 +49,14 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (fsRecommendati
 	if opts.Fixture != "" {
 		src, openErr := os.Open(opts.Fixture)
 		if openErr != nil {
-			return fsRecommendation{}, fmt.Errorf("open fixture: %w", openErr)
+			return nil, fmt.Errorf("open fixture: %w", openErr)
 		}
 		defer src.Close()
 		writes, err = aggregateWrites(src, opts.AggregateOpts)
 	} else {
 		noteWSL2IfDetected(stderr)
 		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
-			return fsRecommendation{}, verr
+			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
@@ -67,16 +67,68 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (fsRecommendati
 	if err != nil {
 		var amb *ambiguousSelectionError
 		if errors.As(err, &amb) {
-			return fsRecommendation{}, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, wrapCoded(ExitTargetAmbiguous, err)
 		}
-		return fsRecommendation{}, err
+		return nil, err
 	}
 
 	mounts, err := acquireMounts(opts, stderr)
 	if err != nil {
-		return fsRecommendation{}, err
+		return nil, err
 	}
-	return correlateWrites(writes.Paths, mounts), nil
+	s := fsToSidecar(writes, mounts, opts.AggregateOpts)
+	s.ObservedAt = observedAt
+	s.Workload = opts.Workload
+	if opts.Fixture == "" {
+		// Fixture mode: duration unknown, leave 0 (computeFSConfidence treats
+		// 0 as "not measured" and skips the soft floor).
+		s.DurationSeconds = int(opts.Duration.Seconds())
+	}
+	computeFSConfidence(s)
+	return s, nil
+}
+
+// fsToSidecar assembles a *Sidecar from the write observation and the mount
+// config. The capability scaffolding (Capabilities/ExpectedCaps/...) is left at
+// NewSidecar's empty defaults; the fs section (writable_paths +
+// fs_recommendation) carries the observation. PLAN.md §Output schema: one
+// observer per run populates its own block.
+func fsToSidecar(writes *writeObservation, mounts []string, opts aggregateOpts) *Sidecar {
+	s := NewSidecar()
+	s.Target.Mode = opts.modeLabel()
+	s.Target.Selector = opts.selector()
+	s.Target.ReplicasObserved = len(writes.PerReplica)
+	for rid, c := range writes.PerReplicaCount {
+		s.Target.PerReplicaEventCounts[rid] = c
+	}
+	if opts.Image != "" {
+		s.Image = opts.Image
+	} else {
+		s.Image = writes.Image
+	}
+
+	rec := correlateWrites(writes.Paths, mounts)
+	s.FSRecommendation = &rec
+
+	wp := make([]WritablePath, 0, len(writes.Paths))
+	for _, p := range writes.Paths {
+		disp := DispositionTmpfsCandidate
+		if underAnyMount(p, mounts) {
+			disp = DispositionVolumeCovered
+		}
+		entry := WritablePath{Path: p, Disposition: disp}
+		if st := writes.Stats[p]; st != nil {
+			entry.EventCount = st.eventCount
+			entry.CommSamples = sortedKeys(st.commSamples)
+		}
+		wp = append(wp, entry)
+	}
+	s.WritablePaths = wp
+
+	s.TraceHealth.EventsRecorded = writes.EventCount
+	s.TraceHealth.EventsDropped = writes.Dropped
+	finaliseTraceHealth(&s.TraceHealth)
+	return s
 }
 
 // observeWrites spawns `ig run trace_open --paths --output json` and aggregates
@@ -84,9 +136,8 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (fsRecommendati
 // path) but against the trace_open gadget: --paths makes ig emit the
 // symlink-resolved fpath (fileEvent.Path prefers it). ig's stderr is drained
 // through parseIGStderr so it can't block the pipe and its diagnostics still
-// reach the operator; the ringbuf-loss count is discarded here because the
-// writeObservation aggregate carries no trace_health yet — drop-rate accounting
-// arrives with the sidecar/confidence follow-on (issue #77).
+// reach the operator; the ringbuf-loss count it returns lands on
+// writeObservation.Dropped and feeds trace_health.
 func observeWrites(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*writeObservation, error) {
 	cmd := exec.CommandContext(ctx, igBin, "run", TraceOpenGadget, "--paths", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
@@ -104,23 +155,29 @@ func observeWrites(ctx context.Context, igBin string, opts aggregateOpts, stderr
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
 
-	var wg sync.WaitGroup
+	var (
+		wg   sync.WaitGroup
+		lost int
+	)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		parseIGStderr(stderrPipe, stderrSink)
+		lost = parseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	obs, aggErr := aggregateWrites(stdout, opts)
 	// A context-cancel kill is the normal end of the timed window, so a
 	// resulting wait error is not propagated (matches observe()).
 	waitErr := cmd.Wait()
-	wg.Wait()
+	wg.Wait() // happens-before the lost read below; no extra sync needed
 	if aggErr != nil && !errors.Is(aggErr, io.EOF) {
 		return nil, aggErr
 	}
 	if waitErr != nil && ctx.Err() == nil {
 		return nil, fmt.Errorf("ig exited: %w", waitErr)
+	}
+	if obs != nil {
+		obs.Dropped = lost
 	}
 	return obs, nil
 }

@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a non-observer feature (CLI flag, output format, config option, tooling integration). For a new observer, use the "New observer proposal" template instead.
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        csd's scope is deliberately narrow: a one-shot CLI that **observes a running container** and derives the minimum security config. Features that push it toward static image/Compose/Dockerfile analysis (that is [compose-lint](https://github.com/tmatens/compose-lint)'s job), enforcement, or a long-running daemon are out of scope — see [ROADMAP.md §Out of scope](https://github.com/tmatens/container-sec-derive/blob/main/ROADMAP.md).
+
+        **Proposing a new observer (a new security setting to derive)? Use the "New observer proposal" template instead.**
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case. What can't you do today that you want to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: What should csd do? Show the CLI invocation, flag, config key, or output format you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds exist today? What else did you consider, and why is this the right approach?
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope-check
+    attributes:
+      label: Scope check
+      options:
+        - label: This is not a new observer (those use the "New observer proposal" template).
+          required: true
+        - label: This fits csd's scope as a one-shot runtime observation CLI — not static analysis, enforcement, or a daemon.
+          required: true

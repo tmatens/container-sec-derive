@@ -36,6 +36,12 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      # codeql-action/analyze prechecks this scope even though `upload: never`
+      # means nothing is actually pushed to Code Scanning (so no GHAS is
+      # exercised on this private repo). Granting the scope is harmless; the
+      # action just doesn't use it.
+      security-events: write
+      actions: read
     strategy:
       fail-fast: false
       matrix:

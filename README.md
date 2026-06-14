@@ -1,8 +1,19 @@
 # container-sec-derive
 
+[![release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.1.0)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![signed: cosign](https://img.shields.io/badge/signed-cosign%20key--based-orange?logo=sigstore&logoColor=white)](#verifying-release-artifacts)
+[![SBOM](https://img.shields.io/badge/SBOM-SPDX%20%2B%20CycloneDX-informational)](#verifying-release-artifacts)
+
+<!-- Badges are intentionally static: the repo + GHCR package are private while
+     the project is unpublished (COI), so dynamic shields (github/v/release,
+     package pulls) would render broken or leak existence. Swap to dynamic
+     badges when the project goes public. -->
+
 Runtime observation tool that derives the minimum container security configuration an image actually needs by watching it run.
 
-> **Status:** v0.1.0 release-work. v0.1 alpha / beta / rc shipped (capability observation, sidecar, seven formatters, `verify`, reference-image bisections, IG version-pin CI gate, WSL2 smoke matrix, cosign release pipeline, SPDX + CycloneDX SBOMs). Container image build + vendored `ig` and full docs walkthrough remain before the v0.1.0 tag. See [PLAN.md](PLAN.md) §v0.1 build order.
+> **Status: v0.1.0 released** — the first signed release. Ships static binaries (`linux/amd64`, `linux/arm64`) plus a cosign-signed multi-arch container image on GHCR (see [Container image](#container-image)). v0.1 delivers capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline with SPDX + CycloneDX SBOMs and an OpenVEX attestation. See [PLAN.md](PLAN.md) §v0.1 build order and [the v0.1.0 release](https://github.com/tmatens/container-sec-derive/releases/tag/v0.1.0).
 
 ## What it does
 
@@ -27,9 +38,27 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
   user runs `compose-lint`  → "no profile for image X" → user runs `container-sec-derive` against image X
 ```
 
+## Container image
+
+Released images are published to the GitHub Container Registry:
+
+- **Package:** [`ghcr.io/tmatens/container-sec-derive`](https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive)
+- **Tags:** `0.1.0` and `0.1` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
+
+```sh
+# The package is private (see the COI note below) — authenticate to GHCR first.
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
+
+docker pull ghcr.io/tmatens/container-sec-derive:0.1.0
+```
+
+The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts). Running `csd` needs the privileges described under [the tool's own security posture](#a-note-on-the-tools-own-security-posture).
+
+> **Private while unpublished (COI).** The image is pushed **private** (collaborator-only) and signed with no public Rekor entry. The only public/COI-gated step is flipping the GHCR package to public, done after the COI decision — so the package link above resolves for authenticated collaborators, not anonymously.
+
 ## Building from source
 
-Pre-v0.1.0 builds are unsigned and not published. Build locally:
+Build the binary from source:
 
 ```sh
 git clone https://github.com/tmatens/container-sec-derive
@@ -222,7 +251,7 @@ cosign verify-blob \
   csd.spdx.json
 ```
 
-Pre-v0.1.0 builds are unsigned. The first signed release will be `v0.1.0`.
+Releases are signed starting with `v0.1.0` (the first signed release); earlier pre-release builds are unsigned.
 
 The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/container-sec-derive`**. The manifest is cosign-signed (same key, no transparency log) and carries SBOM + OpenVEX attestations. Verify the signature and the attestations against `cosign.pub`:
 
@@ -240,7 +269,7 @@ cosign verify-attestation --type spdxjson \
   ghcr.io/tmatens/container-sec-derive:0.1.0
 ```
 
-> **Status:** these commands work once the first signed release ships. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision. The image SBOM attestation records the vendored `ig` provenance.
+> **Status:** live as of `v0.1.0` — these commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
 
 ## License
 

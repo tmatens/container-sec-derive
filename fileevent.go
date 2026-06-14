@@ -206,7 +206,11 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 			continue
 		}
 		p := ev.Path()
-		if p == "" {
+		if p == "" || !isRootfsWrite(p) {
+			// Drop pseudo-fs (/proc, /sys, /dev) and relative paths — they
+			// aren't rootfs writes the read_only/tmpfs recommendation can act
+			// on (#86). Filtered here so the whole pipeline (writable_paths,
+			// recommendation, event count) sees only actionable writes.
 			continue
 		}
 		count++

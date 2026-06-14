@@ -344,6 +344,12 @@ jobs:
           image: ghcr.io/tmatens/container-sec-derive@${{ steps.inspect.outputs.digest }}
           format: spdx-json
           output-file: image.spdx.json
+          # This SBOM is consumed by the attest step below (attached to the image
+          # manifest), not the GitHub release. Both default to true; release-asset
+          # upload needs contents:write, which this job intentionally lacks
+          # (contents:read + packages:write only). Matches the binary SBOM steps.
+          upload-artifact: false
+          upload-release-assets: false
       - name: Attest SBOM to image (key-based, no tlog)
         env:
           DIGEST: ${{ steps.inspect.outputs.digest }}

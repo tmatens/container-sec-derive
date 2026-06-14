@@ -320,11 +320,21 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// drop abort) and the compose formatter; the remaining five formatters are
 	// the PR-B follow-on, hence the format guard below.
 	if *observe == ObserveFS {
-		switch *format {
-		case FormatCompose, FormatJSON, FormatDockerRun, FormatK8s, FormatOCI:
-			// implemented for fs
-		default:
-			return codedErrorf(ExitUsage, "--observe %s does not yet support --format %s (supported: %s, %s, %s, %s, %s; compose-patch + compose-lint-profile are a follow-on)", ObserveFS, *format, FormatCompose, FormatJSON, FormatDockerRun, FormatK8s, FormatOCI)
+		// All seven formatters are implemented for fs. compose-patch needs
+		// --compose-in/--service (validated below, shared with the cap path);
+		// compose-lint-profile honors --allow-exploratory.
+		if *format == FormatComposePatch {
+			if *composeIn == "" || *composeService == "" {
+				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+			}
+			if _, statErr := os.Stat(*composeIn); statErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+			}
+		} else if *composeIn != "" || *composeService != "" {
+			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		}
+		if *allowExploratory && *format != FormatComposeLintEntry {
+			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		s, err := produceFSObservation(fsPipelineOpts{
 			AggregateOpts: aggregateOpts{
@@ -361,6 +371,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatOCI:
 			if err := writeFSOCI(stdout, *s.FSRecommendation); err != nil {
 				return fmt.Errorf("write fs oci: %w", err)
+			}
+		case FormatComposePatch:
+			raw, readErr := os.ReadFile(*composeIn)
+			if readErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+			}
+			if err := writeFSComposePatch(stdout, *s.FSRecommendation, raw, *composeIn, *composeService); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write fs compose-patch: %w", err))
+			}
+		case FormatComposeLintEntry:
+			if err := writeFSComposeLintProfile(stdout, s, *allowExploratory); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write fs compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {

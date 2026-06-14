@@ -126,15 +126,16 @@ but together they are the difference between "works" and "mature."
 
 - ✅ **`CHANGELOG.md`** (Keep a Changelog) + a per-PR `[Unreleased]` convention.
 - ✅ **`docs/RELEASING.md`** release checklist and **`.github/pull_request_template.md`**.
-- **`CONTRIBUTING.md`** — the contribution bar (signed + DCO commits, stdlib-only
-  runtime deps, the four-layer observer contract, ground-truth + test
-  expectations, no-AI-attribution) currently lives only in `CLAUDE.md`.
-- **`SECURITY.md`** — a vulnerability-disclosure policy. Table stakes for a
-  security tool that runs root-equivalent.
-- **`AGENTS.md`** — the agent-contribution guide (csd is agent-developed).
-- **`.github/ISSUE_TEMPLATE/`** (bug / feature / new-observer-proposal),
-  **`CODEOWNERS`**, **`CODE_OF_CONDUCT.md`**, and **`GOVERNANCE.md` /
-  `MAINTAINERS.md`** mirroring compose-lint's set.
+- ✅ **`CONTRIBUTING.md`** — the contribution bar (signed + DCO commits,
+  stdlib-only runtime deps, the four-layer observer contract, ground-truth +
+  test expectations, no-AI-attribution), extracted from `CLAUDE.md`.
+- ✅ **`.github/SECURITY.md`** — vulnerability-disclosure policy, scoped to the
+  root-equivalent posture and the cosign/SBOM/OpenVEX supply chain.
+- ✅ **`AGENTS.md`** — the agent-contribution guide (csd is agent-developed).
+- ✅ **`.github/ISSUE_TEMPLATE/`** (bug / feature / new-observer-proposal +
+  `config.yml`), **`.github/CODEOWNERS`**, **`.github/CODE_OF_CONDUCT.md`**
+  (Contributor Covenant 2.1), and **`GOVERNANCE.md` / `MAINTAINERS.md`**
+  mirroring compose-lint's set.
 - **`release-prep.yml`** — automate the `[Unreleased]` → `[X.Y.Z]` changelog
   rename + version bumps + release PR (compose-lint has this; csd does it by
   hand per `docs/RELEASING.md`).

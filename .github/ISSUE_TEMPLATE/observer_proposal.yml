@@ -1,0 +1,78 @@
+name: New observer proposal
+description: Propose a new --observe mode that derives a container security setting from runtime observation.
+title: "[observer] "
+labels: ["observer-proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an observer. An observer earns its place only if the setting it derives is genuinely **not derivable statically**, is backed by an **Inspektor Gadget gadget available at the pinned IG release**, and fits the four-layer architecture.
+
+        Please read [ROADMAP.md](https://github.com/tmatens/container-sec-derive/blob/main/ROADMAP.md) (it may already be planned) and [AGENTS.md](https://github.com/tmatens/container-sec-derive/blob/main/AGENTS.md) before filing.
+
+  - type: textarea
+    id: setting
+    attributes:
+      label: What security setting would this derive?
+      description: Name the config it minimizes (e.g. read_only, devices, network egress allowlist) and, if applicable, the related compose-lint rule (CL-XXXX).
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-dynamic
+    attributes:
+      label: Why can't this be derived statically?
+      description: csd's whole reason to exist is observing what a container actually does. If a static linter could catch this, it belongs in compose-lint, not here. Explain what runtime behavior must be observed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: signal
+    attributes:
+      label: Signal and gadget
+      description: |
+        Which kernel behavior is the signal, and which Inspektor Gadget gadget exposes it at the pinned IG version (`PinnedIGVersion` in main.go)? If no stock gadget exists at the pin, say so — that usually means the observer is blocked or scoped down (cf. the v0.3 security_opt deferral).
+      placeholder: |
+        Signal: connect() to outbound TCP/UDP destinations.
+        Gadget: trace_tcp / trace_network — available at v0.51.0? ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: before-after
+    attributes:
+      label: Example before / after
+      description: A config the observer would help minimize, and the decomposed/minimized result you'd expect csd to emit.
+      render: yaml
+      placeholder: |
+        # before
+        services:
+          app:
+            network_mode: host
+        # after (derived)
+        services:
+          app:
+            # host networking not required; observed only outbound 443 to api.example.com
+            networks: [default]
+    validations:
+      required: true
+
+  - type: textarea
+    id: partial
+    attributes:
+      label: Coverage and limits
+      description: What would the observer NOT capture, and how should that gap be surfaced to the user? (A partial result presented as complete is a correctness bug.)
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked ROADMAP.md and existing issues — this observer is not already planned or proposed.
+          required: true
+        - label: The signal is genuinely runtime-observable and not catchable by static analysis.
+          required: true
+        - label: I understand the observer must honor the four-layer pipeline and emit all seven formatters with a confidence rubric (see CONTRIBUTING.md).
+          required: true

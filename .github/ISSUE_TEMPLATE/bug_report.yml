@@ -1,0 +1,110 @@
+name: Bug report
+description: Report incorrect behavior in csd (wrong/missing recommendation, crash, bad output, parse error).
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Where possible, give a reproducer that works **without live `ig`** — a fixture NDJSON replayed with `--fixture` (and `--mounts-fixture` / `--device-fixture` where relevant) plus the exact command. The smaller, the better.
+
+        Security vulnerabilities should go through [private vulnerability reporting](https://github.com/tmatens/container-sec-derive/security/advisories/new), not this form.
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      description: The smallest fixture NDJSON (or steps) that reproduces the issue. Paste the fixture inline or describe the running container.
+      render: shell
+      placeholder: |
+        # fixture.ndjson
+        {"syscall":"openat","flags_raw":2,"fpath":"/dev/dri/card0","proc":{"comm":"renderer"},"runtime":{"containerId":"abc123","containerName":"gpu-1","containerImageName":"gpu:1"}}
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command you ran
+      description: The exact `csd` invocation.
+      render: shell
+      placeholder: csd --observe devices --container gpu-1 --fixture fixture.ndjson --format json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened? Paste the full output (stdout and stderr).
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: observer
+    attributes:
+      label: Observer
+      description: Which "--observe" mode?
+      options:
+        - caps
+        - fs
+        - devices
+        - privileged
+        - "n/a (verify / other)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - "Fixture replay (--fixture)"
+        - "Live observation (ig + root)"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: csd version
+      description: Output of `csd --version`.
+      placeholder: "0.3.0"
+    validations:
+      required: true
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go version
+      description: Output of `go version` (if you built from source).
+      placeholder: "go1.26.4"
+    validations:
+      required: false
+
+  - type: input
+    id: env
+    attributes:
+      label: Kernel / ig version (live bugs only)
+      description: "`uname -r` and `ig version`. Leave blank for fixture-replay bugs."
+      placeholder: "6.8.0-..., ig v0.51.0"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I am running the latest released version, or I have confirmed the bug still reproduces on `main`.
+          required: true

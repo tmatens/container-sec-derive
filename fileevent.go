@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -183,6 +184,7 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 	union := map[string]struct{}{}
 	perReplica := map[string]map[string]struct{}{}
 	perReplicaCount := map[string]int{}
+	perReplicaName := map[string]string{}
 	stats := map[string]*writeStats{}
 	count := 0
 	image := ""
@@ -221,6 +223,9 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 		}
 		perReplica[rid][p] = struct{}{}
 		perReplicaCount[rid]++
+		if ev.Runtime.ContainerName != "" {
+			perReplicaName[rid] = ev.Runtime.ContainerName
+		}
 		st := stats[p]
 		if st == nil {
 			st = &writeStats{commSamples: map[string]struct{}{}}
@@ -234,6 +239,23 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 	if err := scan.Err(); err != nil {
 		return nil, err
 	}
+
+	// Ambiguity: --image matched >1 replica without --all-matching. Mirrors
+	// aggregate() (the cap path) — the tool refuses to silently union the
+	// write paths of replicas the user didn't opt into aggregating.
+	if opts.Image != "" && !opts.AllMatching && len(perReplica) > 1 {
+		labels := make([]string, 0, len(perReplica))
+		for rid := range perReplica {
+			if name := perReplicaName[rid]; name != "" {
+				labels = append(labels, fmt.Sprintf("%s (%s)", name, rid))
+			} else {
+				labels = append(labels, rid)
+			}
+		}
+		sort.Strings(labels)
+		return nil, &ambiguousSelectionError{image: opts.Image, replicas: labels}
+	}
+
 	obs := &writeObservation{
 		Paths:           sortedKeys(union),
 		PerReplica:      map[string][]string{},

@@ -72,7 +72,7 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*Sidecar, erro
 		return nil, err
 	}
 
-	mounts, err := acquireMounts(opts, stderr)
+	mounts, err := acquireMounts(opts, sortedKeys(writes.PerReplica), stderr)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +124,34 @@ func fsToSidecar(writes *writeObservation, mounts []string, opts aggregateOpts) 
 		wp = append(wp, entry)
 	}
 	s.WritablePaths = wp
+
+	// Cross-replica write-path disagreement under --all-matching: any union
+	// path not observed on every replica. The fs analog of
+	// ReplicaCapDisagreement; undefined (left empty) with <2 replicas. Feeds
+	// computeFSConfidence. A non-empty list means the workload exercised
+	// replicas unevenly — the union recommendation includes tmpfs paths some
+	// replica never wrote, which a reviewer should weigh.
+	if len(writes.PerReplica) > 1 {
+		perReplicaSets := make(map[string]map[string]struct{}, len(writes.PerReplica))
+		for rid, paths := range writes.PerReplica {
+			set := make(map[string]struct{}, len(paths))
+			for _, p := range paths {
+				set[p] = struct{}{}
+			}
+			perReplicaSets[rid] = set
+		}
+		var dis []string
+		for _, p := range writes.Paths {
+			for _, set := range perReplicaSets {
+				if _, ok := set[p]; !ok {
+					dis = append(dis, p)
+					break
+				}
+			}
+		}
+		sort.Strings(dis)
+		s.Target.ReplicaWritePathDisagreement = dis
+	}
 
 	s.TraceHealth.EventsRecorded = writes.EventCount
 	s.TraceHealth.EventsDropped = writes.Dropped
@@ -190,33 +218,56 @@ type containerMount struct {
 	Destination string `json:"Destination"`
 }
 
-// acquireMounts resolves the container's mount destinations for volume
-// correlation, from (in order): an explicit --mounts-fixture, else a live
-// `docker inspect` of the --container target, else nothing.
+// acquireMounts resolves the mount destinations for volume correlation, from
+// (in order): an explicit --mounts-fixture, else live `docker inspect`, else
+// nothing. observedReplicas are the container ids the observation actually saw
+// (writeObservation.PerReplica keys), used to inspect the right containers
+// under --image without re-resolving the selector.
 //
-// Two cases return no mounts (so every rootfs write becomes a tmpfs candidate):
-//   - Hermetic fixture mode (--fixture) without --mounts-fixture: there is no
-//     container to inspect, and inventing mounts would be wrong.
-//   - --image selection: `docker inspect <image>` has no .Mounts, and resolving
-//     the per-replica container set + correlating each replica's own mounts is
-//     the deferred multi-replica fs work (issue #77). We skip with a note
-//     rather than silently inspect a wrong ref.
-func acquireMounts(opts fsPipelineOpts, stderr io.Writer) ([]string, error) {
+// Live acquisition:
+//   - --container: inspect that one target.
+//   - --image (one or, under --all-matching, several replicas): inspect each
+//     observed replica container and union their mount destinations, so a path
+//     under any replica's volume is volume-covered. Replicas of one compose
+//     service usually share mount topology, but unioning is the safe choice —
+//     it never misclassifies a volume-backed write as a tmpfs candidate.
+//
+// No mounts are returned (every rootfs write becomes a tmpfs candidate) in
+// hermetic fixture mode without --mounts-fixture, or when no replica id is
+// available to inspect.
+func acquireMounts(opts fsPipelineOpts, observedReplicas []string, stderr io.Writer) ([]string, error) {
 	if opts.MountsFixture != "" {
 		return loadMountsFixture(opts.MountsFixture)
 	}
 	if opts.Fixture != "" {
 		return nil, nil
 	}
-	if opts.AggregateOpts.Container == "" {
+
+	ctx, cancel := context.WithTimeout(context.Background(), inspectDefaultTimeout)
+	defer cancel()
+
+	if opts.AggregateOpts.Container != "" {
+		return mountDestinations(ctx, opts.AggregateOpts.Container)
+	}
+
+	// --image: inspect each observed replica and union mount destinations.
+	if len(observedReplicas) == 0 {
 		if stderr != nil {
-			fmt.Fprintln(stderr, "csd: note: --observe fs mount correlation is skipped under --image (per-replica correlation is a follow-on); every rootfs write is treated as a tmpfs candidate")
+			fmt.Fprintln(stderr, "csd: note: no replica observed; mount correlation skipped, every rootfs write treated as a tmpfs candidate")
 		}
 		return nil, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), inspectDefaultTimeout)
-	defer cancel()
-	return mountDestinations(ctx, opts.AggregateOpts.Container)
+	union := map[string]struct{}{}
+	for _, rid := range observedReplicas {
+		dests, err := mountDestinations(ctx, rid)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range dests {
+			union[d] = struct{}{}
+		}
+	}
+	return sortedKeys(union), nil
 }
 
 // mountDestinations runs `docker inspect --format '{{json .Mounts}}'` for the

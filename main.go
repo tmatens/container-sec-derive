@@ -70,9 +70,10 @@ const (
 // source (trace_capabilities vs trace_open) and the formatter family, not a
 // separate code path per CLI.
 const (
-	ObserveCaps    = "caps"
-	ObserveFS      = "fs"
-	ObserveDevices = "devices"
+	ObserveCaps       = "caps"
+	ObserveFS         = "fs"
+	ObserveDevices    = "devices"
+	ObservePrivileged = "privileged"
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -260,8 +261,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		container        = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
 		image            = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
 		allMatching      = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
-		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), or devices (privileged-mode device decomposition)")
+		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), devices (device decomposition), or privileged (drop privileged: true → cap_add + devices)")
 		mountsFixture    = fs.String("mounts-fixture", "", "fs observer only: read container mount destinations from this `docker inspect` .Mounts JSON instead of running docker inspect")
+		deviceFixture    = fs.String("device-fixture", "", "privileged observer only: read the trace_open NDJSON for the devices half from this file (the --fixture file supplies the trace_capabilities half)")
 		fixture          = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
 		fixtureErr       = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
 		inspectFixture   = fs.String("inspect-fixture", "", "read pre-captured image-inspection JSON from this file instead of running `docker inspect`")
@@ -297,13 +299,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
 	}
 	switch *observe {
-	case ObserveCaps, ObserveFS, ObserveDevices:
+	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged:
 		// recognized
 	default:
-		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices)
+		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged)
 	}
 	if *observe != ObserveFS && *mountsFixture != "" {
 		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
+	}
+	if *observe != ObservePrivileged && *deviceFixture != "" {
+		return codedErrorf(ExitUsage, "--device-fixture is only meaningful with --observe %s", ObservePrivileged)
 	}
 	// Workload is recorded on the sidecar and surfaced as a confidence factor
 	// (both observers); the compose-lint contribution gate also requires the
@@ -477,6 +482,68 @@ func run(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("write sidecar: %w", err)
 			}
 		}
+		if s.TraceHealth.DropRate >= DropRateAbort {
+			return codedErrorf(ExitDropRateExcessive,
+				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
+				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
+			)
+		}
+		return nil
+	}
+	// The v0.3 privileged-mode decomposition composes the capability and device
+	// observers (two concurrent gadget streams live; --fixture + --device-fixture
+	// hermetically) and emits the minimum non-privileged equivalent. It takes its
+	// own produce→format path and returns before the capability formatter switch.
+	// This PR wires the JSON sidecar and the compose formatter; the remaining
+	// five formatters are the follow-on PR, hence the format guard.
+	if *observe == ObservePrivileged {
+		switch *format {
+		case FormatCompose, FormatJSON:
+			// implemented in this increment
+		default:
+			return codedErrorf(ExitUsage, "--format %s not yet implemented for --observe %s; use %s or %s", *format, ObservePrivileged, FormatJSON, FormatCompose)
+		}
+		if *allowExploratory {
+			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+		}
+		if *composeIn != "" || *composeService != "" {
+			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		}
+		s, err := producePrivilegedObservation(privilegedPipelineOpts{
+			AggregateOpts: aggregateOpts{
+				Container:    *container,
+				Image:        *image,
+				AllMatching:  *allMatching,
+				InitWindowMs: *initWindowMs,
+			},
+			Fixture:        *fixture,
+			DeviceFixture:  *deviceFixture,
+			FixtureStderr:  *fixtureErr,
+			InspectFixture: *inspectFixture,
+			IGBin:          *igBin,
+			Duration:       *duration,
+			Workload:       *workload,
+		}, stderr)
+		if err != nil {
+			return err
+		}
+		switch *format {
+		case FormatCompose:
+			if err := writePrivilegedCompose(stdout, s); err != nil {
+				return fmt.Errorf("write privileged compose: %w", err)
+			}
+		case FormatJSON:
+			if err := writeJSON(stdout, s); err != nil {
+				return fmt.Errorf("write json: %w", err)
+			}
+		}
+		if *outPath != "" {
+			if err := writeSidecar(s, *outPath); err != nil {
+				return fmt.Errorf("write sidecar: %w", err)
+			}
+		}
+		emitAdvisoryWarnings(s, stderr)
 		if s.TraceHealth.DropRate >= DropRateAbort {
 			return codedErrorf(ExitDropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",

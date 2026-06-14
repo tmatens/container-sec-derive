@@ -94,6 +94,23 @@ func deviceToSidecar(dev *deviceObservation, opts aggregateOpts) *Sidecar {
 		s.Image = dev.Image
 	}
 
+	applyDeviceFields(s, dev)
+
+	s.TraceHealth.EventsRecorded = dev.EventCount
+	s.TraceHealth.EventsDropped = dev.Dropped
+	finaliseTraceHealth(&s.TraceHealth)
+	return s
+}
+
+// applyDeviceFields populates the device section of s (device_recommendation,
+// device_paths, and replica_device_disagreement) from the device observation.
+// It is shared by deviceToSidecar (the standalone --observe devices path) and
+// the privileged-composition merge, which folds device fields into a sidecar
+// that already carries the capability observation. It deliberately touches only
+// the device-specific fields — not Target.Mode/Selector/Image or trace_health,
+// which the two callers own differently — so the merge can add devices to a cap
+// sidecar without clobbering the cap Target.
+func applyDeviceFields(s *Sidecar, dev *deviceObservation) {
 	rec := deviceToRecommendation(dev.Devices)
 	s.DeviceRecommendation = &rec
 
@@ -135,11 +152,6 @@ func deviceToSidecar(dev *deviceObservation, opts aggregateOpts) *Sidecar {
 		sort.Strings(dis)
 		s.Target.ReplicaDeviceDisagreement = dis
 	}
-
-	s.TraceHealth.EventsRecorded = dev.EventCount
-	s.TraceHealth.EventsDropped = dev.Dropped
-	finaliseTraceHealth(&s.TraceHealth)
-	return s
 }
 
 // observeDevices spawns `ig run trace_open --paths --output json` and aggregates

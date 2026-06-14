@@ -11,6 +11,28 @@ the relevant entry.
 
 ## [Unreleased]
 
+The privileged-mode decomposition observer (v0.3, device-decomposition first;
+design in issue #92). In progress — landing across several PRs.
+
+### Added
+
+- **`--observe devices`**: a third observer that derives the minimum explicit
+  `devices:` grant a `privileged: true` container actually needs, by tracing
+  opens (`ig run trace_open --paths`) of non-default `/dev` nodes — everything
+  under `/dev` except the Docker/OCI default device set (`/dev/null`, `/dev/zero`,
+  `/dev/ptmx`, `/dev/pts/*`, `/dev/shm`, `/dev/mqueue`, …) every container already
+  gets. `--observe caps`/`fs` are unchanged. `json` and `compose` output land in
+  this increment; the remaining five formatters follow.
+- The evidence sidecar gains a `device_paths` block (per-node event counts and
+  comm samples) and a `device_recommendation` block (the per-node `devices:`
+  list plus conservative derived-capability hints), with a device-scoped
+  confidence rubric (no event-count floor — device opens are inherently sparse).
+
+### Changed
+
+- Sidecar `schema_version` **1.1 → 1.2** (additive, omitempty device fields; a
+  `caps`/`fs` sidecar is byte-identical). `tool_version` → `0.3.0`.
+
 ## [0.2.0] - 2026-06-14
 
 The read-only-filesystem + tmpfs observer.

@@ -70,8 +70,9 @@ const (
 // source (trace_capabilities vs trace_open) and the formatter family, not a
 // separate code path per CLI.
 const (
-	ObserveCaps = "caps"
-	ObserveFS   = "fs"
+	ObserveCaps    = "caps"
+	ObserveFS      = "fs"
+	ObserveDevices = "devices"
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -259,7 +260,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		container        = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
 		image            = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
 		allMatching      = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
-		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities) or fs (read-only filesystem + tmpfs)")
+		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), or devices (privileged-mode device decomposition)")
 		mountsFixture    = fs.String("mounts-fixture", "", "fs observer only: read container mount destinations from this `docker inspect` .Mounts JSON instead of running docker inspect")
 		fixture          = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
 		fixtureErr       = fs.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
@@ -296,10 +297,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
 	}
 	switch *observe {
-	case ObserveCaps, ObserveFS:
+	case ObserveCaps, ObserveFS, ObserveDevices:
 		// recognized
 	default:
-		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s", *observe, ObserveCaps, ObserveFS)
+		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices)
 	}
 	if *observe != ObserveFS && *mountsFixture != "" {
 		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
@@ -383,6 +384,64 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatComposeLintEntry:
 			if err := writeFSComposeLintProfile(stdout, s, *allowExploratory); err != nil {
 				return wrapCoded(ExitUsage, fmt.Errorf("write fs compose-lint-profile: %w", err))
+			}
+		}
+		if *outPath != "" {
+			if err := writeSidecar(s, *outPath); err != nil {
+				return fmt.Errorf("write sidecar: %w", err)
+			}
+		}
+		if s.TraceHealth.DropRate >= DropRateAbort {
+			return codedErrorf(ExitDropRateExcessive,
+				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
+				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
+			)
+		}
+		return nil
+	}
+	// The v0.3 device-decomposition observer is a third signal source
+	// (trace_open filtered to non-default /dev nodes) producing a devices: +
+	// derived-cap recommendation in the Sidecar's device section, so it takes
+	// its own produce→format path and returns before the capability formatter
+	// switch. This PR wires the JSON sidecar (the canonical evidence artifact)
+	// and the compose formatter; the remaining five formatters are follow-on
+	// PRs, hence the format guard.
+	if *observe == ObserveDevices {
+		switch *format {
+		case FormatCompose, FormatJSON:
+			// implemented in this increment
+		default:
+			return codedErrorf(ExitUsage, "--format %s not yet implemented for --observe %s; use %s or %s", *format, ObserveDevices, FormatJSON, FormatCompose)
+		}
+		if *allowExploratory {
+			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+		}
+		if *composeIn != "" || *composeService != "" {
+			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		}
+		s, err := produceDeviceObservation(devicePipelineOpts{
+			AggregateOpts: aggregateOpts{
+				Container:   *container,
+				Image:       *image,
+				AllMatching: *allMatching,
+			},
+			Fixture:  *fixture,
+			IGBin:    *igBin,
+			Duration: *duration,
+			Workload: *workload,
+		}, stderr)
+		if err != nil {
+			return err
+		}
+		switch *format {
+		case FormatCompose:
+			if err := writeDeviceCompose(stdout, *s.DeviceRecommendation); err != nil {
+				return fmt.Errorf("write device compose: %w", err)
+			}
+		case FormatJSON:
+			if err := writeJSON(stdout, s); err != nil {
+				return fmt.Errorf("write json: %w", err)
 			}
 		}
 		if *outPath != "" {

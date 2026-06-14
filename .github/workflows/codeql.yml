@@ -7,11 +7,11 @@
 # still fails the build on extraction/analysis errors (it does NOT fail on
 # findings — those live in the artifact, same as a normal CodeQL run).
 #
-# WHEN THE REPO GOES PUBLIC (or GHAS is enabled): flip `upload: false` ->
-# `true` on the analyze step, add `security-events: write` to the job
-# permissions, drop the upload-artifact step, and CodeQL alerts land in the
-# Security tab and on PRs automatically. (This is the same COI-gated flip as
-# OpenSSF Scorecard and cosign keyless — see ROADMAP §Maturity.)
+# WHEN THE REPO GOES PUBLIC (or GHAS is enabled): set `upload: always` on the
+# analyze step, add `security-events: write` to the job permissions, drop the
+# upload-artifact step, and CodeQL alerts land in the Security tab and on PRs
+# automatically. (This is the same COI-gated flip as OpenSSF Scorecard and
+# cosign keyless — see ROADMAP §Maturity.)
 #
 # Pinning (CLAUDE.md §Dependency pinning): every `uses:` is SHA-pinned with a
 # trailing tag comment.
@@ -63,8 +63,12 @@ jobs:
       - uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
           category: "/language:${{ matrix.language }}"
-          # Private repo, no GHAS — see the header. Flip to true when public.
-          upload: false
+          # Private repo, no GHAS — see the header. `upload` is an enum
+          # (always|failure-only|never), not a boolean; `never` keeps the SARIF
+          # local (written to `output`) instead of pushing it to Code Scanning.
+          # Flip to `always` when the repo is public / GHAS is enabled.
+          upload: never
+          upload-database: false
           output: sarif-results
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -3,7 +3,22 @@
   "extends": [
     "config:recommended"
   ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the cosign-release input pinned in release.yml so Renovate keeps cosign patched within the allowed range.",
+      "managerFilePatterns": ["/^\\.github/workflows/release\\.yml$/"],
+      "matchStrings": ["cosign-release:\\s*(?<currentValue>v[0-9][0-9.]*)"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "sigstore/cosign"
+    }
+  ],
   "packageRules": [
+    {
+      "description": "Keep cosign on 2.x: 3.x dropped --tlog-upload=false / --output-signature (needs a --signing-config), which breaks the no-public-Rekor COI signing flow in release.yml. Moving to 3.x is a deliberate, tested migration, not an auto-bump.",
+      "matchDepNames": ["sigstore/cosign"],
+      "allowedVersions": "<3.0.0"
+    },
     {
       "description": "Automerge low-risk GitHub Actions bumps. Actions are SHA-pinned (CLAUDE.md), CI gates every PR, and minor/patch/digest carry no API breakage. Majors stay manual (e.g. setup-go v5->v6 changes the runner Node).",
       "matchManagers": ["github-actions"],

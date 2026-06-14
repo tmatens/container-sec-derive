@@ -6,10 +6,13 @@ import "time"
 //
 // SchemaVersion follows semver-on-schema: additive changes stay within 1.x;
 // consumers (including the compose-lint contribution flow) reject unknown
-// majors. See PLAN.md §Output schema.
+// majors. See PLAN.md §Output schema. v0.2 bumped 1.0 → 1.1 for the additive,
+// omitempty fs fields (writable_paths, fs_recommendation,
+// replica_write_path_disagreement) — a 1.0 capability sidecar is byte-identical
+// under 1.1, and a 1.1-aware consumer knows the document may carry the fs block.
 const (
-	SchemaVersion = "1.0"
-	ToolVersion   = "0.1.0-beta"
+	SchemaVersion = "1.1"
+	ToolVersion   = "0.2.0"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."

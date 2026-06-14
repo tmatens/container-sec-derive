@@ -1,6 +1,6 @@
 # container-sec-derive
 
-[![release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.1.0)
+[![release](https://img.shields.io/badge/release-v0.2.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.2.0)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![signed: cosign](https://img.shields.io/badge/signed-cosign%20key--based-orange?logo=sigstore&logoColor=white)](#verifying-release-artifacts)
@@ -13,7 +13,7 @@
 
 Runtime observation tool that derives the minimum container security configuration an image actually needs by watching it run.
 
-> **Status: v0.1.0 released** — the first signed release. Ships static binaries (`linux/amd64`, `linux/arm64`) plus a cosign-signed multi-arch container image on GHCR (see [Container image](#container-image)). v0.1 delivers capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline with SPDX + CycloneDX SBOMs and an OpenVEX attestation. See [PLAN.md](PLAN.md) §v0.1 build order and [the v0.1.0 release](https://github.com/tmatens/container-sec-derive/releases/tag/v0.1.0).
+> **Status: v0.2.0 released.** v0.1 delivered capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline (SPDX + CycloneDX SBOMs + OpenVEX) on signed static binaries plus a cosign-signed multi-arch GHCR image. **v0.2 adds the read-only-filesystem + tmpfs observer** (`--observe fs`): it traces write-intent opens (`ig run trace_open`), correlates them against the container's mounts, and emits a `read_only: true` + `tmpfs:` recommendation in all seven formats, with its own evidence block (`writable_paths`, `fs_recommendation`), confidence rubric, multi-replica correlation, and a live integration-CI smoke. See [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) §v0.2, and [the latest release](https://github.com/tmatens/container-sec-derive/releases).
 
 ## What it does
 
@@ -43,13 +43,13 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
 Released images are published to the GitHub Container Registry:
 
 - **Package:** [`ghcr.io/tmatens/container-sec-derive`](https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive)
-- **Tags:** `0.1.0` and `0.1` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
+- **Tags:** `0.2.0` and `0.2` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
 
 ```sh
 # The package is private (see the COI note below) — authenticate to GHCR first.
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
 
-docker pull ghcr.io/tmatens/container-sec-derive:0.1.0
+docker pull ghcr.io/tmatens/container-sec-derive:0.2.0
 ```
 
 The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts). Running `csd` needs the privileges described under [the tool's own security posture](#a-note-on-the-tools-own-security-posture).
@@ -96,6 +96,15 @@ csd verify [flags]                 # classify an observation against a baseline
 ```
 
 The `observe` keyword is optional; `csd --container x` and `csd observe --container x` are equivalent.
+
+Choosing an observer:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--observe caps\|fs` | `caps` | `caps` derives the minimum capability set (v0.1). `fs` derives a read-only-filesystem + `tmpfs:` recommendation from observed write-intent opens (v0.2). |
+| `--mounts-fixture <file>` | unset | `fs` only: read the container's mount destinations from a `docker inspect .Mounts` JSON file instead of running `docker inspect` (hermetic tests / CI). |
+
+Under `--observe fs`, the same seven `--format` values emit the read-only/tmpfs equivalent (e.g. `compose` → `read_only: true` + `tmpfs:`, `docker-run` → `--read-only --tmpfs`, `k8s` → `readOnlyRootFilesystem` + in-memory volumes). Mount correlation under `--image` inspects each observed replica; live mounts otherwise come from the `--container` target.
 
 Selecting a target:
 
@@ -200,7 +209,7 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 
 ## Future scope
 
-Read-only filesystem + tmpfs paths, privileged-mode decomposition, Docker socket usage, dangerous-cap validation, host-network necessity, device profiles, network egress allowlists. See [ROADMAP.md](ROADMAP.md). All future observers slot into the same architecture as v1.
+Read-only filesystem + tmpfs paths shipped in **v0.2** (`--observe fs`). Still ahead: privileged-mode decomposition, Docker socket usage, dangerous-cap validation, host-network necessity, device profiles, network egress allowlists. See [ROADMAP.md](ROADMAP.md). All future observers slot into the same architecture as v1.
 
 ## Out of scope
 

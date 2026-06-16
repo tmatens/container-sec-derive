@@ -1,0 +1,105 @@
+{
+  "schema_version": "1.3",
+  "image": "myapp:1",
+  "observed_at": "2026-04-19T12:00:00Z",
+  "duration_seconds": 600,
+  "tool_version": "0.4.0",
+  "target": {
+    "mode": "container",
+    "selector": "aabbccddeeff0011",
+    "replicas_observed": 1,
+    "per_replica_event_counts": {
+      "aabbccddeeff0011": 7
+    },
+    "per_replica_caps": {},
+    "replica_cap_disagreement": [],
+    "restarts": [],
+    "follow_restart": false,
+    "target_exited_early": false,
+    "init_window_suppressed": 0,
+    "distinct_comms": 0
+  },
+  "capabilities": [],
+  "expected_caps_from_entrypoint": [],
+  "coverage_warnings": [],
+  "capadd_validation": {
+    "findings": [
+      {
+        "cap": "NET_RAW",
+        "used": true,
+        "removable": false,
+        "event_count": 2,
+        "syscalls": [
+          {
+            "name": "socket",
+            "count": 2
+          }
+        ],
+        "advice": "observed via socket. raw and packet sockets; no finer capability. If the only use is ICMP (ping), set net.ipv4.ping_group_range and drop NET_RAW entirely."
+      },
+      {
+        "cap": "SYS_ADMIN",
+        "used": true,
+        "removable": false,
+        "event_count": 3,
+        "syscalls": [
+          {
+            "name": "perf_event_open",
+            "count": 3
+          }
+        ],
+        "advice": "observed only via perf_event_open; PERFMON is sufficient (Linux \u003e= 5.8).",
+        "finer_caps": [
+          "PERFMON"
+        ]
+      },
+      {
+        "cap": "SYS_MODULE",
+        "used": false,
+        "removable": true,
+        "event_count": 0,
+        "syscalls": [],
+        "advice": "no capability check fired under this workload — candidate for removal. Workload-bounded: verify with a fuller workload before dropping."
+      },
+      {
+        "cap": "SYS_PTRACE",
+        "used": true,
+        "removable": false,
+        "event_count": 2,
+        "syscalls": [
+          {
+            "name": "process_vm_readv",
+            "count": 1
+          },
+          {
+            "name": "ptrace",
+            "count": 1
+          }
+        ],
+        "advice": "observed via process_vm_readv, ptrace. process introspection (ptrace / process_vm_readv); no finer capability exists. Restrict to debugging builds rather than shipping it in production."
+      }
+    ],
+    "granted_set_provided": true,
+    "recommended_cap_add": [
+      "NET_RAW",
+      "PERFMON",
+      "SYS_PTRACE"
+    ]
+  },
+  "trace_health": {
+    "events_recorded": 7,
+    "events_dropped": 0,
+    "drop_rate": 0
+  },
+  "confidence": {
+    "level": "moderate",
+    "factors": [
+      "ok: 3 capability/ies observed in use across 7 held event(s)",
+      "ok: 1 cap(s) flagged removable (granted but no held check fired) — workload-bounded",
+      "moderate: no workload script provided; removable-cap conclusions reflect startup + idle only — verify before dropping",
+      "deferred: steady-state detection not yet implemented",
+      "deferred: target-exited-early signal not yet wired"
+    ]
+  },
+  "caveat": "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
+}

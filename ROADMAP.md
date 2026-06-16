@@ -42,6 +42,18 @@ The single highest-value future observer. `read_only: true` is borderline-imposs
 
 ## v0.4 — Docker socket API usage
 
+> **Status: deferred — signal-blocked (issue #110).** The intended signal (parse
+> the HTTP request line on the docker.sock fd) is not exposed by any built-in IG
+> gadget at the pinned `v0.51.0` or the current latest `v0.53.1`: `trace_tcp` /
+> `tcpdump` are TCP/IP only (docker.sock is `AF_UNIX`), `trace_ssl` is TLS-only
+> (it is plaintext HTTP), and `trace_open` misses `connect()`-based socket use.
+> Delivering it would require either a custom csd-authored IG gadget — a change
+> to the locked "built-in gadgets, subprocess only" posture (PLAN.md Decisions
+> 5/7) — or upstream IG support. So it is held, and the **v0.5 dangerous-cap_add
+> validator was pulled ahead of it** (shipped in release v0.4.0). Release
+> numbering stays sequential; the ROADMAP phase labels are planning order, not
+> release tags.
+
 When a container mounts `/var/run/docker.sock`, *which* API endpoints does it actually call? Most socket-mount cases (Traefik, Portainer, Watchtower) only need a small subset; a properly scoped socket-proxy is safer than full socket access.
 
 - **Signal:** eBPF on `connect()` to the docker.sock path + observe HTTP requests on the resulting fd (or trace `read`/`write` and parse the request line).
@@ -52,6 +64,27 @@ When a container mounts `/var/run/docker.sock`, *which* API endpoints does it ac
 ---
 
 ## v0.5 — Dangerous cap_add validator
+
+> **Status: released (v0.4.0), pulled ahead of the deferred §v0.4 socket
+> observer.** Design + scope in **issue #111**. Inverse of v0.1: it validates an
+> already-granted dangerous cap against runtime behavior. Delivered the
+> **`--observe capadd`** mode, which reuses the `trace_capabilities` signal (the
+> per-event `syscall` field is present at the pin — no new gadget, no pin bump)
+> and re-aggregates it by syscall-per-cap (`capadd.go`), a curated honest
+> knowledge base with finer-grained substitutions (`capadddecision.go` —
+> `SYS_ADMIN`+`perf_event_open` → `PERFMON`, `SYS_ADMIN`+`bpf` → `BPF`; honest
+> "no finer cap exists" where true), runc/init + denied-check filtering, the
+> optional **`--cap-add`** granted-set input that enables unused → removable
+> detection and a recommended minimized `cap_add`, the additive
+> `capadd_validation` sidecar block (schema bumped 1.2 → **1.3**), a workload-
+> coverage-dominant confidence rubric (`capaddconfidence.go` — the unused-cap
+> call is the workload-bounded sharp edge, surfaced like `csd verify`'s
+> `over_permissioned` WARN), multi-replica disagreement, **all seven formatters**,
+> and a hardware-free live smoke (`scripts/smoke_capadd.sh`: the synthetic
+> exerciser's deterministic CHOWN/SETUID/SETGID checks gate "used", an unused
+> SYS_MODULE gates "removable"). **CL-0011 needs no compose-lint change** — the
+> static dangerous-`cap_add` rule already ships there; csd emits the validated
+> minimized profile.
 
 Inverse of v0.1. When `cap_add: [SYS_ADMIN]` (or another dangerous cap) is set, observe which syscalls actually invoked it. Often the dangerous cap was a shotgun fix for a problem solvable with a finer-grained cap.
 

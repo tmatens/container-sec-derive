@@ -198,6 +198,23 @@ jobs:
           cat smoke_device.txt
           exit $rc
 
+      # v0.5 dangerous-cap_add validator (--observe capadd). Reuses the
+      # trace_capabilities gadget (attach already proven by the caps smoke
+      # above); what this adds is the per-cap syscall correlation and the
+      # unused->removable classification on a real stream. Hardware-free hard
+      # gate: the synthetic exerciser deterministically fires held
+      # CHOWN/SETUID/SETGID checks, so validating those plus an unused
+      # SYS_MODULE must report CHOWN used and SYS_MODULE removable
+      # (scripts/smoke_capadd.sh).
+      - name: Live-BPF capadd smoke
+        env:
+          DURATION: ${{ github.event.inputs.duration || '30s' }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/smoke_capadd.sh > smoke_capadd.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_capadd.txt
+          exit $rc
+
       # Route the verdict to channels readable WITHOUT the Actions log
       # API (which is unreachable from some clients): a PR comment +
       # the job summary. SECURITY: the report is a strict ALLOWLIST —
@@ -224,7 +241,9 @@ jobs:
                        echo '-- fs observer --'; \
                        grep -hE '^(PASS|FAIL|INFO|smoke-fs:)' smoke_fs.txt 2>/dev/null || true; \
                        echo '-- devices / privileged observer --'; \
-                       grep -hE '^(PASS|FAIL|INFO|smoke-device:)' smoke_device.txt 2>/dev/null || true; } )"
+                       grep -hE '^(PASS|FAIL|INFO|smoke-device:)' smoke_device.txt 2>/dev/null || true; \
+                       echo '-- capadd observer --'; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-capadd:)' smoke_capadd.txt 2>/dev/null || true; } )"
           [ -n "$report" ] || report="(no status lines captured — see the Actions run)"
           { echo "### Live-BPF integration report";
             echo "[run](${RUN_URL})";

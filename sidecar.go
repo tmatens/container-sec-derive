@@ -14,7 +14,7 @@ import "time"
 // 1.2, and a 1.2-aware consumer knows the document may carry the device block.
 const (
 	SchemaVersion = "1.2"
-	ToolVersion   = "0.3.0"
+	ToolVersion   = "0.3.1"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."

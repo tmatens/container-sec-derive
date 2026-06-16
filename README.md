@@ -1,6 +1,6 @@
 # container-sec-derive
 
-[![release](https://img.shields.io/badge/release-v0.3.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.3.0)
+[![release](https://img.shields.io/badge/release-v0.3.1-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.3.1)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![signed: cosign](https://img.shields.io/badge/signed-cosign%20key--based-orange?logo=sigstore&logoColor=white)](#verifying-release-artifacts)
@@ -13,7 +13,7 @@
 
 Runtime observation tool that derives the minimum container security configuration an image actually needs by watching it run.
 
-> **Status: v0.3.0 released.** v0.1 delivered capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline (SPDX + CycloneDX SBOMs + OpenVEX) on signed static binaries plus a cosign-signed multi-arch GHCR image. **v0.2 added the read-only-filesystem + tmpfs observer** (`--observe fs`). **v0.3 adds privileged-mode decomposition**: a device observer (`--observe devices`) that derives the minimum `devices:` grant from observed opens of non-default `/dev` nodes, and the `--observe privileged` composition that runs the capability and device observers together to replace `privileged: true` with the minimum `cap_add` + `devices` — emitted in all seven formats, with a `privileged_decomposition` evidence block, a combined confidence rubric, and a hardware-free live integration-CI smoke. See [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) §v0.3, and [the latest release](https://github.com/tmatens/container-sec-derive/releases).
+> **Status: v0.3.1 released.** v0.1 delivered capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline (SPDX + CycloneDX SBOMs + OpenVEX) on signed static binaries plus a cosign-signed multi-arch GHCR image. **v0.2 added the read-only-filesystem + tmpfs observer** (`--observe fs`). **v0.3 adds privileged-mode decomposition**: a device observer (`--observe devices`) that derives the minimum `devices:` grant from observed opens of non-default `/dev` nodes, and the `--observe privileged` composition that runs the capability and device observers together to replace `privileged: true` with the minimum `cap_add` + `devices` — emitted in all seven formats, with a `privileged_decomposition` evidence block, a combined confidence rubric, and a hardware-free live integration-CI smoke. **v0.3.1** flags that decomposition as **partial** — the AppArmor/seccomp (`security_opt`) dimension of `privileged: true` is not observed (no denial gadget at the pinned IG), surfaced via a `# WARNING (partial decomposition)` header, `partial`/`security_opt` sidecar fields, and a stderr advisory. See [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) §v0.3, and [the latest release](https://github.com/tmatens/container-sec-derive/releases).
 
 ## What it does
 
@@ -43,13 +43,13 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
 Released images are published to the GitHub Container Registry:
 
 - **Package:** [`ghcr.io/tmatens/container-sec-derive`](https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive)
-- **Tags:** `0.3.0` and `0.3` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
+- **Tags:** `0.3.1` and `0.3` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
 
 ```sh
 # The package is private (see the COI note below) — authenticate to GHCR first.
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
 
-docker pull ghcr.io/tmatens/container-sec-derive:0.3.0
+docker pull ghcr.io/tmatens/container-sec-derive:0.3.1
 ```
 
 The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts). Running `csd` needs the privileges described under [the tool's own security posture](#a-note-on-the-tools-own-security-posture).
@@ -280,13 +280,13 @@ The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/con
 cosign verify \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.3.0
+  ghcr.io/tmatens/container-sec-derive:0.3.1
 
 # Attestations (SBOM + OpenVEX)
 cosign verify-attestation --type spdxjson \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.3.0
+  ghcr.io/tmatens/container-sec-derive:0.3.1
 
 # Vendored ig provenance — IG version, upstream per-arch tarball digests, and
 # the cosign-verified pin (predicate sourced from ig-pin/)
@@ -294,10 +294,10 @@ cosign verify-attestation \
   --type https://github.com/tmatens/container-sec-derive/attestations/ig-provenance/v1 \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.3.0
+  ghcr.io/tmatens/container-sec-derive:0.3.1
 ```
 
-> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.3.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
+> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.3.1` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
 
 ## License
 

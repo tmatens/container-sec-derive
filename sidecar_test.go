@@ -11,8 +11,8 @@ func TestNewSidecar_Constants(t *testing.T) {
 	if s.SchemaVersion != "1.2" {
 		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.2")
 	}
-	if s.ToolVersion != "0.3.0" {
-		t.Errorf("ToolVersion = %q, want %q", s.ToolVersion, "0.3.0")
+	if s.ToolVersion != "0.3.1" {
+		t.Errorf("ToolVersion = %q, want %q", s.ToolVersion, "0.3.1")
 	}
 	if !strings.Contains(s.Caveat, "not a correctness proof") && !strings.Contains(s.Caveat, "Not a correctness proof") {
 		t.Errorf("Caveat missing the correctness-proof framing: %q", s.Caveat)

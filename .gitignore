@@ -4,7 +4,10 @@
 .claude/
 
 # Go build output
+# /container-sec-derive is the default `go build` (no -o) output name — the
+# module name — which is easy to produce by accident and must never be tracked.
 /csd
+/container-sec-derive
 /csd_linux_amd64
 /csd_linux_arm64
 *.exe

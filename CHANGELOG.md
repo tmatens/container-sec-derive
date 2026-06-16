@@ -11,6 +11,42 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`--observe capadd`: the dangerous-`cap_add` validator (ROADMAP §v0.5,
+  CL-0011).** The inverse of the v0.1 capability observer: instead of deriving
+  caps from zero, it takes already-granted dangerous capabilities and validates
+  them against runtime behavior. It reuses the `trace_capabilities` signal — the
+  per-event `syscall` field present at the pinned IG v0.51.0 — and re-aggregates
+  it by syscall-per-cap (no new gadget, no pin bump). For each validated cap it
+  reports whether it was **used** (and by which syscalls), an honest advisory
+  from a curated knowledge base, any concrete **finer-grained substitute** (e.g.
+  `SYS_ADMIN` observed only via `perf_event_open` → `CAP_PERFMON`; via `bpf` →
+  `CAP_BPF`), and — when the granted set is supplied via **`--cap-add`** — flags
+  caps granted but **never exercised** as removal candidates and synthesizes a
+  recommended minimized `cap_add`. Default (no `--cap-add`) reports observed
+  usage of the built-in dangerous-cap set. runc/init bring-up checks and denied
+  (`capable:false`) checks are filtered so only genuine workload usage counts.
+  Emitted in **all seven formatters**; new additive `capadd_validation` sidecar
+  block (per-cap findings + syscalls + advice + recommended set); a capadd-scoped
+  confidence rubric whose dominant factor is workload coverage (the unused →
+  removable call is workload-bounded, the v0.5 analog of `csd verify`'s
+  `over_permissioned` WARN); multi-replica disagreement; hermetic `--fixture`
+  golden + unit tests; and a hardware-free live-BPF integration smoke
+  (`scripts/smoke_capadd.sh`: the synthetic exerciser's deterministic
+  CHOWN/SETUID/SETGID checks gate "used", an unused SYS_MODULE gates "removable").
+  Schema bumped 1.2 → **1.3** (additive `capadd_validation`; caps/fs/device/
+  privileged sidecars stay byte-identical). Design + scope in **issue #111**.
+
+### Changed
+
+- **Sidecar `tool_version` → 0.4.0; `schema_version` → 1.3.** The next release is
+  **v0.4.0**, delivering the dangerous-`cap_add` validator. Release numbering
+  stays sequential while the ROADMAP §v0.4 Docker-socket observer is **deferred**
+  (signal-blocked — no built-in IG gadget captures AF_UNIX/HTTP payloads at the
+  pin or latest; tracked in **issue #110**), so v0.4.0 ships the §v0.5 observer
+  ahead of it.
+
 ## [0.3.1] - 2026-06-16
 
 ### Changed

@@ -12,9 +12,12 @@ import "time"
 // omitempty device fields (device_paths, device_recommendation,
 // replica_device_disagreement) — a caps or fs sidecar is byte-identical under
 // 1.2, and a 1.2-aware consumer knows the document may carry the device block.
+// v0.5 bumps 1.2 -> 1.3 for the additive, omitempty capadd_validation block (the
+// dangerous-cap_add validator); caps/fs/device sidecars stay byte-identical under
+// 1.3, and a 1.3-aware consumer knows the document may carry the capadd block.
 const (
-	SchemaVersion = "1.2"
-	ToolVersion   = "0.3.1"
+	SchemaVersion = "1.3"
+	ToolVersion   = "0.4.0"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
@@ -86,6 +89,13 @@ type Sidecar struct {
 	// blocks above carry the full evidence; this block is the headline
 	// conclusion (drop privileged: true → cap_add + devices).
 	PrivilegedDecomposition *privilegedDecomposition `json:"privileged_decomposition,omitempty"`
+
+	// v0.5 dangerous-cap_add validator section (the --observe capadd mode).
+	// omitempty + nil on every other observer's run, so caps/fs/device/privileged
+	// sidecars serialize byte-identically under the 1.3 schema bump (PLAN.md
+	// §Output schema). On an `--observe capadd` run the other observers'
+	// scaffolding stays empty and this block carries the per-cap validation.
+	CapaddValidation *capaddValidation `json:"capadd_validation,omitempty"`
 
 	TraceHealth TraceHealth `json:"trace_health"`
 	Confidence  Confidence  `json:"confidence"`

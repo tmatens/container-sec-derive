@@ -74,6 +74,11 @@ const (
 	ObserveFS         = "fs"
 	ObserveDevices    = "devices"
 	ObservePrivileged = "privileged"
+	// ObserveCapadd is the v0.5 dangerous-cap_add validator (CL-0011): the
+	// inverse of caps. It reuses the trace_capabilities signal but aggregates
+	// syscalls per dangerous cap and emits a validation (which caps are used,
+	// by which syscalls, finer-grained alternatives, and removal candidates).
+	ObserveCapadd = "capadd"
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -261,7 +266,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		container        = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
 		image            = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
 		allMatching      = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
-		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), devices (device decomposition), or privileged (drop privileged: true → cap_add + devices)")
+		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), devices (device decomposition), privileged (drop privileged: true → cap_add + devices), or capadd (validate dangerous cap_add against observed syscalls)")
+		capAddIn         = fs.String("cap-add", "", "capadd observer: comma-separated currently-granted caps to validate (e.g. SYS_ADMIN,NET_RAW); enables unused-cap detection and a recommended minimized cap_add. Default: report observed dangerous-cap usage")
 		mountsFixture    = fs.String("mounts-fixture", "", "fs observer only: read container mount destinations from this `docker inspect` .Mounts JSON instead of running docker inspect")
 		deviceFixture    = fs.String("device-fixture", "", "privileged observer only: read the trace_open NDJSON for the devices half from this file (the --fixture file supplies the trace_capabilities half)")
 		fixture          = fs.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
@@ -299,16 +305,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
 	}
 	switch *observe {
-	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged:
+	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd:
 		// recognized
 	default:
-		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged)
+		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd)
 	}
 	if *observe != ObserveFS && *mountsFixture != "" {
 		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
 	}
 	if *observe != ObservePrivileged && *deviceFixture != "" {
 		return codedErrorf(ExitUsage, "--device-fixture is only meaningful with --observe %s", ObservePrivileged)
+	}
+	if *observe != ObserveCapadd && *capAddIn != "" {
+		return codedErrorf(ExitUsage, "--cap-add is only meaningful with --observe %s", ObserveCapadd)
 	}
 	// Workload is recorded on the sidecar and surfaced as a confidence factor
 	// (both observers); the compose-lint contribution gate also requires the
@@ -564,6 +573,101 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatComposeLintEntry:
 			if err := writePrivilegedComposeLintProfile(stdout, s, *allowExploratory); err != nil {
 				return wrapCoded(ExitUsage, fmt.Errorf("write privileged compose-lint-profile: %w", err))
+			}
+		}
+		if *outPath != "" {
+			if err := writeSidecar(s, *outPath); err != nil {
+				return fmt.Errorf("write sidecar: %w", err)
+			}
+		}
+		emitAdvisoryWarnings(s, stderr)
+		if s.TraceHealth.DropRate >= DropRateAbort {
+			return codedErrorf(ExitDropRateExcessive,
+				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
+				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
+			)
+		}
+		return nil
+	}
+	// The v0.5 dangerous-cap_add validator (CL-0011) reuses the trace_capabilities
+	// signal but aggregates syscalls per dangerous cap, emitting a validation in
+	// the Sidecar's capadd_validation block. It takes its own produce→format path
+	// and returns before the capability formatter switch. All seven formatters are
+	// implemented; the advisory is always emitted, and the concrete recommended
+	// cap_add only when --cap-add supplies the granted set.
+	if *observe == ObserveCapadd {
+		if *format == FormatComposePatch {
+			if *composeIn == "" || *composeService == "" {
+				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+			}
+			if _, statErr := os.Stat(*composeIn); statErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+			}
+		} else if *composeIn != "" || *composeService != "" {
+			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		}
+		if *allowExploratory && *format != FormatComposeLintEntry {
+			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+		}
+		// The granted set (--cap-add) is the validate-set when supplied — and the
+		// switch that enables unused-cap detection + a recommended minimized
+		// cap_add. Without it the validator scrutinizes the dangerousCaps default
+		// and reports only observed usage.
+		granted := parseCapSet(*capAddIn)
+		activeSet := granted
+		hasGranted := granted != nil
+		if activeSet == nil {
+			activeSet = dangerousCaps
+		}
+		s, err := produceCapaddObservation(capaddPipelineOpts{
+			AggregateOpts: aggregateOpts{
+				Container:   *container,
+				Image:       *image,
+				AllMatching: *allMatching,
+			},
+			ActiveSet: activeSet,
+			Granted:   hasGranted,
+			Fixture:   *fixture,
+			IGBin:     *igBin,
+			Duration:  *duration,
+			Workload:  *workload,
+		}, stderr)
+		if err != nil {
+			return err
+		}
+		switch *format {
+		case FormatCompose:
+			if err := writeCapaddCompose(stdout, s.CapaddValidation); err != nil {
+				return fmt.Errorf("write capadd compose: %w", err)
+			}
+		case FormatJSON:
+			if err := writeJSON(stdout, s); err != nil {
+				return fmt.Errorf("write json: %w", err)
+			}
+		case FormatDockerRun:
+			if err := writeCapaddDockerRun(stdout, s.CapaddValidation); err != nil {
+				return fmt.Errorf("write capadd docker-run: %w", err)
+			}
+		case FormatK8s:
+			if err := writeCapaddK8s(stdout, s.CapaddValidation); err != nil {
+				return fmt.Errorf("write capadd k8s: %w", err)
+			}
+		case FormatOCI:
+			if err := writeCapaddOCI(stdout, s.CapaddValidation); err != nil {
+				return fmt.Errorf("write capadd oci: %w", err)
+			}
+		case FormatComposePatch:
+			raw, readErr := os.ReadFile(*composeIn)
+			if readErr != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+			}
+			if err := writeCapaddComposePatch(stdout, s.CapaddValidation, raw, *composeIn, *composeService); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write capadd compose-patch: %w", err))
+			}
+		case FormatComposeLintEntry:
+			if err := writeCapaddComposeLintProfile(stdout, s, *allowExploratory); err != nil {
+				return wrapCoded(ExitUsage, fmt.Errorf("write capadd compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {

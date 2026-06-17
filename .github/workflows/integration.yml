@@ -215,6 +215,20 @@ jobs:
           cat smoke_capadd.txt
           exit $rc
 
+      # Closed-loop "meets intent" test (scripts/closed_loop.sh). The only gate
+      # that validates csd's OUTPUT, not just its pipeline: derive a cap profile,
+      # re-run the workload under exactly that profile (must succeed = sufficient),
+      # then with all caps dropped (must fail = necessary). Hardware-free; the
+      # derive phase reuses trace_capabilities (attach already proven above).
+      - name: Closed-loop meets-intent test
+        env:
+          DURATION: ${{ github.event.inputs.duration || '30s' }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/closed_loop.sh > closed_loop.txt 2>&1 && rc=0 || rc=$?
+          cat closed_loop.txt
+          exit $rc
+
       # Route the verdict to channels readable WITHOUT the Actions log
       # API (which is unreachable from some clients): a PR comment +
       # the job summary. SECURITY: the report is a strict ALLOWLIST —
@@ -243,7 +257,9 @@ jobs:
                        echo '-- devices / privileged observer --'; \
                        grep -hE '^(PASS|FAIL|INFO|smoke-device:)' smoke_device.txt 2>/dev/null || true; \
                        echo '-- capadd observer --'; \
-                       grep -hE '^(PASS|FAIL|INFO|smoke-capadd:)' smoke_capadd.txt 2>/dev/null || true; } )"
+                       grep -hE '^(PASS|FAIL|INFO|smoke-capadd:)' smoke_capadd.txt 2>/dev/null || true; \
+                       echo '-- closed-loop (meets intent) --'; \
+                       grep -hE '^(PASS|FAIL|INFO|closed-loop:)' closed_loop.txt 2>/dev/null || true; } )"
           [ -n "$report" ] || report="(no status lines captured — see the Actions run)"
           { echo "### Live-BPF integration report";
             echo "[run](${RUN_URL})";

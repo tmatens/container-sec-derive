@@ -26,9 +26,9 @@ Each of those needs a real host. The tiers below say which.
 |---|---|---|---|
 | Static analysis (`go vet`, CodeQL, govulncheck) | No obvious bugs / known CVEs / scanning | `ci.yml`, `codeql.yml`, `govulncheck.yml` | ✅ |
 | Unit + golden + `--fixture` pipeline | The transform: aggregation, decision logic, every formatter, the sidecar schema, exit codes | local + `ci.yml` | ✅ (the hermetic core) |
-| Fuzz | Parser robustness on hostile input | `ci.yml` (CPU-bounded) | ⚠️ partial — v0.2 parsers have targets; **`capadd` NDJSON + `compose-patch` rewriter not yet fuzzed** (#116) |
+| Fuzz | Parser robustness on hostile input | `ci.yml` (CPU-bounded) | ✅ ig NDJSON (`capEvent`/`fileEvent`) + `capadd` aggregator + `parseMountDestinations` + `compose-patch` rewriter |
 | Live-BPF integration smokes | Attach + attribution + `ig`-schema conformance, on a real kernel | `integration.yml` on **GitHub-hosted** runners (`scripts/smoke_{wsl2,fs,device,capadd}.sh`) | ✅ baseline (one kernel, hardware-free) |
-| Closed-loop "meets intent" | A **derived config actually works** (and a tighter one breaks) | real host / self-hosted runner | ❌ **missing** (#116) — highest-value gap |
+| Closed-loop "meets intent" | A **derived config actually works** (and a tighter one breaks) | hosted or self-hosted runner | ✅ `scripts/closed_loop.sh` / `make closed-loop`, in `integration.yml` |
 | Hardware-ful device | Real `/dev/dri` / `/dev/net/tun` / `/dev/kvm` detection | self-hosted runner with that hardware | ❌ missing (#116) |
 | Kernel/distro matrix | BPF attach across kernels (incl. the future LSM-BPF path, kernel ≥5.7) | self-hosted runner(s) / VM matrix | ❌ missing (#116) |
 | Dogfooding | csd against the real target stack | the homelab host | ❌ missing (#116) |
@@ -76,17 +76,21 @@ limitation to work around.
 ## Closing the gap
 
 The outstanding live/host tiers and the repo-side work that enables them are
-tracked in **issue #116**. The priority order:
+tracked in **issue #116**. Status:
 
-1. **Closed-loop harness** (`scripts/closed_loop.sh`) — derive → relaunch with the
-   derived config → re-run the workload → assert it still works, then assert a
+1. ✅ **Closed-loop harness** (`scripts/closed_loop.sh`) — derive → relaunch with
+   the derived config → re-run the workload → assert it still works, then assert a
    tighter config fails. Hardware-free, so it runs on hosted runners *and* a
-   self-hosted one. This is the only test that proves a derived profile is
-   *correct*, not just internally consistent — it is `csd verify` extended to
-   actually apply the config.
-2. **Fuzz the v0.4 parsers** — close the hermetic-tier fuzz gap (no host needed).
-3. **Hardware-ful device smoke + kernel matrix** — self-hosted runner.
-4. **Dogfood** against the real stack.
+   self-hosted one. The only test that proves a derived profile is *correct*, not
+   just internally consistent — `csd verify` extended to actually apply the config.
+2. ✅ **Fuzz the v0.4 parsers** — the hermetic-tier fuzz gap is closed.
+3. ⬜ **Hardware-ful device smoke + kernel matrix** — needs a self-hosted runner;
+   blocked on the runner trust-model decision (#116).
+4. ⬜ **Dogfood** against the real stack — host-side.
+
+Items 3–4 need a real host / self-hosted runner, which is gated on the trust-model
+decision in #116 (GitHub self-hosted vs. Forgejo mirror; never run untrusted PR
+code privileged).
 
 A **decision precedes the self-hosted items**: a runner executing PR code with
 root + BPF is a supply-chain risk (csd PRs are agent-authored), so either a

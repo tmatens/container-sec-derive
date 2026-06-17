@@ -166,9 +166,19 @@ func observeCapadd(ctx context.Context, igBin string, opts aggregateOpts, active
 	}()
 
 	obs, aggErr := aggregateCapadd(stdout, opts, activeSet)
-	waitErr := cmd.Wait()
+	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
+	if earlyErr {
+		// Undrained stdout on early error → ig blocks and never exits; kill it
+		// so the stderr drain + cmd.Wait() don't stall for the window (matches
+		// observe()).
+		_ = cmd.Process.Kill()
+	}
+	// Join the stderr drain BEFORE cmd.Wait() (StderrPipe contract): the read
+	// must finish before Wait closes the pipe, else a trailing `lost N` line
+	// can be dropped.
 	wg.Wait()
-	if aggErr != nil && !errors.Is(aggErr, io.EOF) {
+	waitErr := cmd.Wait()
+	if earlyErr {
 		return nil, aggErr
 	}
 	if waitErr != nil && ctx.Err() == nil {

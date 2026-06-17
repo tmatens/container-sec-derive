@@ -185,10 +185,11 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 		return nil, err
 	}
 
-	// Ambiguity: --image matched >1 replica without --all-matching. Same guard
-	// as aggregate()/aggregateDevices — refuse to silently union the dangerous-
-	// cap usage of replicas the user didn't opt into aggregating.
-	if opts.Image != "" && !opts.AllMatching && len(perReplica) > 1 {
+	// Ambiguity: the selector (--image, or a too-short --container prefix)
+	// matched >1 replica without --all-matching. Same guard as
+	// aggregate()/aggregateDevices — refuse to silently union the dangerous-cap
+	// usage of replicas the user didn't opt into aggregating.
+	if opts.ambiguous(len(perReplica)) {
 		labels := make([]string, 0, len(perReplica))
 		for rid := range perReplica {
 			if name := perReplicaName[rid]; name != "" {
@@ -198,7 +199,7 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 			}
 		}
 		sort.Strings(labels)
-		return nil, &ambiguousSelectionError{image: opts.Image, replicas: labels}
+		return nil, opts.newAmbiguousSelectionError(labels)
 	}
 
 	obs := &capaddObservation{

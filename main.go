@@ -211,6 +211,30 @@ func (o aggregateOpts) matchesRuntime(containerID, containerName, image string) 
 	return false
 }
 
+// ambiguous reports whether the active selector matched more replicas than the
+// user opted into aggregating. A bare --image without --all-matching is
+// ambiguous; so is a --container id-prefix that matched >1 container (an exact
+// id/name match yields one replica, so this only fires for a too-short prefix —
+// deep-review M3). Emitting the union would be an over-permissioned profile
+// (PLAN.md §Target selection). The no-selector case (whole-host / --fixture
+// replay) is intentionally not ambiguous. --all-matching requires --image, so it
+// only ever clears the image path.
+func (o aggregateOpts) ambiguous(replicaCount int) bool {
+	if replicaCount <= 1 || o.AllMatching {
+		return false
+	}
+	return o.Image != "" || o.Container != ""
+}
+
+// newAmbiguousSelectionError builds the typed error for the active selector,
+// naming the right flag and only offering --all-matching as a remedy for --image.
+func (o aggregateOpts) newAmbiguousSelectionError(labels []string) *ambiguousSelectionError {
+	if o.Image != "" {
+		return &ambiguousSelectionError{flag: "--image", selector: o.Image, replicas: labels, allMatchingHint: true}
+	}
+	return &ambiguousSelectionError{flag: "--container", selector: o.Container, replicas: labels}
+}
+
 func (o aggregateOpts) modeLabel() string {
 	if o.Image != "" {
 		if o.AllMatching {
@@ -1257,10 +1281,11 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		return nil, err
 	}
 
-	// Ambiguity: --image matched >1 replica without --all-matching.
-	// PLAN.md §Target selection requires an error here so the tool never
-	// silently emits the union of replica cap sets as a single profile.
-	if opts.Image != "" && !opts.AllMatching && len(replicas) > 1 {
+	// Ambiguity: the selector (--image, or a too-short --container prefix)
+	// matched >1 replica without --all-matching. PLAN.md §Target selection
+	// requires an error here so the tool never silently emits the union of
+	// replica cap sets as a single profile.
+	if opts.ambiguous(len(replicas)) {
 		labels := make([]string, 0, len(replicas))
 		for rid, st := range replicas {
 			if st.sampleName != "" {
@@ -1270,7 +1295,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			}
 		}
 		sort.Strings(labels)
-		return nil, &ambiguousSelectionError{image: opts.Image, replicas: labels}
+		return nil, opts.newAmbiguousSelectionError(labels)
 	}
 
 	s := NewSidecar()

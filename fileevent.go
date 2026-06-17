@@ -244,10 +244,11 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 		return nil, err
 	}
 
-	// Ambiguity: --image matched >1 replica without --all-matching. Mirrors
-	// aggregate() (the cap path) — the tool refuses to silently union the
-	// write paths of replicas the user didn't opt into aggregating.
-	if opts.Image != "" && !opts.AllMatching && len(perReplica) > 1 {
+	// Ambiguity: the selector (--image, or a too-short --container prefix)
+	// matched >1 replica without --all-matching. Mirrors aggregate() (the cap
+	// path) — the tool refuses to silently union the write paths of replicas the
+	// user didn't opt into aggregating.
+	if opts.ambiguous(len(perReplica)) {
 		labels := make([]string, 0, len(perReplica))
 		for rid := range perReplica {
 			if name := perReplicaName[rid]; name != "" {
@@ -257,7 +258,7 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 			}
 		}
 		sort.Strings(labels)
-		return nil, &ambiguousSelectionError{image: opts.Image, replicas: labels}
+		return nil, opts.newAmbiguousSelectionError(labels)
 	}
 
 	obs := &writeObservation{

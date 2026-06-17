@@ -138,7 +138,7 @@ The relationship between a CLI invocation and the container(s) being observed is
 
 **Target selection.** Three mutually exclusive flags:
 
-- `--container <id-or-name>` — explicit, preferred. Unambiguous; no ambiguity if multiple replicas of the same image are running.
+- `--container <id-or-name>` — explicit, preferred. An exact id or name is unambiguous even with multiple replicas of the same image running. An **id-prefix** (≥6 chars) is a convenience that can match more than one container; if it matches **more than one**, csd errors with the candidate list (same `ExitTargetAmbiguous` as `--image`) and asks for a longer or exact id rather than silently unioning the matches — `--all-matching` is not an opt-in here, it requires `--image`.
 - `--image <ref>` — convenience for the common case. Matches containers by image reference. If **zero** containers match, error and exit. If **more than one** container matches, error with a list of candidates and require the user to disambiguate with `--container` or opt in with `--all-matching`.
 - `--all-matching` — explicit opt-in to observe every running container of `--image <ref>`. Events are aggregated per `image_digest`, not per `container_id`. The evidence sidecar records the replica count and a per-replica event-count distribution so uneven coverage is visible ("replica A: 1,240 events, replica B: 8 events — workload likely did not exercise replica B").
 

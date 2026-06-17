@@ -106,11 +106,29 @@ var capKB = map[string]capKBEntry{
 
 // capAdvice returns the advisory for a used capability and, when every observed
 // syscall is covered by a finer capability, the concrete substitute set.
-// syscalls is expected sorted.
-func capAdvice(capName string, syscalls []string) (advice string, finerCaps []string) {
+// syscalls and deniedSyscalls are expected sorted; deniedSyscalls are the
+// capable:false attempts retained for this cap (L10).
+func capAdvice(capName string, syscalls, deniedSyscalls []string) (advice string, finerCaps []string) {
 	entry, known := capKB[capName]
 	syscallList := strings.Join(syscalls, ", ")
-	if known && len(entry.finerBySyscall) > 0 && len(syscalls) > 0 {
+
+	// L10: a denied (capable:false) attempt for a syscall that this cap's
+	// knowledge-base entry has NO finer substitute for is evidence the workload
+	// tries to use the capability for something a finer cap can't cover. We only
+	// reason about this when a finer substitution was on the table (the entry has
+	// a finerBySyscall map) — for caps with no substitute there is nothing to
+	// suppress and the base advice already keeps them. Such a "broad" denied
+	// attempt suppresses the substitution and adds a caveat.
+	var deniedBroad []string
+	if known && len(entry.finerBySyscall) > 0 {
+		for _, sc := range deniedSyscalls {
+			if _, mapped := entry.finerBySyscall[sc]; !mapped {
+				deniedBroad = append(deniedBroad, sc)
+			}
+		}
+	}
+
+	if known && len(entry.finerBySyscall) > 0 && len(syscalls) > 0 && len(deniedBroad) == 0 {
 		finer := map[string]struct{}{}
 		allMapped := true
 		for _, sc := range syscalls {
@@ -136,16 +154,25 @@ func capAdvice(capName string, syscalls []string) (advice string, finerCaps []st
 			return advice, finerCaps
 		}
 	}
+
+	// Substitution suppressed (or never applicable): fall through to the honest
+	// base advice, appending the L10 caveat when a denied broad attempt is what
+	// blocked an otherwise-clean substitution.
+	caveat := ""
+	if len(deniedBroad) > 0 {
+		caveat = fmt.Sprintf(" Note: denied (capable:false) attempt(s) observed via %s — the workload tried to use this capability for operation(s) no finer capability covers, so it cannot be safely substituted or dropped on the strength of the held syscalls alone.",
+			strings.Join(deniedBroad, ", "))
+	}
 	if known {
 		if syscallList != "" {
-			return fmt.Sprintf("observed via %s. %s", syscallList, entry.base), nil
+			return fmt.Sprintf("observed via %s. %s%s", syscallList, entry.base, caveat), nil
 		}
-		return entry.base, nil
+		return entry.base + caveat, nil
 	}
 	if syscallList != "" {
-		return fmt.Sprintf("observed via %s; review whether this capability is genuinely required by the workload.", syscallList), nil
+		return fmt.Sprintf("observed via %s; review whether this capability is genuinely required by the workload.%s", syscallList, caveat), nil
 	}
-	return "review whether this capability is genuinely required by the workload.", nil
+	return "review whether this capability is genuinely required by the workload." + caveat, nil
 }
 
 // capaddToValidation builds the v0.5 validation from observed usage. When the
@@ -171,7 +198,25 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 	recommend := map[string]struct{}{}
 	for _, c := range capsToReport {
 		u := obs.Used[c]
+		deniedNames := sortedKeys(obs.Denied[c])
 		if u == nil {
+			// No held check fired. Normally a granted-but-unused cap is a removal
+			// candidate — UNLESS the workload attempted it and the check was
+			// denied (capable:false): that is evidence the cap is wanted under a
+			// grant it could not exercise, so it is NOT safe to drop (L10). Keep
+			// it and caveat instead of recommending removal. (u==nil is reached
+			// only in granted mode; default mode reports only observed-used caps.)
+			if len(deniedNames) > 0 {
+				v.Findings = append(v.Findings, CapaddFinding{
+					Cap:      c,
+					Used:     false,
+					Syscalls: []SyscallStat{},
+					Advice: fmt.Sprintf("no held check fired, but denied (capable:false) attempt(s) observed via %s — the workload attempted this capability under a grant it could not exercise; do not drop it without verifying those paths.",
+						strings.Join(deniedNames, ", ")),
+				})
+				recommend[c] = struct{}{}
+				continue
+			}
 			v.Findings = append(v.Findings, CapaddFinding{
 				Cap:       c,
 				Used:      false,
@@ -186,7 +231,7 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 			names = append(names, sc)
 		}
 		sort.Strings(names)
-		advice, finer := capAdvice(c, names)
+		advice, finer := capAdvice(c, names, deniedNames)
 		v.Findings = append(v.Findings, CapaddFinding{
 			Cap:        c,
 			Used:       true,

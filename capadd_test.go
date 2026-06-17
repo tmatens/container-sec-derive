@@ -74,8 +74,9 @@ func TestCapadd_Golden(t *testing.T) {
 	}
 }
 
-// TestAggregateCapadd_Filtering verifies the aggregator drops runc/init checks,
-// denied (capable:false) checks, non-active caps, and other containers' events.
+// TestAggregateCapadd_Filtering verifies the aggregator drops runc/init checks
+// and non-active caps, excludes other containers, does not count denied
+// (capable:false) checks as usage, and retains them separately (L10).
 func TestAggregateCapadd_Filtering(t *testing.T) {
 	f, err := os.Open("testdata/capadd/sample.ndjson")
 	if err != nil {
@@ -89,20 +90,25 @@ func TestAggregateCapadd_Filtering(t *testing.T) {
 		t.Fatalf("aggregate: %v", err)
 	}
 
-	// SYS_ADMIN: the runc:[2:INIT] execve check and the denied mount check are
-	// both filtered, leaving only the three workload perf_event_open opens.
+	// SYS_ADMIN: the runc:[2:INIT] execve check is filtered and the denied
+	// (capable:false) perf_event_open check is not counted as usage, leaving only
+	// the three held workload perf_event_open opens.
 	sa := obs.Used["SYS_ADMIN"]
 	if sa == nil {
 		t.Fatal("SYS_ADMIN not observed")
 	}
 	if got := sa.syscalls["perf_event_open"]; got != 3 {
-		t.Errorf("SYS_ADMIN perf_event_open count = %d, want 3", got)
+		t.Errorf("SYS_ADMIN perf_event_open held count = %d, want 3 (denied attempt excluded)", got)
+	}
+	if got := sa.events; got != 3 {
+		t.Errorf("SYS_ADMIN held events = %d, want 3 (denied attempt not counted as usage)", got)
 	}
 	if _, ok := sa.syscalls["execve"]; ok {
 		t.Error("runc:[2:INIT] execve check should have been filtered")
 	}
-	if _, ok := sa.syscalls["mount"]; ok {
-		t.Error("denied (capable:false) mount check should have been filtered")
+	// L10: the denied perf_event_open attempt is retained separately, not dropped.
+	if got := obs.Denied["SYS_ADMIN"]["perf_event_open"]; got != 1 {
+		t.Errorf("denied SYS_ADMIN perf_event_open count = %d, want 1 (retained, not dropped)", got)
 	}
 	// CHOWN is non-dangerous and not in the granted set; never recorded.
 	if _, ok := obs.Used["CHOWN"]; ok {
@@ -125,7 +131,7 @@ func TestAggregateCapadd_Filtering(t *testing.T) {
 func TestCapAdvice(t *testing.T) {
 	// SYS_ADMIN observed only via perf_event_open -> PERFMON (a softened,
 	// caveated substitution — not a flat "is sufficient"; deep-review M4).
-	advice, finer := capAdvice("SYS_ADMIN", []string{"perf_event_open"})
+	advice, finer := capAdvice("SYS_ADMIN", []string{"perf_event_open"}, nil)
 	if len(finer) != 1 || finer[0] != "PERFMON" {
 		t.Errorf("SYS_ADMIN/perf finer = %v, want [PERFMON]", finer)
 	}
@@ -136,7 +142,7 @@ func TestCapAdvice(t *testing.T) {
 	// SYS_ADMIN via bpf is NOT a clean substitution: CAP_BPF alone is unsound
 	// (needs CAP_BPF + PERFMON/NET_ADMIN by program type), so `bpf` is unmapped
 	// and the result falls through to base advice with no finer cap (M4).
-	advice, finer = capAdvice("SYS_ADMIN", []string{"bpf"})
+	advice, finer = capAdvice("SYS_ADMIN", []string{"bpf"}, nil)
 	if finer != nil {
 		t.Errorf("SYS_ADMIN/bpf finer = %v, want nil (CAP_BPF alone is unsound)", finer)
 	}
@@ -146,14 +152,14 @@ func TestCapAdvice(t *testing.T) {
 
 	// SYS_ADMIN via bpf + perf_event_open -> still no clean substitution (bpf
 	// unmapped), so it falls through to base advice.
-	_, finer = capAdvice("SYS_ADMIN", []string{"bpf", "perf_event_open"})
+	_, finer = capAdvice("SYS_ADMIN", []string{"bpf", "perf_event_open"}, nil)
 	if finer != nil {
 		t.Errorf("SYS_ADMIN/bpf+perf finer = %v, want nil (bpf unmapped)", finer)
 	}
 
 	// SYS_ADMIN via perf_event_open AND mount -> no clean substitution (mount
 	// has no finer cap), so it falls through to the base advice.
-	advice, finer = capAdvice("SYS_ADMIN", []string{"mount", "perf_event_open"})
+	advice, finer = capAdvice("SYS_ADMIN", []string{"mount", "perf_event_open"}, nil)
 	if finer != nil {
 		t.Errorf("mixed SYS_ADMIN finer = %v, want nil (no clean substitution)", finer)
 	}
@@ -161,17 +167,43 @@ func TestCapAdvice(t *testing.T) {
 		t.Errorf("mixed advice = %q, want base advice", advice)
 	}
 
-	// NET_RAW: known, no finer cap.
-	advice, finer = capAdvice("NET_RAW", []string{"socket"})
+	// L10: SYS_ADMIN held only via perf_event_open (a clean PERFMON candidate)
+	// BUT with a denied (capable:false) mount attempt — mount has no finer cap,
+	// so the substitution must be suppressed and the caveat must name the denied
+	// broad attempt. The cap stays SYS_ADMIN, not PERFMON.
+	advice, finer = capAdvice("SYS_ADMIN", []string{"perf_event_open"}, []string{"mount"})
+	if finer != nil {
+		t.Errorf("L10 SYS_ADMIN finer = %v, want nil (denied broad attempt suppresses substitution)", finer)
+	}
+	if !strings.Contains(advice, "denied") || !strings.Contains(advice, "mount") {
+		t.Errorf("L10 advice = %q, want a denied-mount caveat", advice)
+	}
+
+	// L10 precision: a denied attempt for a FINER syscall (perf_event_open) does
+	// NOT suppress the substitution — only denied broad (non-finer) syscalls do.
+	advice, finer = capAdvice("SYS_ADMIN", []string{"perf_event_open"}, []string{"perf_event_open"})
+	if len(finer) != 1 || finer[0] != "PERFMON" {
+		t.Errorf("L10 finer-denied finer = %v, want [PERFMON] (finer denied attempt does not suppress)", finer)
+	}
+	if strings.Contains(advice, "denied") {
+		t.Errorf("L10 finer-denied advice = %q, want no denied caveat", advice)
+	}
+
+	// NET_RAW: known, no finer cap. A denied broad attempt does not add a caveat
+	// (there was no substitution to suppress; the cap is kept regardless).
+	advice, finer = capAdvice("NET_RAW", []string{"socket"}, []string{"bind"})
 	if finer != nil {
 		t.Errorf("NET_RAW finer = %v, want nil", finer)
 	}
 	if !strings.Contains(advice, "ping_group_range") {
 		t.Errorf("NET_RAW advice = %q, want ICMP note", advice)
 	}
+	if strings.Contains(advice, "denied") {
+		t.Errorf("NET_RAW advice = %q, want no denied caveat (no substitution to suppress)", advice)
+	}
 
 	// Unknown cap: generic advice, no finer.
-	advice, finer = capAdvice("FOOBAR", []string{"ioctl"})
+	advice, finer = capAdvice("FOOBAR", []string{"ioctl"}, nil)
 	if finer != nil || !strings.Contains(advice, "review whether") {
 		t.Errorf("unknown cap advice = %q finer = %v", advice, finer)
 	}
@@ -221,6 +253,80 @@ func TestCapaddValidation_GrantedVsDefault(t *testing.T) {
 	for _, f := range v.Findings {
 		if f.Cap == "SYS_MODULE" {
 			t.Error("default mode should not report unused SYS_MODULE")
+		}
+	}
+}
+
+// TestCapaddValidation_DeniedAttempts is the L10 regression: a denied
+// (capable:false) broad-syscall attempt under a granted cap must not be silently
+// discarded. It must (a) suppress a finer-grained substitution the held syscalls
+// would otherwise justify, keeping the broad cap, and (b) keep a granted cap that
+// was only ever attempted-and-denied out of the removable set.
+func TestCapaddValidation_DeniedAttempts(t *testing.T) {
+	// SYS_ADMIN: held via perf_event_open (a clean PERFMON candidate) but with a
+	// denied mount — mount has no finer cap, so the substitution is unsafe.
+	// SYS_MODULE: granted, never seen at all — a genuine removal candidate.
+	// DAC_OVERRIDE: granted, only ever attempted-and-denied (openat) — wanted by
+	// the workload under a grant it couldn't exercise; not removable.
+	const fixture = `{"syscall":"perf_event_open","cap":"CAP_SYS_ADMIN","capable":true,"proc":{"comm":"app","pid":10},"runtime":{"containerId":"c1","containerImageName":"i:1"}}
+{"syscall":"perf_event_open","cap":"CAP_SYS_ADMIN","capable":true,"proc":{"comm":"app","pid":10},"runtime":{"containerId":"c1","containerImageName":"i:1"}}
+{"syscall":"mount","cap":"CAP_SYS_ADMIN","capable":false,"proc":{"comm":"app","pid":10},"runtime":{"containerId":"c1","containerImageName":"i:1"}}
+{"syscall":"open_by_handle_at","cap":"CAP_DAC_OVERRIDE","capable":false,"proc":{"comm":"app","pid":11},"runtime":{"containerId":"c1","containerImageName":"i:1"}}
+`
+	active := parseCapSet("SYS_ADMIN,SYS_MODULE,DAC_OVERRIDE")
+	obs, err := aggregateCapadd(strings.NewReader(fixture), aggregateOpts{Container: "c1"}, active)
+	if err != nil {
+		t.Fatalf("aggregateCapadd: %v", err)
+	}
+	v := capaddToValidation(obs, active, true)
+
+	byCap := map[string]CapaddFinding{}
+	for _, f := range v.Findings {
+		byCap[f.Cap] = f
+	}
+
+	// SYS_ADMIN: used, substitution suppressed (no finer caps), denied caveat.
+	sa := byCap["SYS_ADMIN"]
+	if !sa.Used {
+		t.Error("SYS_ADMIN should be Used (held perf_event_open)")
+	}
+	if len(sa.FinerCaps) != 0 {
+		t.Errorf("SYS_ADMIN FinerCaps = %v, want empty (denied mount suppresses substitution)", sa.FinerCaps)
+	}
+	if !strings.Contains(sa.Advice, "denied") || !strings.Contains(sa.Advice, "mount") {
+		t.Errorf("SYS_ADMIN advice = %q, want a denied-mount caveat", sa.Advice)
+	}
+
+	// SYS_MODULE: never observed at all -> genuine removal candidate.
+	sm := byCap["SYS_MODULE"]
+	if sm.Used || !sm.Removable {
+		t.Errorf("SYS_MODULE = {Used:%v Removable:%v}, want unused+removable", sm.Used, sm.Removable)
+	}
+
+	// DAC_OVERRIDE: only denied attempts -> not used, NOT removable, caveated.
+	do := byCap["DAC_OVERRIDE"]
+	if do.Used {
+		t.Error("DAC_OVERRIDE should not be Used (only denied attempts)")
+	}
+	if do.Removable {
+		t.Error("DAC_OVERRIDE must NOT be removable (workload attempted it, was denied) — L10")
+	}
+	if !strings.Contains(do.Advice, "denied") {
+		t.Errorf("DAC_OVERRIDE advice = %q, want a denied-attempt caveat", do.Advice)
+	}
+
+	// Recommendation keeps the two attempted caps, drops the genuinely-unused one,
+	// and offers NO finer substitute (PERFMON) for the suppressed SYS_ADMIN.
+	want := []string{"DAC_OVERRIDE", "SYS_ADMIN"}
+	if strings.Join(v.RecommendedCapAdd, ",") != strings.Join(want, ",") {
+		t.Errorf("RecommendedCapAdd = %v, want %v", v.RecommendedCapAdd, want)
+	}
+	for _, c := range v.RecommendedCapAdd {
+		if c == "PERFMON" {
+			t.Error("RecommendedCapAdd contains PERFMON; substitution should have been suppressed (L10)")
+		}
+		if c == "SYS_MODULE" {
+			t.Error("RecommendedCapAdd contains SYS_MODULE; the genuinely-unused cap should be dropped")
 		}
 	}
 }

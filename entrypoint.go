@@ -125,7 +125,9 @@ func inspectEntrypoint(ctx context.Context, image string) (entrypointInspection,
 	// it for digest enrichment. Two separate `docker inspect` invocations
 	// would also work but cost an extra subprocess per run.
 	const inspectFormat = `{"config":{{json .Config}},"repo_digests":{{json .RepoDigests}}}`
-	inspectOut, err := exec.CommandContext(ctx, "docker", "inspect", "--format", inspectFormat, image).Output()
+	// "--" terminates flag parsing so an image ref beginning with "-" can't be
+	// smuggled in as a docker flag (deep-review L2; defense-in-depth, not injection).
+	inspectOut, err := exec.CommandContext(ctx, "docker", "inspect", "--format", inspectFormat, "--", image).Output()
 	if err != nil {
 		return insp, fmt.Errorf("docker inspect %s: %w", image, err)
 	}
@@ -143,7 +145,7 @@ func inspectEntrypoint(ctx context.Context, image string) (entrypointInspection,
 	insp.Cmd = combined.Config.Cmd
 	insp.RepoDigests = combined.RepoDigests
 
-	historyOut, err := exec.CommandContext(ctx, "docker", "history", "--no-trunc", "--format", "{{.CreatedBy}}", image).Output()
+	historyOut, err := exec.CommandContext(ctx, "docker", "history", "--no-trunc", "--format", "{{.CreatedBy}}", "--", image).Output()
 	if err != nil {
 		return insp, fmt.Errorf("docker history %s: %w", image, err)
 	}

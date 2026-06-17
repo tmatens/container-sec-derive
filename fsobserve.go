@@ -284,7 +284,9 @@ func acquireMounts(opts fsPipelineOpts, observedReplicas []string, stderr io.Wri
 // container and returns its sorted, non-empty mount destinations. Runtime is
 // hardcoded to docker in this increment, matching inspectEntrypoint.
 func mountDestinations(ctx context.Context, container string) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Mounts}}", container).Output()
+	// "--" terminates flag parsing so a container id/name beginning with "-"
+	// can't be smuggled in as a docker flag (deep-review L2; defense-in-depth).
+	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Mounts}}", "--", container).Output()
 	if err != nil {
 		return nil, fmt.Errorf("docker inspect %s mounts: %w", container, err)
 	}

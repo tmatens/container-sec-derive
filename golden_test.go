@@ -232,6 +232,14 @@ func TestRun_OutFlagWritesSidecar(t *testing.T) {
 		t.Errorf("stdout changed under --out:\ngot:\n%s\nwant:\n%s", stdout.String(), wantStdout)
 	}
 
+	// L4: the sidecar is security evidence written by a root-equivalent
+	// process; it must not be world- or group-readable.
+	if fi, err := os.Stat(out); err != nil {
+		t.Fatalf("stat sidecar: %v", err)
+	} else if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("sidecar mode = %o, want 600 (owner-only)", perm)
+	}
+
 	data, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatalf("read sidecar: %v", err)

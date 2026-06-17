@@ -169,14 +169,24 @@ func TestAggregate_LegacyFixtureWithoutCapableFieldKeptForCompat(t *testing.T) {
 	}
 }
 
-func TestAggregate_SkipsMalformedLines(t *testing.T) {
+// TestAggregate_HardFailsOnMalformedLine pins the L3 contract: the caps
+// aggregator now hard-fails on a malformed NDJSON line (matching the
+// fs/device/capadd aggregators) rather than silently skipping it, which would
+// yield a smaller derived cap set with no signal — the dangerous direction.
+func TestAggregate_HardFailsOnMalformedLine(t *testing.T) {
 	input := "not json at all\n" +
 		ev("cap", "CAP_CHOWN", "containerId", "a") +
-		"\n" + // blank line
 		ev("cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	if _, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"}); err == nil {
+		t.Fatal("expected a parse error on a malformed line, got nil")
+	}
+
+	// Blank lines are still skipped, not treated as malformed.
+	clean := ev("cap", "CAP_CHOWN", "containerId", "a") + "\n" +
+		ev("cap", "CAP_SETUID", "containerId", "a")
+	s, err := aggregate(strings.NewReader(clean), aggregateOpts{Container: "a"})
 	if err != nil {
-		t.Fatalf("aggregate: %v", err)
+		t.Fatalf("aggregate (blank line): %v", err)
 	}
 	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("got %v", s.CapNames())

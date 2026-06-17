@@ -13,6 +13,16 @@ the relevant entry.
 
 ### Security
 
+- **The evidence sidecar (`--out`) is now written `0600`, not `0666`
+  (deep-review L4).** It is security evidence written by a root-equivalent
+  process and should not be world- or group-readable.
+
+- **`docker inspect`/`docker history` calls now pass `--` before the
+  image/container argument (deep-review L2).** Defense-in-depth (not an injection
+  fix — there is no shell): `--` prevents an id/ref beginning with `-` from being
+  parsed as a docker flag. Applies to the entrypoint cross-check and the fs
+  mount lookup.
+
 - **`compose-patch` refuses tab-indented compose files instead of emitting a
   duplicate-key, insecure patch (deep-review M2).** `leadingSpaces()` counts only
   spaces, so a tab-indented `cap_drop`/`cap_add` block read as column 0 (a
@@ -23,6 +33,18 @@ the relevant entry.
   formatters (caps/capadd/fs/devices/privileged).
 
 ### Fixed
+
+- **`checkIGVersion` runs `ig version` with a bounded, cancellable context
+  (deep-review L1).** It used context-less `exec.Command`, so a hung `ig version`
+  ignored the timeout and Ctrl-C; it now uses `exec.CommandContext` with a 10s
+  ceiling and honors SIGINT/SIGTERM.
+
+- **The caps aggregator hard-fails on a malformed NDJSON line instead of silently
+  skipping it (deep-review L3).** Skipping yielded a *smaller* derived cap set
+  with no signal — the dangerous direction (a user could drop a needed cap). It
+  now matches the fs/device/capadd aggregators (the pinned ig version emits clean
+  one-event-per-line NDJSON, so a parse failure means corrupt input). Blank lines
+  are still skipped.
 
 - **`compose-patch` line I/O is now faithful: CRLF, missing-final-newline, and
   >1MB lines (deep-review L5/L6/L8).** The emitter read lines with a

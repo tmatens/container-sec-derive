@@ -79,6 +79,12 @@ commit. Never patch the parser to cope with schema drift across pinned versions.
 - All changes via PR, squash-merge to `main`; update the docs your change
   touches in the same PR; add a `CHANGELOG.md` `[Unreleased]` entry for any
   version-visible change.
+- A new observer must ship **every** required test type in
+  [docs/testing.md §Required test types per change](docs/testing.md) (golden,
+  `run()`-level CLI table, confidence rubric, live fake-`ig`, multi-replica,
+  negative/error-path, fuzz for new parsers, `-race`); a bug fix ships a
+  regression test that fails before the fix. Skipping a required type is a
+  reviewable omission, not a deferral — they are all hermetic.
 - SHA-pin every GitHub Actions `uses:` (only exception `uses: ./`); digest-pin
   Docker base images; the vendored `ig` is cosign-verified at pin time.
 

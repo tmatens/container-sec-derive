@@ -161,10 +161,34 @@ jobs:
               "${f}"
           done
           ls -la
+      # Release notes are the CHANGELOG section for this tag, so the GitHub
+      # Release body matches the documented changes instead of publishing empty.
+      # The version is the tag without the leading v (the CHANGELOG header form,
+      # e.g. ## [0.4.0]); awk captures from that header to the next ## [ section.
+      # A fallback keeps the release from ever publishing an empty body if the
+      # section is missing (e.g. a tag cut ahead of its changelog entry).
+      - name: Extract release notes from CHANGELOG
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v ver="$ver" '
+            index($0, "## [" ver "]") == 1 { capture = 1; next }
+            capture && index($0, "## [") == 1 { exit }
+            capture { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          # Trim leading/trailing blank lines for a tidy release body.
+          awk 'NF { p = 1 } p' RELEASE_NOTES.md | tac | awk 'NF { p = 1 } p' | tac > RELEASE_NOTES.trimmed
+          mv RELEASE_NOTES.trimmed RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            printf 'See [CHANGELOG.md](https://github.com/%s/blob/%s/CHANGELOG.md) for the changes in this release.\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" > RELEASE_NOTES.md
+          fi
+          echo "--- release notes ---"
+          cat RELEASE_NOTES.md
       - name: publish release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           fail_on_unmatched_files: true
+          body_path: RELEASE_NOTES.md
           files: |
             dist/csd_linux_amd64
             dist/csd_linux_arm64

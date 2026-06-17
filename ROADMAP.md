@@ -4,6 +4,15 @@ The architecture in [PLAN.md](PLAN.md) anticipates a multi-observer future. v1 s
 
 Phases are ordered by *leverage per unit of work*, not by chronology. Real ordering will adapt to user demand and prototype findings.
 
+> **Phase numbers are stable planning IDs, not release versions.** Each `§vX.Y`
+> heading is a fixed identifier assigned in the original planning order; releases
+> are numbered sequentially as work actually ships, so the two intentionally
+> diverge. The device profile (§v0.7) was delivered early in **v0.3.0**, and the
+> dangerous-`cap_add` validator (§v0.5) shipped as **v0.4.0** ahead of the
+> deferred Docker-socket observer (§v0.4). Don't renumber phases when the order
+> changes — it would break the issue/changelog references that cite these IDs;
+> each phase records the release that delivered it instead.
+
 ---
 
 ## v0.1 — Capability profiles [planning]
@@ -105,6 +114,12 @@ Validate or refute the choice of `network_mode: host`. Most legitimate cases inv
 ---
 
 ## v0.7 — Device profile
+
+> **Status: delivered in v0.3.0** as **`--observe devices`**. The device profile
+> (which non-default `/dev/*` nodes a container opens → minimum `devices:` grant)
+> was the natural complement of the v0.3 privileged decomposition and shipped with
+> it; this phase ID is kept for the planning-order reference, not as outstanding
+> work. See §v0.3 and `CHANGELOG.md` [0.3.0].
 
 Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/dev/dri`), audio (`/dev/snd`), GPU (`/dev/nvidia*`), USB devices — none of these are derivable statically.
 

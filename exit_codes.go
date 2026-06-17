@@ -55,18 +55,30 @@ func wrapCoded(code int, err error) *codedError {
 	return &codedError{code: code, err: err}
 }
 
-// ambiguousSelectionError is returned by aggregate() when --image matched
-// more than one replica without --all-matching. A typed error so run()
-// can map it to ExitTargetAmbiguous without pattern-matching strings.
+// ambiguousSelectionError is returned by the aggregators when the target
+// selector matched more than one replica without an opt-in to aggregate them:
+// a bare --image without --all-matching, or a --container id-prefix that matched
+// multiple containers (deep-review M3 — a short prefix used to silently union
+// them). A typed error so run() can map it to ExitTargetAmbiguous without
+// pattern-matching strings.
 type ambiguousSelectionError struct {
-	image    string
+	flag     string   // the offending selector flag: "--image" or "--container"
+	selector string   // its value
 	replicas []string // human-facing "<name> (<id>)" labels, pre-sorted
+	// allMatchingHint is true only for --image, where --all-matching is a valid
+	// way to aggregate; --all-matching requires --image, so it is not offered as
+	// a remedy for an ambiguous --container prefix.
+	allMatchingHint bool
 }
 
 func (e *ambiguousSelectionError) Error() string {
+	remedy := "rerun with a longer or exact --container id to disambiguate"
+	if e.allMatchingHint {
+		remedy = "rerun with --container to disambiguate or --all-matching to aggregate across replicas"
+	}
 	return fmt.Sprintf(
-		"--image %q matched %d replicas; rerun with --container to disambiguate or --all-matching to aggregate across replicas:\n  %s",
-		e.image, len(e.replicas), strings.Join(e.replicas, "\n  "),
+		"%s %q matched %d replicas; %s:\n  %s",
+		e.flag, e.selector, len(e.replicas), remedy, strings.Join(e.replicas, "\n  "),
 	)
 }
 

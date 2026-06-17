@@ -128,7 +128,7 @@ Selecting a target:
 
 | Flag | Meaning |
 |---|---|
-| `--container <id\|name>` | Single replica by id, name, or id-prefix (≥6 chars). |
+| `--container <id\|name>` | Single replica by id, name, or id-prefix (≥6 chars). An exact id/name is always unambiguous; a prefix that matches more than one container errors (exit 40) — use a longer or exact id. |
 | `--image <ref>` | Select replicas by image; errors if more than one matches without `--all-matching`. |
 | `--all-matching` | Aggregate across every replica matching `--image` (union profile, with disagreement recorded on the sidecar). |
 | `--fixture <file>` | Replay pre-captured NDJSON instead of running `ig`. Skips kernel/BPF entirely. |
@@ -209,7 +209,7 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 | 21 | `trace_health` drop rate ≥ 10%; profile written but flagged as untrustworthy. |
 | 30 | `ig` version mismatch against `PinnedIGVersion`. |
 | 31 | `ig` binary missing or not executable. |
-| 40 | `--image` matched multiple replicas without `--all-matching`. |
+| 40 | Target selector matched multiple replicas without `--all-matching` (`--image`, or a too-short `--container` id-prefix). |
 | 64 | Usage error (bad flags, mutually exclusive selectors, contract not met for `compose-lint-profile`, etc.). |
 
 ## Documentation

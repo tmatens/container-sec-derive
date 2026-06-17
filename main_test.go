@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,46 @@ func TestAggregate_DistinctCapsSorted(t *testing.T) {
 	want := []string{"CHOWN", "DAC_OVERRIDE", "SETUID"}
 	if !equalSlice(s.CapNames(), want) {
 		t.Errorf("caps = %v, want %v", s.CapNames(), want)
+	}
+}
+
+// TestAggregate_ContainerPrefixAmbiguous is the M3 regression: a --container
+// value that is an id-PREFIX matching >1 container must error (not silently
+// union the replicas into one over-permissioned profile), and the error must
+// name --container with the longer-id remedy — not --all-matching, which only
+// applies to --image.
+func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
+	// Two containers sharing the 6-char prefix "aabbcc"; an exact 12-char id
+	// resolves to one, the prefix resolves to both.
+	input := ev("cap", "CAP_CHOWN", "containerId", "aabbcc111111", "containerName", "app-1") +
+		ev("cap", "CAP_NET_RAW", "containerId", "aabbcc222222", "containerName", "app-2")
+
+	// Prefix matches two replicas -> ambiguous.
+	_, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "aabbcc"})
+	if err == nil {
+		t.Fatal("expected ambiguity error for a prefix matching two containers")
+	}
+	var amb *ambiguousSelectionError
+	if !errors.As(err, &amb) {
+		t.Fatalf("err = %v, want *ambiguousSelectionError", err)
+	}
+	if amb.flag != "--container" {
+		t.Errorf("error flag = %q, want --container", amb.flag)
+	}
+	if amb.allMatchingHint {
+		t.Error("--all-matching must not be offered as a remedy for an ambiguous --container prefix")
+	}
+	if msg := amb.Error(); !strings.Contains(msg, "--container") || strings.Contains(msg, "--all-matching") {
+		t.Errorf("message = %q, want a --container longer-id remedy without --all-matching", msg)
+	}
+
+	// An exact id resolves to exactly one replica -> no error.
+	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "aabbcc111111"})
+	if err != nil {
+		t.Fatalf("exact id should not be ambiguous: %v", err)
+	}
+	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+		t.Errorf("exact id caps = %v, want [CHOWN]", s.CapNames())
 	}
 }
 

@@ -11,6 +11,18 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--container` id-prefix matching ≥2 containers no longer silently unions
+  them (deep-review M3).** The >1-replica ambiguity guard fired only for
+  `--image`; a too-short `--container` id-prefix that matched multiple containers
+  fell through and emitted the *union* of their profiles — an over-permissioned
+  result forbidden by PLAN.md §Target selection. The guard now covers the
+  `--container` prefix path too: it errors with the candidate list
+  (`ExitTargetAmbiguous`, 40) and asks for a longer or exact id. An exact
+  id/name is unaffected (it resolves to one replica); `--all-matching` remains an
+  `--image`-only opt-in. Applies across all observers (caps/fs/devices/capadd).
+
 ### Security
 
 - **`--observe capadd`: retain denied (`capable:false`) attempts so they can't

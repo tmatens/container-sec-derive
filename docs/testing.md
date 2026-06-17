@@ -29,9 +29,9 @@ Each of those needs a real host. The tiers below say which.
 | Fuzz | Parser robustness on hostile input | `ci.yml` (CPU-bounded) | ✅ ig NDJSON (`capEvent`/`fileEvent`) + `capadd` aggregator + `parseMountDestinations` + `compose-patch` rewriter |
 | Live-BPF integration smokes | Attach + attribution + `ig`-schema conformance, on a real kernel | `integration.yml` on **GitHub-hosted** runners (`scripts/smoke_{wsl2,fs,device,capadd}.sh`) | ✅ baseline (one kernel, hardware-free) |
 | Closed-loop "meets intent" | A **derived config actually works** (and a tighter one breaks) | hosted or self-hosted runner | ✅ `scripts/closed_loop.sh` / `make closed-loop`, in `integration.yml` |
-| Hardware-ful device | Real `/dev/dri` / `/dev/net/tun` / `/dev/kvm` detection | self-hosted runner with that hardware | ❌ missing (#116) |
-| Kernel/distro matrix | BPF attach across kernels (incl. the future LSM-BPF path, kernel ≥5.7) | self-hosted runner(s) / VM matrix | ❌ missing (#116) |
-| Dogfooding | csd against the real target stack | the homelab host | ❌ missing (#116) |
+| Hardware-ful device | Real `/dev/dri` / `/dev/net/tun` / `/dev/kvm` detection | self-hosted runner with that hardware | 🟡 scaffolded (`scripts/smoke_device_hw.sh` + `integration-selfhosted.yml`); needs a registered runner (#116) |
+| Kernel/distro matrix | BPF attach across kernels (incl. the future LSM-BPF path, kernel ≥5.7) | self-hosted runner(s) / VM matrix | 🟡 scaffolded (the full suite runs on the self-hosted runner's kernel); a true matrix needs multiple runners (#116) |
+| Dogfooding | csd against the real target stack | the homelab host | ❌ host-side (#116) |
 
 ## The hermetic core (fully testable without a kernel)
 
@@ -84,16 +84,15 @@ tracked in **issue #116**. Status:
    self-hosted one. The only test that proves a derived profile is *correct*, not
    just internally consistent — `csd verify` extended to actually apply the config.
 2. ✅ **Fuzz the v0.4 parsers** — the hermetic-tier fuzz gap is closed.
-3. ⬜ **Hardware-ful device smoke + kernel matrix** — needs a self-hosted runner;
-   blocked on the runner trust-model decision (#116).
+3. 🟡 **Hardware-ful device smoke + kernel matrix** — repo side scaffolded
+   (`scripts/smoke_device_hw.sh` + `integration-selfhosted.yml`); needs a
+   registered runner.
 4. ⬜ **Dogfood** against the real stack — host-side.
 
-Items 3–4 need a real host / self-hosted runner, which is gated on the trust-model
-decision in #116 (GitHub self-hosted vs. Forgejo mirror; never run untrusted PR
-code privileged).
-
-A **decision precedes the self-hosted items**: a runner executing PR code with
-root + BPF is a supply-chain risk (csd PRs are agent-authored), so either a
-trust-gated **GitHub self-hosted runner** or a **Forgejo mirror + Forgejo runner**
-(privileged CI inside the homelab trust boundary) — never running untrusted/fork
-PR code privileged. See #116.
+**Runner trust model (decided, #116): Option A** — a **GitHub self-hosted runner**,
+**ephemeral**, triggered **only** by `workflow_dispatch` + `schedule` against
+`main` (never `pull_request`), so it runs only trusted, merged code — never
+untrusted PR code privileged, and creates no perpetually-pending PR checks.
+Registration + host prerequisites: **`docs/self-hosted-runner.md`**. Bring an
+ephemeral runner up on demand (desktop or a homelab VM/LXC), trigger
+*integration-selfhosted*, tear it down — no always-on box needed.

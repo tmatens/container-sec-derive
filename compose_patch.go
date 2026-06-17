@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"sort"
@@ -30,7 +28,7 @@ func writeComposePatch(w io.Writer, s *Sidecar, original []byte, inPath, service
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}
-	origLines := splitComposeLines(original)
+	origLines, eol, finalNL := splitComposeLines(original)
 	loc, err := locateComposeService(origLines, service)
 	if err != nil {
 		return err
@@ -85,7 +83,7 @@ func writeComposePatch(w io.Writer, s *Sidecar, original []byte, inPath, service
 	// Build the marked stream for the unified diff in a single walk so
 	// the output is order-stable and we don't have to LCS-diff after.
 	marks := markRewrites(origLines, rewrites)
-	return emitUnifiedDiff(w, inPath, marks)
+	return emitUnifiedDiff(w, inPath, marks, eol, finalNL)
 }
 
 // capRewrite is one localized edit: replace origLines[start:end] with
@@ -391,14 +389,35 @@ func isBlankOrComment(line string) bool {
 	return s == "" || strings.HasPrefix(s, "#")
 }
 
-func splitComposeLines(b []byte) []string {
-	var out []string
-	scan := bufio.NewScanner(bytes.NewReader(b))
-	scan.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scan.Scan() {
-		out = append(out, scan.Text())
+// splitComposeLines splits a compose file into lines and reports the file's
+// line-ending convention and whether it ends with a newline. It splits on "\n"
+// directly rather than via bufio.Scanner so that (a) a line longer than 1MB is
+// not silently truncated with the rest of the file dropped (deep-review L8), and
+// (b) CRLF files keep their "\r\n" terminator on re-emit instead of being
+// flattened to LF (deep-review L6). Returned lines are stripped of any trailing
+// "\r" so the locator sees clean content; emitUnifiedDiff re-adds eol. The
+// finalNewline flag lets emitUnifiedDiff emit a "\ No newline at end of file"
+// marker when the original lacks a trailing newline (deep-review L5).
+func splitComposeLines(b []byte) (lines []string, eol string, finalNewline bool) {
+	if len(b) == 0 {
+		return nil, "\n", false
 	}
-	return out
+	s := string(b)
+	finalNewline = strings.HasSuffix(s, "\n")
+	eol = "\n"
+	if strings.Contains(s, "\r\n") {
+		eol = "\r\n"
+	}
+	lines = strings.Split(s, "\n")
+	// A trailing "\n" leaves an empty final element from Split; drop it so the
+	// line set reflects actual lines, not a phantom blank.
+	if finalNewline && len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for i := range lines {
+		lines[i] = strings.TrimSuffix(lines[i], "\r")
+	}
+	return lines, eol, finalNewline
 }
 
 // diffLine is one line in the marked-up stream consumed by emitUnifiedDiff.
@@ -412,7 +431,7 @@ type diffLine struct {
 // changes. We collapse to one hunk because cap_drop / cap_add edits are
 // always within a small window (the service body); a multi-hunk emitter
 // would be premature given the actual edit shape.
-func emitUnifiedDiff(w io.Writer, inPath string, marks []diffLine) error {
+func emitUnifiedDiff(w io.Writer, inPath string, marks []diffLine, eol string, finalNewline bool) error {
 	first, last := -1, -1
 	for i, m := range marks {
 		if m.kind != ' ' {
@@ -424,6 +443,21 @@ func emitUnifiedDiff(w io.Writer, inPath string, marks []diffLine) error {
 	}
 	if first == -1 {
 		return nil
+	}
+
+	// The original file's final line (last mark present in the OLD file, i.e.
+	// not an addition) and the new file's final line (last mark not a removal).
+	// When the original lacks a trailing newline, whichever of these falls in
+	// the hunk is followed by the "\ No newline at end of file" marker so the
+	// diff applies cleanly (deep-review L5).
+	oldFinal, newFinal := -1, -1
+	for i := range marks {
+		if marks[i].kind != '+' {
+			oldFinal = i
+		}
+		if marks[i].kind != '-' {
+			newFinal = i
+		}
 	}
 	const ctx = 3
 	hunkStart := first - ctx
@@ -470,7 +504,19 @@ func emitUnifiedDiff(w io.Writer, inPath string, marks []diffLine) error {
 		return err
 	}
 	for i := hunkStart; i < hunkEnd; i++ {
-		if _, err := fmt.Fprintf(w, "%c%s\n", marks[i].kind, marks[i].text); err != nil {
+		m := marks[i]
+		// A line with no trailing newline keeps the diff's own "\n" separator and
+		// is followed by the marker; every other line uses the file's eol ("\n"
+		// or "\r\n") so CRLF round-trips byte-for-byte.
+		noNewline := !finalNewline &&
+			((i == oldFinal && m.kind != '+') || (i == newFinal && m.kind != '-'))
+		if noNewline {
+			if _, err := fmt.Fprintf(w, "%c%s\n\\ No newline at end of file\n", m.kind, m.text); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := fmt.Fprintf(w, "%c%s%s", m.kind, m.text, eol); err != nil {
 			return err
 		}
 	}

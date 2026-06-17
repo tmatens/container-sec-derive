@@ -28,7 +28,7 @@ func writeDeviceComposePatch(w io.Writer, rec deviceRecommendation, original []b
 	if len(rec.Devices) == 0 {
 		return nil
 	}
-	origLines := splitComposeLines(original)
+	origLines, eol, finalNL := splitComposeLines(original)
 	loc, err := locateComposeService(origLines, service)
 	if err != nil {
 		return err
@@ -56,5 +56,5 @@ func writeDeviceComposePatch(w io.Writer, rec deviceRecommendation, original []b
 		return nil
 	}
 	marks := markRewrites(origLines, rewrites)
-	return emitUnifiedDiff(w, inPath, marks)
+	return emitUnifiedDiff(w, inPath, marks, eol, finalNL)
 }

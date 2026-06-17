@@ -24,6 +24,18 @@ the relevant entry.
 
 ### Fixed
 
+- **`compose-patch` line I/O is now faithful: CRLF, missing-final-newline, and
+  >1MB lines (deep-review L5/L6/L8).** The emitter read lines with a
+  `bufio.Scanner` capped at 1MB, which (L8) silently dropped a >1MB line *and the
+  rest of the file* — so a service after a long line became unpatchable — and
+  (L6) stripped `\r`, flipping CRLF files to LF and producing a diff that no
+  longer matched the original bytes. `splitComposeLines` now splits on `\n`
+  directly (no length cap), records the file's `\r\n`/`\n` convention, and
+  re-emits it so CRLF round-trips byte-for-byte. (L5) When the original has no
+  trailing newline the diff now carries the `\ No newline at end of file` marker,
+  so `git apply` / `patch` accept it. Verified end-to-end with `git apply` for
+  both CRLF and newline-less inputs. Applies to all five patch formatters.
+
 - **`compose-patch` refuses to rewrite a YAML-anchored block (deep-review L7).**
   Rewriting a `cap_add: &anchor …` (or an alias `cap_add: *anchor`) would drop
   the anchor definition that aliases elsewhere depend on, or silently expand an

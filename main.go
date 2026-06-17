@@ -1000,20 +1000,34 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 // of the form `lost N samples` (ig v0.51.0 format) and returns the
 // cumulative total. Every line is echoed to sink so operators still
 // see ig's diagnostics; passing nil for sink silences passthrough.
+//
+// It reads with bufio.Reader.ReadString, NOT bufio.Scanner: a scanner's fixed
+// line cap silently STOPS on an oversized line, dropping every subsequent
+// `lost N` count and under-reporting drops — which would defeat the >=1%
+// confidence downgrade and the >=10% ExitDropRateExcessive abort on an
+// adversarial / pathological ig stderr stream (esp. via --fixture-stderr).
+// ReadString has no line cap, so an outsized line is read through and parsing
+// continues, and it always reads to EOF so the stderr pipe is fully drained
+// (it can never block the observe path).
 func parseIGStderr(r io.Reader, sink io.Writer) int {
 	total := 0
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scan.Scan() {
-		line := scan.Bytes()
-		if sink != nil {
-			fmt.Fprintln(sink, string(line))
-		}
-		m := igLostSamplesRE.FindSubmatch(line)
-		if len(m) == 2 {
-			if n, err := strconv.Atoi(string(m[1])); err == nil {
-				total += n
+	br := bufio.NewReader(r)
+	for {
+		line, err := br.ReadString('\n')
+		if len(line) > 0 {
+			line = strings.TrimRight(line, "\r\n")
+			if sink != nil {
+				fmt.Fprintln(sink, line)
 			}
+			m := igLostSamplesRE.FindStringSubmatch(line)
+			if len(m) == 2 {
+				if n, convErr := strconv.Atoi(m[1]); convErr == nil {
+					total += n
+				}
+			}
+		}
+		if err != nil { // io.EOF or a read error: stream is exhausted
+			break
 		}
 	}
 	return total

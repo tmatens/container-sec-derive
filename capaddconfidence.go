@@ -34,7 +34,7 @@ func computeCapaddConfidence(s *Sidecar) {
 	}
 
 	val := s.CapaddValidation
-	used, removable := 0, 0
+	used, removable, substituted := 0, 0, 0
 	if val != nil {
 		for _, f := range val.Findings {
 			if f.Used {
@@ -42,6 +42,9 @@ func computeCapaddConfidence(s *Sidecar) {
 			}
 			if f.Removable {
 				removable++
+			}
+			if len(f.FinerCaps) > 0 {
+				substituted++
 			}
 		}
 	}
@@ -52,6 +55,12 @@ func computeCapaddConfidence(s *Sidecar) {
 	// workload factor below carries the actual grade weight.
 	if removable > 0 {
 		addInfo(fmt.Sprintf("%d cap(s) flagged removable (granted but no held check fired) — workload-bounded", removable))
+	}
+	// The finer-cap substitution call is the OTHER workload-bounded over-trust
+	// edge (deep-review L9): a cap that looks replaceable by a finer one only
+	// because the broader syscalls weren't exercised. Priced like removable.
+	if substituted > 0 {
+		addInfo(fmt.Sprintf("%d cap(s) flagged for finer-grained substitution — workload-bounded", substituted))
 	}
 
 	// Drop rate. Same thresholds as the cap/fs/device rubrics; the runner aborts
@@ -84,8 +93,8 @@ func computeCapaddConfidence(s *Sidecar) {
 	switch {
 	case s.Workload != "":
 		addInfo("workload script provided (" + s.Workload + ")")
-	case removable > 0:
-		addModerate("no workload script provided; removable-cap conclusions reflect startup + idle only — verify before dropping")
+	case removable > 0 || substituted > 0:
+		addModerate("no workload script provided; removable / substitution conclusions reflect startup + idle only — verify before dropping or substituting")
 	default:
 		addModerate("no workload script provided (startup + idle only)")
 	}

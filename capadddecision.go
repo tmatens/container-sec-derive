@@ -68,35 +68,40 @@ type capKBEntry struct {
 // (no CAP_ prefix). Caps absent from the table get a generic advisory.
 var capKB = map[string]capKBEntry{
 	"SYS_ADMIN": {
-		base: "the kitchen-sink capability; no single finer capability covers it. Narrow via the observed syscalls — consider rootless / user-namespace alternatives or a scoped seccomp profile.",
+		base: "the kitchen-sink capability; no single finer capability covers it. Narrow via the observed syscalls — e.g. BPF program loading typically needs CAP_BPF *plus* a program-type cap (CAP_PERFMON for kprobe/perf, CAP_NET_ADMIN for tc/xdp), so it is NOT safely replaced by CAP_BPF alone; otherwise consider rootless / user-namespace alternatives or a scoped seccomp profile.",
+		// Only perf_event_open maps to a single finer cap. `bpf` is deliberately
+		// NOT mapped: loading most BPF objects needs CAP_BPF + CAP_PERFMON (or
+		// CAP_NET_ADMIN) depending on program type, so recommending CAP_BPF
+		// alone would drop a still-needed cap (deep-review M4) — it falls through
+		// to the honest base advice above instead.
 		finerBySyscall: map[string]string{
-			"bpf":             "BPF",
 			"perf_event_open": "PERFMON",
 		},
 	},
-	"SYS_PTRACE":      {base: "process introspection (ptrace / process_vm_readv); no finer capability exists. Restrict to debugging builds rather than shipping it in production."},
-	"SYS_MODULE":      {base: "loads / unloads kernel modules; load required modules on the host instead — almost never legitimate inside a container."},
-	"SYS_RAWIO":       {base: "raw I/O port and device-memory access (/dev/mem, ioperm); almost never legitimate in a container."},
-	"SYS_TIME":        {base: "sets the system clock; let the host manage time (NTP) and drop this capability."},
-	"SYS_BOOT":        {base: "reboot() / kexec_load(); not legitimate for an application container."},
-	"SYS_NICE":        {base: "raises scheduling priority / sets CPU affinity; keep only if real-time or elevated nice priority is genuinely required."},
-	"SYS_RESOURCE":    {base: "overrides resource limits and quotas; usually resolvable by setting the limits correctly on the container instead."},
-	"SYS_CHROOT":      {base: "chroot(); rarely needed by application workloads — review whether the entrypoint actually requires it."},
-	"DAC_OVERRIDE":    {base: "bypasses all file read / write / execute permission checks; usually resolvable by chowning files to the container's runtime user."},
-	"DAC_READ_SEARCH": {base: "bypasses file-read and directory-search permission checks (and enables open_by_handle_at, a known container-escape primitive); prefer correct ownership / ACLs."},
-	"NET_ADMIN":       {base: "network-stack configuration (interfaces, routes, iptables); no finer capability. If the need is only binding privileged ports, CAP_NET_BIND_SERVICE is sufficient."},
-	"NET_RAW":         {base: "raw and packet sockets; no finer capability. If the only use is ICMP (ping), set net.ipv4.ping_group_range and drop NET_RAW entirely."},
-	"MKNOD":           {base: "creates device nodes (mknod); rarely needed — pre-create required nodes or grant them via devices: instead."},
-	"LINUX_IMMUTABLE": {base: "sets the immutable / append-only inode flags; almost never needed by an application container."},
-	"MAC_ADMIN":       {base: "configures the MAC (AppArmor / SELinux) policy; not legitimate for an application container."},
-	"MAC_OVERRIDE":    {base: "overrides MAC (AppArmor / SELinux) policy; not legitimate for an application container."},
-	"SYSLOG":          {base: "reads and controls the kernel ring buffer (dmesg); review whether the workload genuinely needs kernel log access."},
-	"AUDIT_CONTROL":   {base: "configures the kernel audit subsystem; not legitimate for an application container."},
-	"BPF":             {base: "loads BPF programs and maps; legitimate for observability / networking tooling but a broad capability — keep only if the workload is itself a BPF tool."},
-	"PERFMON":         {base: "performance-monitoring access (perf_event_open); legitimate for profilers, but review whether the workload needs it in production."},
-	"SETFCAP":         {base: "sets file capabilities; usually only needed by package / installer tooling at build time, not at runtime."},
-	"WAKE_ALARM":      {base: "sets wake-from-suspend timers; not legitimate for a container on a server host."},
-	"BLOCK_SUSPEND":   {base: "blocks system suspend; not legitimate for a container on a server host."},
+	"SYS_PTRACE":         {base: "process introspection (ptrace / process_vm_readv); no finer capability exists. Restrict to debugging builds rather than shipping it in production."},
+	"SYS_MODULE":         {base: "loads / unloads kernel modules; load required modules on the host instead — almost never legitimate inside a container."},
+	"SYS_RAWIO":          {base: "raw I/O port and device-memory access (/dev/mem, ioperm); almost never legitimate in a container."},
+	"SYS_TIME":           {base: "sets the system clock; let the host manage time (NTP) and drop this capability."},
+	"SYS_BOOT":           {base: "reboot() / kexec_load(); not legitimate for an application container."},
+	"SYS_NICE":           {base: "raises scheduling priority / sets CPU affinity; keep only if real-time or elevated nice priority is genuinely required."},
+	"SYS_RESOURCE":       {base: "overrides resource limits and quotas; usually resolvable by setting the limits correctly on the container instead."},
+	"SYS_CHROOT":         {base: "chroot(); rarely needed by application workloads — review whether the entrypoint actually requires it."},
+	"DAC_OVERRIDE":       {base: "bypasses all file read / write / execute permission checks; usually resolvable by chowning files to the container's runtime user."},
+	"DAC_READ_SEARCH":    {base: "bypasses file-read and directory-search permission checks (and enables open_by_handle_at, a known container-escape primitive); prefer correct ownership / ACLs."},
+	"CHECKPOINT_RESTORE": {base: "checkpoint/restore (criu) — also grants open_by_handle_at, the SAME container-escape primitive as DAC_READ_SEARCH (it was carved out of it); rarely needed by application workloads."},
+	"NET_ADMIN":          {base: "network-stack configuration (interfaces, routes, iptables); no finer capability. If the need is only binding privileged ports, CAP_NET_BIND_SERVICE is sufficient."},
+	"NET_RAW":            {base: "raw and packet sockets; no finer capability. If the only use is ICMP (ping), set net.ipv4.ping_group_range and drop NET_RAW entirely."},
+	"MKNOD":              {base: "creates device nodes (mknod); rarely needed — pre-create required nodes or grant them via devices: instead."},
+	"LINUX_IMMUTABLE":    {base: "sets the immutable / append-only inode flags; almost never needed by an application container."},
+	"MAC_ADMIN":          {base: "configures the MAC (AppArmor / SELinux) policy; not legitimate for an application container."},
+	"MAC_OVERRIDE":       {base: "overrides MAC (AppArmor / SELinux) policy; not legitimate for an application container."},
+	"SYSLOG":             {base: "reads and controls the kernel ring buffer (dmesg); review whether the workload genuinely needs kernel log access."},
+	"AUDIT_CONTROL":      {base: "configures the kernel audit subsystem; not legitimate for an application container."},
+	"BPF":                {base: "loads BPF programs and maps; legitimate for observability / networking tooling but a broad capability — keep only if the workload is itself a BPF tool."},
+	"PERFMON":            {base: "performance-monitoring access (perf_event_open); legitimate for profilers, but review whether the workload needs it in production."},
+	"SETFCAP":            {base: "sets file capabilities; usually only needed by package / installer tooling at build time, not at runtime."},
+	"WAKE_ALARM":         {base: "sets wake-from-suspend timers; not legitimate for a container on a server host."},
+	"BLOCK_SUSPEND":      {base: "blocks system suspend; not legitimate for a container on a server host."},
 }
 
 // capAdvice returns the advisory for a used capability and, when every observed
@@ -118,8 +123,17 @@ func capAdvice(capName string, syscalls []string) (advice string, finerCaps []st
 		}
 		if allMapped {
 			finerCaps = sortedKeys(finer)
-			return fmt.Sprintf("observed only via %s; %s is sufficient (Linux >= 5.8).",
-				syscallList, strings.Join(finerCaps, " + ")), finerCaps
+			// Not a flat "is sufficient": the substitution is workload-bounded
+			// and a finer cap may carry its own gate (deep-review M4/L9).
+			advice = fmt.Sprintf("observed only via %s; %s likely suffices (Linux >= 5.8) — verify before dropping %s.",
+				syscallList, strings.Join(finerCaps, " + "), capName)
+			for _, fc := range finerCaps {
+				if fc == "PERFMON" {
+					advice += " (CAP_PERFMON is additionally gated by kernel.perf_event_paranoid.)"
+					break
+				}
+			}
+			return advice, finerCaps
 		}
 	}
 	if known {

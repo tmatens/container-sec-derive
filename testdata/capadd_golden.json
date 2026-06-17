@@ -48,7 +48,7 @@
             "count": 3
           }
         ],
-        "advice": "observed only via perf_event_open; PERFMON is sufficient (Linux \u003e= 5.8).",
+        "advice": "observed only via perf_event_open; PERFMON likely suffices (Linux \u003e= 5.8) — verify before dropping SYS_ADMIN. (CAP_PERFMON is additionally gated by kernel.perf_event_paranoid.)",
         "finer_caps": [
           "PERFMON"
         ]
@@ -96,7 +96,8 @@
     "factors": [
       "ok: 3 capability/ies observed in use across 7 held event(s)",
       "ok: 1 cap(s) flagged removable (granted but no held check fired) — workload-bounded",
-      "moderate: no workload script provided; removable-cap conclusions reflect startup + idle only — verify before dropping",
+      "ok: 1 cap(s) flagged for finer-grained substitution — workload-bounded",
+      "moderate: no workload script provided; removable / substitution conclusions reflect startup + idle only — verify before dropping or substituting",
       "deferred: steady-state detection not yet implemented",
       "deferred: target-exited-early signal not yet wired"
     ]

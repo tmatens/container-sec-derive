@@ -123,19 +123,32 @@ func TestAggregateCapadd_Filtering(t *testing.T) {
 // substitution, a mixed-syscall case with no clean substitution, a no-finer
 // known cap, and an unknown cap's generic advice.
 func TestCapAdvice(t *testing.T) {
-	// SYS_ADMIN observed only via perf_event_open -> PERFMON.
+	// SYS_ADMIN observed only via perf_event_open -> PERFMON (a softened,
+	// caveated substitution — not a flat "is sufficient"; deep-review M4).
 	advice, finer := capAdvice("SYS_ADMIN", []string{"perf_event_open"})
 	if len(finer) != 1 || finer[0] != "PERFMON" {
 		t.Errorf("SYS_ADMIN/perf finer = %v, want [PERFMON]", finer)
 	}
-	if !strings.Contains(advice, "PERFMON is sufficient") {
-		t.Errorf("advice = %q, want PERFMON substitution", advice)
+	if !strings.Contains(advice, "PERFMON likely suffices") || !strings.Contains(advice, "perf_event_paranoid") {
+		t.Errorf("advice = %q, want caveated PERFMON substitution", advice)
 	}
 
-	// SYS_ADMIN via both bpf and perf_event_open -> both finer caps.
+	// SYS_ADMIN via bpf is NOT a clean substitution: CAP_BPF alone is unsound
+	// (needs CAP_BPF + PERFMON/NET_ADMIN by program type), so `bpf` is unmapped
+	// and the result falls through to base advice with no finer cap (M4).
+	advice, finer = capAdvice("SYS_ADMIN", []string{"bpf"})
+	if finer != nil {
+		t.Errorf("SYS_ADMIN/bpf finer = %v, want nil (CAP_BPF alone is unsound)", finer)
+	}
+	if !strings.Contains(advice, "CAP_BPF alone") {
+		t.Errorf("bpf advice = %q, want the CAP_BPF-alone caveat", advice)
+	}
+
+	// SYS_ADMIN via bpf + perf_event_open -> still no clean substitution (bpf
+	// unmapped), so it falls through to base advice.
 	_, finer = capAdvice("SYS_ADMIN", []string{"bpf", "perf_event_open"})
-	if len(finer) != 2 || finer[0] != "BPF" || finer[1] != "PERFMON" {
-		t.Errorf("SYS_ADMIN/bpf+perf finer = %v, want [BPF PERFMON]", finer)
+	if finer != nil {
+		t.Errorf("SYS_ADMIN/bpf+perf finer = %v, want nil (bpf unmapped)", finer)
 	}
 
 	// SYS_ADMIN via perf_event_open AND mount -> no clean substitution (mount
@@ -224,7 +237,7 @@ func TestCapaddCompose(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"# csd dangerous cap_add validation",
-		"# SYS_ADMIN: observed only via perf_event_open; PERFMON is sufficient",
+		"# SYS_ADMIN: observed only via perf_event_open; PERFMON likely suffices",
 		"# dropped (unused under this workload): SYS_MODULE",
 		"cap_add:",
 		"  - PERFMON",

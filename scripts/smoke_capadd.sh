@@ -75,12 +75,14 @@ fi
 (CONTAINER="${CONTAINER}" "${WORKLOAD}" >"${WORKDIR}/capadd-workload.log" 2>&1 || true) &
 WPID=$!
 
+# Capture csd's REAL exit code: `if ! cmd; then rc=$?` records the `!` negation's
+# status (0), not csd's, masking the 30/31 diagnostics below.
 rc=0
-if ! "${CSD}" --observe capadd --cap-add "${CAP_ADD}" --container "${CONTAINER}" \
-        --duration "${DURATION}" --workload "${WORKLOAD}" --out "${SIDECAR}" >"${LOG}" 2>&1; then
-    rc=$?
-    wait "${WPID}" 2>/dev/null || true
-    docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+"${CSD}" --observe capadd --cap-add "${CAP_ADD}" --container "${CONTAINER}" \
+    --duration "${DURATION}" --workload "${WORKLOAD}" --out "${SIDECAR}" >"${LOG}" 2>&1 && rc=0 || rc=$?
+wait "${WPID}" 2>/dev/null || true
+docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
+if [[ ${rc} -ne 0 ]]; then
     case ${rc} in
         30) echo "FAIL capadd: csd exited SchemaMismatch (30) — host ig differs from PinnedIGVersion" ;;
         31) echo "FAIL capadd: csd exited IGMissing (31) — install the pinned ig binary on PATH" ;;
@@ -88,8 +90,6 @@ if ! "${CSD}" --observe capadd --cap-add "${CAP_ADD}" --container "${CONTAINER}"
     esac
     exit 1
 fi
-wait "${WPID}" 2>/dev/null || true
-docker rm -f "${CONTAINER}" >/dev/null 2>&1 || true
 
 if [[ ! -s "${SIDECAR}" ]]; then
     echo "FAIL capadd: sidecar empty or missing at ${SIDECAR}"

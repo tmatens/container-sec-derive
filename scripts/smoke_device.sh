@@ -86,11 +86,13 @@ run_observer() {
     (CONTAINER="${container}" "${WORKLOAD}" >"${WORKDIR}/${observer}-workload.log" 2>&1 || true) &
     local wpid=$!
 
-    if ! "${CSD}" --observe "${observer}" --container "${container}" --duration "${DURATION}" \
-            --workload "${WORKLOAD}" --out "${sidecar}" >"${log}" 2>&1; then
-        rc=$?
-        wait "${wpid}" 2>/dev/null || true
-        docker rm -f "${container}" >/dev/null 2>&1 || true
+    # Capture csd's REAL exit code: `if ! cmd; then rc=$?` records the `!`
+    # negation's status (0), not csd's, masking the 30/31 diagnostics below.
+    "${CSD}" --observe "${observer}" --container "${container}" --duration "${DURATION}" \
+        --workload "${WORKLOAD}" --out "${sidecar}" >"${log}" 2>&1 && rc=0 || rc=$?
+    wait "${wpid}" 2>/dev/null || true
+    docker rm -f "${container}" >/dev/null 2>&1 || true
+    if [[ ${rc} -ne 0 ]]; then
         if [[ ${rc} -eq 30 ]]; then
             echo "FAIL ${observer}: csd exited SchemaMismatch (30) — host ig differs from PinnedIGVersion"
         elif [[ ${rc} -eq 31 ]]; then
@@ -100,8 +102,6 @@ run_observer() {
         fi
         return 1
     fi
-    wait "${wpid}" 2>/dev/null || true
-    docker rm -f "${container}" >/dev/null 2>&1 || true
 
     if [[ ! -s "${sidecar}" ]]; then
         echo "FAIL ${observer}: sidecar empty or missing at ${sidecar}"

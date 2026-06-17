@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd missrate build test vet image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd closed-loop missrate build test vet image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from main.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -76,6 +76,13 @@ smoke-device: build
 # correlation (CHOWN used) and the unused->removable classification (SYS_MODULE).
 smoke-capadd: build
 	./scripts/smoke_capadd.sh
+
+# closed-loop "meets intent" test — see scripts/closed_loop.sh. Derives a cap
+# profile, RE-RUNS the workload under exactly that profile (must succeed), then
+# with all caps dropped (must fail): proves the derived config is sufficient AND
+# necessary. The only test that validates csd's OUTPUT, not just its pipeline.
+closed-loop: build
+	./scripts/closed_loop.sh
 
 # missrate measures the kretprobe capture deficit (upper bound on the
 # kretprobe miss rate) against the synthetic exerciser in counting mode.

@@ -101,10 +101,16 @@ it is load-bearing. A new observer typically needs:
 7. **All seven formatters** (`compose`, `json`, `docker-run`, `k8s`, `oci`,
    `compose-patch`, `compose-lint-profile`). `k8s`/`oci`/`compose-patch` are
    bespoke per output shape, not naive concatenation.
-8. **Ground-truth + integration tests** — unit tests with positive and negative
-   cases, and a deterministic synthetic-exerciser gate in the relevant smoke
-   script (reference images may legitimately observe nothing post-attach; see
-   [docs/known-deltas.md](docs/known-deltas.md)).
+8. **The required test types** — a new observer must ship **all** of the
+   per-observer test types in
+   [docs/testing.md §Required test types per change](docs/testing.md): golden,
+   a `run()`-level CLI table across every format, a confidence-rubric test, a
+   live fake-`ig` test, multi-replica, negative/error-path, fuzz for any new
+   parser, and `-race`. These are all hermetic (runnable without a kernel), so
+   none may be deferred. Plus a deterministic synthetic-exerciser gate in the
+   relevant smoke script (reference images may legitimately observe nothing
+   post-attach; see [docs/known-deltas.md](docs/known-deltas.md)). Skipping a
+   required type is a reviewable omission, not a gap to fix later.
 
 ### Observer requirements
 
@@ -186,8 +192,11 @@ All changes to `main` go through a PR — including maintainer changes.
 
 - **Keep PRs small.** Easier to review, revert, and bisect.
 - **Don't mix refactors with behavior changes.** Land the refactor first.
-- **Update tests.** New observers need positive and negative tests plus a smoke
-  gate; bug fixes need a regression test.
+- **Update tests.** New observers must ship every required test type in
+  [docs/testing.md §Required test types per change](docs/testing.md) (golden,
+  `run()`-level CLI table, confidence rubric, live fake-`ig`, multi-replica,
+  negative/error-path, fuzz for new parsers, `-race`) plus a smoke gate; a
+  bug fix needs a regression test that fails before the fix.
 - **Update the docs your change touches in the same PR** so the entry-point docs
   never trail `main`: keep the CLAUDE.md/README status current, update the
   PLAN.md build order, tick PLAN.md success-criteria boxes *only with evidence*,

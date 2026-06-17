@@ -33,6 +33,35 @@ Each of those needs a real host. The tiers below say which.
 | Kernel/distro matrix | BPF attach across kernels (incl. the future LSM-BPF path, kernel ≥5.7) | self-hosted runner(s) / VM matrix | 🟡 scaffolded (the full suite runs on the self-hosted runner's kernel); a true matrix needs multiple runners (#116) |
 | Dogfooding | csd against the real target stack | the homelab host | ❌ host-side (#116) |
 
+## Required test types per change (the per-observer bar)
+
+The tiers above say what *can* be tested; this section says what a change **must**
+ship. It exists because the v0.4 `capadd` observer shipped with ~0% coverage at
+the `run()`, confidence-rubric, and live layers — not from individual misses but
+because the bar was never written down (deep-review #120 retrospective). A new
+observer or parser that skips a type below is now a **visible, reviewable
+omission**, not a silent gap.
+
+**Every new observer must ship all of these** (all hermetic — runnable in the
+sandbox, so there is no excuse to defer them):
+
+| Test type | What it pins | Example |
+|---|---|---|
+| **Golden / snapshot** | The sidecar JSON shape for the observer's block (run with `-update-golden` only on intentional change) | `TestCapadd_Golden` |
+| **`run()`-level CLI table** | `produce*Observation` + **every** `--format` driven end-to-end through `run()`, in each mode (e.g. granted vs default) | `TestRun_CapaddAllFormats` |
+| **Confidence-rubric test** | The grade + factors across the states that drive it (clean → moderate, the force-low and two-moderate paths), and any pricing edge (e.g. substitution) | `TestComputeCapaddConfidence` |
+| **Live fake-`ig` test** | The spawn → parse → drop-accounting path via the `fakeIGRun` harness (stream + `lost N` → observation + `Dropped`); missing binary → `ExitIGMissing` | `TestObserveCapadd_FakeIG` |
+| **Multi-replica** | `--all-matching` populates the disagreement field; `--image` matching >1 without it is `ExitTargetAmbiguous` | `TestCapaddMultiReplica` |
+| **Negative / error-path** | The `ExitUsage` flag combinations and the compose-lint contract-gate violation set | `TestRun_CapaddNegativePaths`, `TestCheckCapaddComposeLintContract` |
+| **Fuzz** (any new **parser**) | Robustness on hostile input — required whenever a change adds or alters NDJSON/compose parsing | `FuzzAggregateCapadd`, `FuzzCapaddComposePatch` |
+| **`-race`** | The observe goroutines / multi-stream merge are data-race-free | `go test -race ./...` (CI gate) |
+
+**Every change** (not just observers): a Medium/Low correctness fix lands with a
+regression test that fails before the fix (tab/CRLF/no-newline/anchored-patch
+goldens; the `parseIGStderr` oversized-line test; the L10 denied-attempt test are
+the worked examples). A new parser adds a fuzz target. Behavior changes update the
+golden in the same PR, never silently.
+
 ## The hermetic core (fully testable without a kernel)
 
 This is everything except attach/attribution, and it is the bulk of the code.

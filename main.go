@@ -1092,8 +1092,21 @@ func finaliseTraceHealth(th *TraceHealth) {
 // NOT treated as SchemaMismatch — observe() will surface ExitIGMissing
 // for the same condition. Returning nil here keeps the version-check
 // out of that error's blast radius.
+// igVersionCheckTimeout bounds the `ig version` probe in checkIGVersion. ig
+// version is near-instant; this is a generous ceiling that only fires if the
+// binary hangs.
+const igVersionCheckTimeout = 10 * time.Second
+
 func checkIGVersion(igBin string, stderr io.Writer) error {
-	out, err := exec.Command(igBin, "version").Output()
+	// Bound the probe and honor Ctrl-C/SIGTERM: a hung `ig version` used to
+	// ignore both because it ran via context-less exec.Command (deep-review L1).
+	// The signal context is short-lived (just this probe) — the observe path
+	// installs its own afterwards.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	ctx, timeoutCancel := context.WithTimeout(ctx, igVersionCheckTimeout)
+	defer timeoutCancel()
+	out, err := exec.CommandContext(ctx, igBin, "version").Output()
 	if err != nil {
 		if stderr != nil {
 			fmt.Fprintf(stderr, "csd: ig version check skipped: %v\n", err)
@@ -1196,10 +1209,14 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 		}
 		var ev capEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
-			// Skip malformed lines rather than abort the observation
-			// window. Real IG output can include non-event diagnostic
-			// lines on some versions.
-			continue
+			// Hard-fail on a malformed line, matching the fs/device/capadd
+			// aggregators (deep-review L3). Silently skipping would yield a
+			// SMALLER derived cap set with no signal — the dangerous direction,
+			// since a user could then drop a cap the workload needs. The pinned
+			// ig version (enforced by checkIGVersion) emits one clean JSON event
+			// per stdout line, so a parse failure means corrupt input, not a
+			// benign diagnostic line.
+			return nil, fmt.Errorf("parse trace_capabilities event: %w", err)
 		}
 		if !opts.matches(ev) {
 			continue
@@ -1411,7 +1428,10 @@ func isInitComm(comm string) bool {
 // Routes through writeJSON so the --out file and `--format json` stdout
 // are byte-identical.
 func writeSidecar(s *Sidecar, path string) error {
-	f, err := os.Create(path)
+	// 0600, not os.Create's 0666: the sidecar is security evidence written by a
+	// root-equivalent process; it should not be world- or group-readable
+	// (deep-review L4).
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

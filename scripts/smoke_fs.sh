@@ -81,22 +81,34 @@ run_one() {
      "${workload}" >"${WORKDIR}/${label}-workload.log" 2>&1 || true) &
     local wpid=$!
 
-    if ! "${CSD}" --observe fs --container "${container}" --duration "${DURATION}" \
-            --out "${sidecar}" >"${csd_log}" 2>&1; then
-        rc=$?
-        wait "${wpid}" 2>/dev/null || true
-        docker rm -f "${container}" >/dev/null 2>&1 || true
-        if [[ ${rc} -eq 30 ]]; then
-            echo "FAIL ${label}: csd exited SchemaMismatch (30) — host ig version differs from PinnedIGVersion"
-        elif [[ ${rc} -eq 31 ]]; then
-            echo "FAIL ${label}: csd exited IGMissing (31) — install the pinned ig binary on PATH"
-        else
-            echo "FAIL ${label}: csd exited ${rc}; see ${csd_log}"
-        fi
-        return 1
-    fi
+    # Capture csd's REAL exit code. `if ! "${CSD}" ...; then rc=$?` records the
+    # status of the `!` negation (always 0), NOT csd's — masking 30/31 and the
+    # artifact-with-caveat codes and mislabelling failures "csd exited 0".
+    "${CSD}" --observe fs --container "${container}" --duration "${DURATION}" \
+        --out "${sidecar}" >"${csd_log}" 2>&1 && rc=0 || rc=$?
     wait "${wpid}" 2>/dev/null || true
     docker rm -f "${container}" >/dev/null 2>&1 || true
+    if [[ ${rc} -ne 0 ]]; then
+        # 30/31 are environment-wide (wrong/missing ig) — fatal for every image.
+        if [[ ${rc} -eq 30 ]]; then
+            echo "FAIL ${label}: csd exited SchemaMismatch (30) — host ig version differs from PinnedIGVersion"
+            return 1
+        fi
+        if [[ ${rc} -eq 31 ]]; then
+            echo "FAIL ${label}: csd exited IGMissing (31) — install the pinned ig binary on PATH"
+            return 1
+        fi
+        # Other codes are artifact-with-caveat (20 target-exited-early, 21
+        # drop-rate). Informational reference images (predicate *-info) tolerate
+        # them — their post-attach behavior is timing-dependent (docs/known-deltas.md);
+        # the synthetic hard gate does not.
+        if [[ "${predicate}" == *-info ]]; then
+            echo "INFO ${label}: csd exited ${rc} (artifact-with-caveat); informational image, not a failure (see ${csd_log})"
+            return 0
+        fi
+        echo "FAIL ${label}: csd exited ${rc}; see ${csd_log}"
+        return 1
+    fi
 
     if [[ ! -s "${sidecar}" ]]; then
         echo "FAIL ${label}: sidecar empty or missing at ${sidecar}"

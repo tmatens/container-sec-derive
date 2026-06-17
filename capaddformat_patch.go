@@ -51,6 +51,9 @@ func writeCapaddComposePatch(w io.Writer, val *capaddValidation, original []byte
 		rewrites = append(rewrites, capRewrite{loc.bodyStart, loc.bodyStart, newCapAdd})
 	}
 
+	if err := refuseAnchoredRewrites(origLines, rewrites); err != nil {
+		return err
+	}
 	edited := applyRewriteSequence(origLines, rewrites)
 	if equalLines(origLines, edited) {
 		return nil

@@ -76,6 +76,16 @@ type capaddObservation struct {
 	EventCount int                  // held dangerous-cap events counted post-filter
 	Dropped    int                  // ig ringbuf-lost count (live path); 0 in fixture mode
 
+	// Denied records denied (capable:false) cap_capable attempts per cap
+	// (normalized) -> syscall -> count, for caps in the active set, after the
+	// same target/init filtering as held usage. A denied check says nothing
+	// about a *held* cap's exercise, so these are NOT counted as usage (they
+	// never enter Used/EventCount). But they ARE retained as evidence of
+	// *attempted* use: a denied broad syscall under a granted cap means the
+	// decision layer must not silently recommend dropping or finer-substituting
+	// it on the strength of the held syscalls alone (deep-review L10).
+	Denied map[string]map[string]int
+
 	// PerReplica is the set of in-validate-set caps observed per replica id
 	// (or name), feeding the multi-replica disagreement signal. PerReplicaCount
 	// is the held-event count per replica (the per_replica_event_counts source).
@@ -94,6 +104,7 @@ type capaddObservation struct {
 // without --all-matching is refused rather than silently unioned.
 func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struct{}) (*capaddObservation, error) {
 	used := map[string]*capUsage{}
+	denied := map[string]map[string]int{}
 	perReplica := map[string]map[string]struct{}{}
 	perReplicaCount := map[string]int{}
 	perReplicaName := map[string]string{}
@@ -110,11 +121,10 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil, fmt.Errorf("parse trace_capabilities event: %w", err)
 		}
-		if !ev.Capable {
-			// Denied checks (the cap was NOT held) say nothing about a granted
-			// cap's usage; filtering them mirrors the v0.1 aggregator.
-			continue
-		}
+		// Target + init + active-set filtering applies to held AND denied events
+		// alike: an off-target, runc/init, or out-of-set check is noise either
+		// way. (This filtering used to short-circuit on !Capable before matching;
+		// it now matches first so a denied in-scope attempt can be retained — L10.)
 		if !opts.matches(ev) {
 			continue
 		}
@@ -125,6 +135,20 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 		}
 		cap := normalizeCap(ev.CapName)
 		if _, ok := activeSet[cap]; !ok {
+			continue
+		}
+		if !ev.Capable {
+			// Denied check: the cap was NOT held here. It does not count as
+			// usage (mirrors the v0.1 aggregator, which drops denied checks so
+			// they can't inflate the derived set), but we retain the attempted
+			// syscall as an L10 signal so the decision layer won't drop or
+			// finer-substitute a cap the workload tried — and was denied — to use.
+			if sc := strings.TrimSpace(ev.Syscall); sc != "" {
+				if denied[cap] == nil {
+					denied[cap] = map[string]int{}
+				}
+				denied[cap][sc]++
+			}
 			continue
 		}
 		count++
@@ -179,6 +203,7 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 
 	obs := &capaddObservation{
 		Used:            used,
+		Denied:          denied,
 		EventCount:      count,
 		PerReplica:      map[string][]string{},
 		PerReplicaCount: perReplicaCount,

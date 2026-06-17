@@ -11,6 +11,22 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Security
+
+- **`--observe capadd`: retain denied (`capable:false`) attempts so they can't
+  silently weaken a recommendation (deep-review L10).** Denied cap checks were
+  dropped outright, so a workload that attempted a *broad* operation (e.g.
+  `mount` under `CAP_SYS_ADMIN`) but was denied left no trace — and the validator
+  could then recommend finer-substituting or dropping that cap on the strength of
+  the held syscalls alone. Denied in-scope attempts are now kept (still **not**
+  counted as usage): a denied attempt for a syscall no finer capability covers
+  now **suppresses** the finer-grained substitution (the broad cap is kept, with
+  a caveat naming the denied attempt), and a granted cap that was *only* ever
+  attempted-and-denied is **no longer flagged removable**. A denied attempt for a
+  syscall that does map to a finer cap (e.g. `perf_event_open`) does not suppress
+  the substitution. No sidecar-schema change (`capadd_validation` shape
+  unchanged); recommendations are strictly more conservative.
+
 ## [0.4.0] - 2026-06-17
 
 ### Added

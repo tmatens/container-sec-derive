@@ -365,6 +365,76 @@ func TestComposePatch_RefusesAnchoredBlock(t *testing.T) {
 	}
 }
 
+// TestSplitComposeLines covers the line-reader invariants behind L6/L8: CRLF
+// detection with "\r" stripped from stored lines, trailing-newline tracking, and
+// no truncation of a >1MB line (which bufio.Scanner's 1MB cap used to drop along
+// with the rest of the file).
+func TestSplitComposeLines(t *testing.T) {
+	// LF, trailing newline.
+	lines, eol, fin := splitComposeLines([]byte("a\nb\n"))
+	if eol != "\n" || !fin || len(lines) != 2 || lines[0] != "a" || lines[1] != "b" {
+		t.Errorf("LF: lines=%q eol=%q fin=%v", lines, eol, fin)
+	}
+	// No trailing newline.
+	lines, _, fin = splitComposeLines([]byte("a\nb"))
+	if fin || len(lines) != 2 || lines[1] != "b" {
+		t.Errorf("no-final-newline: lines=%q fin=%v", lines, fin)
+	}
+	// CRLF: "\r" stripped from content, eol records the convention.
+	lines, eol, fin = splitComposeLines([]byte("a\r\nb\r\n"))
+	if eol != "\r\n" || !fin || lines[0] != "a" || lines[1] != "b" {
+		t.Errorf("CRLF: lines=%q eol=%q fin=%v", lines, eol, fin)
+	}
+	// A >1MB line must not be dropped, and lines after it must survive.
+	huge := strings.Repeat("x", 1<<21) // 2MB, well past the old 1MB scanner cap
+	lines, _, _ = splitComposeLines([]byte("# " + huge + "\nservices:\n  app:\n"))
+	if len(lines) != 3 || lines[1] != "services:" || lines[2] != "  app:" {
+		t.Errorf(">1MB line truncated the file: got %d lines, last=%q", len(lines), lines[len(lines)-1])
+	}
+}
+
+// TestComposePatch_PreservesCRLF is the L6 regression: a CRLF compose file must
+// round-trip — context and added diff lines keep "\r\n" so the patch applies to
+// the original bytes instead of flipping the file to LF.
+func TestComposePatch_PreservesCRLF(t *testing.T) {
+	in := []byte("services:\r\n  app:\r\n    image: x\r\n    cap_add:\r\n      - CHOWN\r\n")
+	s := helperSidecarWithCaps("SETGID")
+	var buf bytes.Buffer
+	if err := writeComposePatch(&buf, s, in, "compose.yaml", "app"); err != nil {
+		t.Fatalf("writeComposePatch: %v", err)
+	}
+	out := buf.String()
+	// Added cap_add lines carry CRLF.
+	if !strings.Contains(out, "+    cap_add:\r\n") || !strings.Contains(out, "+      - SETGID\r\n") {
+		t.Errorf("added lines lost CRLF:\n%q", out)
+	}
+	// A context line carries CRLF too (so it matches the original bytes).
+	if !strings.Contains(out, " services:\r\n") {
+		t.Errorf("context line lost CRLF:\n%q", out)
+	}
+}
+
+// TestComposePatch_NoTrailingNewline is the L5 regression: when the original
+// lacks a final newline, the diff must carry the "\ No newline at end of file"
+// marker so git apply / patch don't choke.
+func TestComposePatch_NoTrailingNewline(t *testing.T) {
+	// cap_add block is the file's tail and the file has no trailing newline.
+	in := []byte("services:\n  app:\n    image: x\n    cap_add:\n      - CHOWN")
+	s := helperSidecarWithCaps("SETGID")
+	var buf bytes.Buffer
+	if err := writeComposePatch(&buf, s, in, "compose.yaml", "app"); err != nil {
+		t.Fatalf("writeComposePatch: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "\\ No newline at end of file") {
+		t.Errorf("missing no-newline marker for a file without a trailing newline:\n%s", out)
+	}
+	// The removed old final line precedes a marker.
+	if !strings.Contains(out, "-      - CHOWN\n\\ No newline at end of file") {
+		t.Errorf("marker not attached to the removed final line:\n%s", out)
+	}
+}
+
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }

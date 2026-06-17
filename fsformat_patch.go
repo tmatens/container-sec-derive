@@ -27,7 +27,7 @@ func writeFSComposePatch(w io.Writer, rec fsRecommendation, original []byte, inP
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}
-	origLines := splitComposeLines(original)
+	origLines, eol, finalNL := splitComposeLines(original)
 	loc, err := locateComposeService(origLines, service)
 	if err != nil {
 		return err
@@ -80,5 +80,5 @@ func writeFSComposePatch(w io.Writer, rec fsRecommendation, original []byte, inP
 		return nil
 	}
 	marks := markRewrites(origLines, rewrites)
-	return emitUnifiedDiff(w, inPath, marks)
+	return emitUnifiedDiff(w, inPath, marks, eol, finalNL)
 }

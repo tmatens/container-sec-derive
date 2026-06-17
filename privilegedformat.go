@@ -196,7 +196,7 @@ func writePrivilegedComposePatch(w io.Writer, s *Sidecar, original []byte, inPat
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}
-	origLines := splitComposeLines(original)
+	origLines, eol, finalNL := splitComposeLines(original)
 	loc, err := locateComposeService(origLines, service)
 	if err != nil {
 		return err
@@ -262,7 +262,7 @@ func writePrivilegedComposePatch(w io.Writer, s *Sidecar, original []byte, inPat
 		return nil
 	}
 	marks := markRewrites(origLines, rewrites)
-	return emitUnifiedDiff(w, inPath, marks)
+	return emitUnifiedDiff(w, inPath, marks, eol, finalNL)
 }
 
 // writePrivilegedComposeLintProfile emits the CL-0002 contribution entry for the

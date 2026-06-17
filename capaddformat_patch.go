@@ -26,7 +26,7 @@ func writeCapaddComposePatch(w io.Writer, val *capaddValidation, original []byte
 	if !val.GrantedSetProvided {
 		return nil
 	}
-	origLines := splitComposeLines(original)
+	origLines, eol, finalNL := splitComposeLines(original)
 	loc, err := locateComposeService(origLines, service)
 	if err != nil {
 		return err
@@ -59,5 +59,5 @@ func writeCapaddComposePatch(w io.Writer, val *capaddValidation, original []byte
 		return nil
 	}
 	marks := markRewrites(origLines, rewrites)
-	return emitUnifiedDiff(w, inPath, marks)
+	return emitUnifiedDiff(w, inPath, marks, eol, finalNL)
 }

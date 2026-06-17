@@ -13,17 +13,23 @@
 #   1. DERIVE      — `csd --observe caps` observes the exerciser loop and emits
 #                    the minimum cap set. An empty set here is a real attach /
 #                    observe regression (hard fail), not a workload artifact.
-#   2. SUFFICIENCY — re-run the exerciser (counting mode) with EXACTLY the
-#                    derived caps and --cap-drop ALL; the cap-gated syscalls
-#                    (chown/setuid/bind) must SUCCEED. Proves the derived config
-#                    runs the workload.
-#   3. NECESSITY   — re-run with --cap-drop ALL and NO caps; the same syscalls
-#                    must FAIL. Proves the derived caps were actually required,
-#                    not superfluous (the over-permissioning csd exists to avoid).
+#   2. SUFFICIENCY — re-run the exerciser (counting mode) under three cap
+#                    configurations and compare the workload's success SCORE
+#                    (sum of cap-relevant syscalls that succeeded): full default
+#                    caps (baseline = achievable max), EXACTLY the derived caps,
+#                    and no caps. The derived run must score == baseline (it runs
+#                    the workload as well as full caps do).
+#   3. NECESSITY   — the derived run must score STRICTLY MORE than the no-caps
+#                    run (dropping the derived caps measurably breaks the
+#                    workload), so the derived caps aren't superfluous.
 #
-# The harness is GENERIC: phases 2-3 apply whatever phase 1 derived, so it tests
-# csd's own output, not a hard-coded expectation. Hardware-free; the derive phase
-# needs ig+BPF+root (like the other smokes), phases 2-3 need only docker.
+# Why a SCORE comparison and not "syscall X must fail": some syscalls aren't
+# cap-gated on every kernel (binding port 80 where ip_unprivileged_port_start=0;
+# chowning a file to its existing owner), so a correct derived set legitimately
+# omits those caps. Comparing the measured score across full/derived/none caps is
+# robust to that and tests csd's ACTUAL output, not a hard-coded expectation.
+# Hardware-free; the derive phase needs ig+BPF+root (like the other smokes),
+# phases 2-3 need only docker.
 #
 # Requires: docker, csd (built; pass CSD=/path), jq, the pinned ig on PATH.
 #
@@ -111,47 +117,43 @@ done
 run_counting() {
     docker run --rm "$@" -e ITERS="${ITERS}" "${IMAGE}" 2>/dev/null | grep '^TALLY ' | head -1
 }
-# tally_field <tally-line> <name> -> the integer value (0 if absent)
-tally_field() {
-    local v
-    v="$(printf '%s\n' "$1" | tr ' ' '\n' | grep "^$2=" | cut -d= -f2)"
-    printf '%s' "${v:-0}"
+# tally_total <tally-line> -> sum of the cap-relevant success fields (the score)
+tally_total() {
+    printf '%s\n' "$1" | tr ' ' '\n' | awk -F= '/^(chown|bind|setgid|setuid)=/ {s+=$2} END {print s+0}'
 }
 
-FAIL=0
+# --- Phases 2-3: SUFFICIENCY + NECESSITY by score comparison ---------------
+# baseline = full default caps (achievable max); derived = exactly csd's output;
+# none = all caps dropped.
+BASE_TALLY="$(run_counting)"
+SUF_TALLY="$(run_counting --cap-drop ALL "${CAPFLAGS[@]}")"
+NONE_TALLY="$(run_counting --cap-drop ALL)"
+base="$(tally_total "${BASE_TALLY}")"
+suf="$(tally_total "${SUF_TALLY}")"
+none="$(tally_total "${NONE_TALLY}")"
+echo "INFO baseline (full caps): ${BASE_TALLY:-<none>}  [score=${base}]"
+echo "INFO derived  (csd caps):  ${SUF_TALLY:-<none>}  [score=${suf}]"
+echo "INFO none     (no caps):   ${NONE_TALLY:-<none>}  [score=${none}]"
 
-# --- Phase 2: SUFFICIENCY (derived caps must WORK) -------------------------
-SUF="$(run_counting --cap-drop ALL "${CAPFLAGS[@]}")"
-if [[ -z "${SUF}" ]]; then
-    echo "FAIL sufficiency: no TALLY from the derived-caps run"
-    FAIL=1
-else
-    s_chown="$(tally_field "${SUF}" chown)"
-    s_setuid="$(tally_field "${SUF}" setuid)"
-    s_bind="$(tally_field "${SUF}" bind)"
-    if [[ "${s_chown}" -gt 0 && "${s_setuid}" -gt 0 && "${s_bind}" -gt 0 ]]; then
-        echo "PASS sufficiency: workload succeeds under the derived caps (${SUF})"
-    else
-        echo "FAIL sufficiency: derived caps did NOT satisfy the workload (${SUF})"
-        FAIL=1
-    fi
+if [[ "${base}" -le 0 ]]; then
+    echo "FAIL: baseline workload scored 0 even with full caps — the exerciser did nothing"
+    exit 1
 fi
 
-# --- Phase 3: NECESSITY (no caps must BREAK it) ---------------------------
-NEC="$(run_counting --cap-drop ALL)"
-if [[ -z "${NEC}" ]]; then
-    echo "FAIL necessity: no TALLY from the no-caps run"
-    FAIL=1
+FAIL=0
+# Sufficiency: derived caps achieve the SAME workload success as full caps.
+if [[ "${suf}" -eq "${base}" ]]; then
+    echo "PASS sufficiency: derived caps achieve full workload success (score ${suf}/${base})"
 else
-    n_chown="$(tally_field "${NEC}" chown)"
-    n_setuid="$(tally_field "${NEC}" setuid)"
-    n_bind="$(tally_field "${NEC}" bind)"
-    if [[ "${n_chown}" -eq 0 && "${n_setuid}" -eq 0 && "${n_bind}" -eq 0 ]]; then
-        echo "PASS necessity: dropping all caps breaks the workload (${NEC})"
-    else
-        echo "FAIL necessity: workload still succeeded without caps — derived caps may be superfluous (${NEC})"
-        FAIL=1
-    fi
+    echo "FAIL sufficiency: derived caps under-satisfy the workload (score ${suf}/${base}) — csd may have missed a needed cap"
+    FAIL=1
+fi
+# Necessity: derived caps enable STRICTLY MORE than no caps (they matter).
+if [[ "${suf}" -gt "${none}" ]]; then
+    echo "PASS necessity: dropping the derived caps reduces workload success (score ${suf} -> ${none})"
+else
+    echo "FAIL necessity: no-caps run scored the same as derived (${suf} == ${none}) — derived caps appear superfluous"
+    FAIL=1
 fi
 
 if [[ ${FAIL} -eq 0 ]]; then

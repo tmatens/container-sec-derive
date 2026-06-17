@@ -39,6 +39,13 @@ Subprocess, not library (Decisions item 5). IG schema is pinned per release via 
 
 `go vet ./...`, `go test ./...`, `go build -o csd .`. All must pass.
 
+**The full test-tier map — what each tier proves and where it runs (hermetic vs
+live vs real-host) — is `docs/testing.md`.** Read it before reasoning about
+coverage: the hermetic core (unit + golden + `--fixture` pipeline) is fully
+runnable without a kernel and is the bulk of the suite; the live-BPF half and the
+closed-loop "meets intent" proof need a real host, and the plan to close those
+gaps is tracked in **issue #116**.
+
 Live-BPF CI (`.github/workflows/integration.yml`) gates PRs beyond the unit
 suite: a per-PR smoke job runs `scripts/smoke_wsl2.sh` against real containers on
 a hosted runner (synthetic fixture is the deterministic gate; the reference

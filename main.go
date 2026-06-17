@@ -959,29 +959,35 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 	}
 
 	var (
-		wg     sync.WaitGroup
-		lost   int
-		lostMu sync.Mutex
+		wg   sync.WaitGroup
+		lost int
 	)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		n := parseIGStderr(stderrPipe, stderrSink)
-		lostMu.Lock()
-		lost = n
-		lostMu.Unlock()
+		lost = parseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	s, aggErr := aggregate(stdout, opts)
-	// Wait for ig to exit. A context-cancel kill is the normal termination
-	// path for the timed observation window, so we don't propagate that as
-	// an error.
-	waitErr := cmd.Wait()
+	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
+	if earlyErr {
+		// Aggregation bailed early (oversized untrusted stdout line, or a
+		// target-selection ambiguity) with ig's stdout pipe undrained; ig will
+		// block on the full pipe and never exit, so kill it now rather than let
+		// the stderr drain and cmd.Wait() below stall for the rest of the
+		// --duration window (a fast ExitTargetAmbiguous is the intended path).
+		_ = cmd.Process.Kill()
+	}
+	// Join the stderr-drain goroutine BEFORE cmd.Wait(): Wait closes the pipe,
+	// and the documented StderrPipe contract requires the read to finish first,
+	// else an in-flight Read can drop a trailing `lost N` line. With the join
+	// here, the lost-counter read below needs no extra synchronisation.
 	wg.Wait()
+	waitErr := cmd.Wait()
 	if s != nil {
 		s.TraceHealth.EventsDropped = lost
 	}
-	if aggErr != nil && !errors.Is(aggErr, io.EOF) {
+	if earlyErr {
 		return nil, aggErr
 	}
 	if waitErr != nil && ctx.Err() == nil {

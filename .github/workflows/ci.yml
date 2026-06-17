@@ -36,5 +36,11 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test ./...
+      # The race detector guards the concurrent observe paths: every observer
+      # spawns a stderr-drain goroutine over a shared lost-samples counter, and
+      # the privileged observer runs two ig streams at once. The suite runs in
+      # <0.1s, so the detector is near-free. (Needs cgo, on by default here.)
+      - name: go test -race
+        run: go test -race ./...
       - name: go build
         run: go build -o csd .

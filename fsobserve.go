@@ -194,11 +194,21 @@ func observeWrites(ctx context.Context, igBin string, opts aggregateOpts, stderr
 	}()
 
 	obs, aggErr := aggregateWrites(stdout, opts)
+	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
+	if earlyErr {
+		// Undrained stdout on early error → ig blocks and never exits; kill it
+		// so the stderr drain + cmd.Wait() don't stall for the window (matches
+		// observe()).
+		_ = cmd.Process.Kill()
+	}
+	// Join the stderr drain BEFORE cmd.Wait() (StderrPipe contract): the read
+	// must finish before Wait closes the pipe, else a trailing `lost N` line
+	// can be dropped. happens-before the lost read below; no extra sync needed.
+	wg.Wait()
 	// A context-cancel kill is the normal end of the timed window, so a
 	// resulting wait error is not propagated (matches observe()).
 	waitErr := cmd.Wait()
-	wg.Wait() // happens-before the lost read below; no extra sync needed
-	if aggErr != nil && !errors.Is(aggErr, io.EOF) {
+	if earlyErr {
 		return nil, aggErr
 	}
 	if waitErr != nil && ctx.Err() == nil {

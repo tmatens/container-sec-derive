@@ -254,6 +254,9 @@ func writePrivilegedComposePatch(w io.Writer, s *Sidecar, original []byte, inPat
 	}
 	sort.Slice(rewrites, func(i, j int) bool { return rewrites[i].start < rewrites[j].start })
 
+	if err := refuseAnchoredRewrites(origLines, rewrites); err != nil {
+		return err
+	}
 	edited := applyRewriteSequence(origLines, rewrites)
 	if equalLines(origLines, edited) {
 		return nil

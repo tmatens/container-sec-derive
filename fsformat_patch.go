@@ -72,6 +72,9 @@ func writeFSComposePatch(w io.Writer, rec fsRecommendation, original []byte, inP
 	}
 	sort.Slice(rewrites, func(i, j int) bool { return rewrites[i].start < rewrites[j].start })
 
+	if err := refuseAnchoredRewrites(origLines, rewrites); err != nil {
+		return err
+	}
 	edited := applyRewriteSequence(origLines, rewrites)
 	if equalLines(origLines, edited) {
 		return nil

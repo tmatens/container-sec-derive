@@ -299,6 +299,72 @@ func TestRun_ComposePatchFlagsRejectedWithOtherFormats(t *testing.T) {
 	}
 }
 
+// TestComposePatch_RejectsTabIndentation is the M2 regression: a tab-indented
+// compose file would make leadingSpaces() read the cap blocks as column 0, the
+// locator miss them, and the patch insert duplicate keys while the stale block
+// survives (defeating "drop ALL"). The patch must refuse such input outright.
+func TestComposePatch_RejectsTabIndentation(t *testing.T) {
+	// Tab-indented service + cap_add (YAML-invalid, but the shape that used to
+	// produce a duplicate-key patch).
+	in := []byte("services:\n\tapp:\n\t\timage: postgres:16\n\t\tcap_add:\n\t\t\t- CHOWN\n")
+	s := helperSidecarWithCaps("SETGID")
+	var buf bytes.Buffer
+	err := writeComposePatch(&buf, s, in, "compose.yaml", "app")
+	if err == nil {
+		t.Fatalf("expected refusal for tab-indented file; got patch:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "tab indentation") {
+		t.Errorf("error = %v, want a tab-indentation refusal", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("no patch should be emitted for a rejected file, got:\n%s", buf.String())
+	}
+
+	// A space-indented file containing only a tab inside a value is fine.
+	ok := []byte("services:\n  app:\n    image: postgres:16\n    environment:\n      MSG: \"a\tb\"\n    cap_add:\n      - CHOWN\n")
+	buf.Reset()
+	if err := writeComposePatch(&buf, s, ok, "compose.yaml", "app"); err != nil {
+		t.Errorf("space-indented file with a tab in a value should patch fine: %v", err)
+	}
+}
+
+// TestComposePatch_RefusesAnchoredBlock is the L7 regression: rewriting a block
+// that defines a YAML anchor (or is an alias) would drop the anchor / silently
+// expand the alias and break references elsewhere. The patch must refuse — but
+// only for the block it would rewrite, not for unrelated anchors in the service.
+func TestComposePatch_RefusesAnchoredBlock(t *testing.T) {
+	s := helperSidecarWithCaps("SETGID")
+
+	// cap_add value is an anchor definition -> refuse.
+	anchored := []byte("services:\n  app:\n    image: postgres:16\n    cap_add: &appcaps\n      - CHOWN\n")
+	var buf bytes.Buffer
+	err := writeComposePatch(&buf, s, anchored, "compose.yaml", "app")
+	if err == nil {
+		t.Fatalf("expected refusal for anchored cap_add; got patch:\n%s", buf.String())
+	}
+	if !strings.Contains(err.Error(), "anchor") {
+		t.Errorf("error = %v, want an anchor refusal", err)
+	}
+
+	// cap_add is an alias -> refuse.
+	aliased := []byte("services:\n  app:\n    image: postgres:16\n    cap_add: *appcaps\n")
+	buf.Reset()
+	if err := writeComposePatch(&buf, s, aliased, "compose.yaml", "app"); err == nil {
+		t.Fatalf("expected refusal for aliased cap_add; got:\n%s", buf.String())
+	}
+
+	// An anchor in an UNRELATED block of the same service must NOT block the
+	// cap patch — precision matters (no over-rejection).
+	unrelated := []byte("services:\n  app:\n    image: postgres:16\n    logging: &log\n      driver: json-file\n    cap_add:\n      - CHOWN\n")
+	buf.Reset()
+	if err := writeComposePatch(&buf, s, unrelated, "compose.yaml", "app"); err != nil {
+		t.Errorf("anchor in an unrelated block must not block the cap patch: %v", err)
+	}
+	if !strings.Contains(buf.String(), "+      - SETGID") {
+		t.Errorf("expected a cap_add rewrite despite the unrelated anchor:\n%s", buf.String())
+	}
+}
+
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }

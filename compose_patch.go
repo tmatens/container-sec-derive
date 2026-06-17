@@ -71,6 +71,10 @@ func writeComposePatch(w io.Writer, s *Sidecar, original []byte, inPath, service
 	}
 	sort.Slice(rewrites, func(i, j int) bool { return rewrites[i].start < rewrites[j].start })
 
+	if err := refuseAnchoredRewrites(origLines, rewrites); err != nil {
+		return err
+	}
+
 	// Apply rewrites to produce the edited line set; bail early if it's
 	// byte-identical to the original (caps already match the file).
 	edited := applyRewriteSequence(origLines, rewrites)
@@ -162,6 +166,17 @@ type composeServiceLoc struct {
 }
 
 func locateComposeService(lines []string, service string) (composeServiceLoc, error) {
+	// Reject tab indentation before locating anything. YAML forbids tabs for
+	// indentation, and leadingSpaces() counts only spaces — so a tab-indented
+	// child key reads as column 0 (a top-level key), the locator misses the
+	// existing cap_drop/cap_add block, and the patch inserts a duplicate while
+	// the stale block survives, defeating "drop ALL" (deep-review M2). Refuse
+	// rather than emit a duplicate-key, insecure patch.
+	if i := firstTabIndentedLine(lines); i >= 0 {
+		return composeServiceLoc{}, fmt.Errorf(
+			"compose file uses tab indentation on line %d; YAML forbids tabs for indentation — re-indent with spaces before patching", i+1)
+	}
+
 	servicesAt := -1
 	for i, ln := range lines {
 		if leadingSpaces(ln) == 0 && trimmedKey(ln) == "services" {
@@ -289,6 +304,74 @@ func trimmedKey(line string) string {
 		return ""
 	}
 	return key
+}
+
+// firstTabIndentedLine returns the index of the first non-blank line whose
+// leading whitespace contains a tab, or -1 if none. A tab in node-content or a
+// value (after the indentation) is fine; only tabs used for indentation are the
+// hazard (deep-review M2).
+func firstTabIndentedLine(lines []string) int {
+	for i, ln := range lines {
+		// A tab at the start of the line, or after only spaces, is indentation.
+		if rest := strings.TrimLeft(ln, " "); strings.HasPrefix(rest, "\t") && strings.TrimSpace(rest) != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+// refuseAnchoredRewrites errors if any block this patch would REPLACE (a rewrite
+// with start<end) carries a YAML anchor, alias, or merge key. Rewriting such a
+// block would drop an anchor definition that aliases elsewhere depend on, or
+// silently expand an alias — neither is a safe in-place edit, so the patch
+// formatters refuse rather than emit a corrupting diff (deep-review L7). Pure
+// insertions (start==end) touch no existing lines and are always safe; blocks
+// elsewhere in the file (including other keys of the same service) are not
+// examined, so an unrelated `logging: *shared` does not block a cap patch.
+func refuseAnchoredRewrites(lines []string, rewrites []capRewrite) error {
+	for _, rw := range rewrites {
+		for i := rw.start; i < rw.end && i < len(lines); i++ {
+			if tok := yamlAnchorToken(lines[i]); tok != "" {
+				return fmt.Errorf(
+					"refusing to rewrite an anchored block: line %d uses a YAML %s; resolve the anchor/alias or edit the block by hand", i+1, tok)
+			}
+		}
+	}
+	return nil
+}
+
+// yamlAnchorToken reports the kind of YAML node property a line carries in
+// value or sequence-item position ("anchor", "alias", or "merge key"), or "" for
+// none. It inspects only value position, so a scalar that merely contains '&' or
+// '*' (e.g. a password) is not mistaken for an anchor.
+func yamlAnchorToken(line string) string {
+	s := strings.TrimLeft(line, " \t")
+	if s == "" || strings.HasPrefix(s, "#") {
+		return ""
+	}
+	if strings.HasPrefix(s, "<<:") { // merge key: `<<: *base`
+		return "merge key"
+	}
+	if strings.HasPrefix(s, "- ") || s == "-" { // sequence item: `- &x` / `- *x`
+		v := strings.TrimSpace(strings.TrimPrefix(s, "-"))
+		switch {
+		case strings.HasPrefix(v, "&"):
+			return "anchor"
+		case strings.HasPrefix(v, "*"):
+			return "alias"
+		}
+		return ""
+	}
+	if colon := strings.IndexByte(s, ':'); colon >= 0 { // mapping value: `k: &x` / `k: *x`
+		v := strings.TrimSpace(s[colon+1:])
+		switch {
+		case strings.HasPrefix(v, "&"):
+			return "anchor"
+		case strings.HasPrefix(v, "*"):
+			return "alias"
+		}
+	}
+	return ""
 }
 
 func leadingSpaces(line string) int {

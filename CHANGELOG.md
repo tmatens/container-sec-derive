@@ -11,7 +11,26 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Security
+
+- **`compose-patch` refuses tab-indented compose files instead of emitting a
+  duplicate-key, insecure patch (deep-review M2).** `leadingSpaces()` counts only
+  spaces, so a tab-indented `cap_drop`/`cap_add` block read as column 0 (a
+  top-level key); the locator missed it and the patch inserted a *second*
+  `cap_drop`, leaving the stale block in place and defeating "drop ALL". YAML
+  forbids tabs for indentation, so the patch now errors (naming the offending
+  line) and asks the user to re-indent with spaces. Applies to all five patch
+  formatters (caps/capadd/fs/devices/privileged).
+
 ### Fixed
+
+- **`compose-patch` refuses to rewrite a YAML-anchored block (deep-review L7).**
+  Rewriting a `cap_add: &anchor …` (or an alias `cap_add: *anchor`) would drop
+  the anchor definition that aliases elsewhere depend on, or silently expand an
+  alias — corrupting the file. The patch now errors when the block it would
+  *replace* carries an anchor, alias, or merge key. The check is scoped to the
+  rewritten block only, so an unrelated `logging: *shared` in the same service
+  does not block a cap patch.
 
 - **`--container` id-prefix matching ≥2 containers no longer silently unions
   them (deep-review M3).** The >1-replica ambiguity guard fired only for

@@ -48,6 +48,9 @@ func writeDeviceComposePatch(w io.Writer, rec deviceRecommendation, original []b
 		rewrites = append(rewrites, capRewrite{loc.bodyStart, loc.bodyStart, newDevices})
 	}
 
+	if err := refuseAnchoredRewrites(origLines, rewrites); err != nil {
+		return err
+	}
 	edited := applyRewriteSequence(origLines, rewrites)
 	if equalLines(origLines, edited) {
 		return nil

@@ -207,6 +207,13 @@ but together they are the difference between "works" and "mature."
 - **Continuous fuzzing (ClusterFuzzLite)** — v0.2 added Go fuzz *targets*; wiring
   them into a `cflite-pr` / `cflite-batch` flow (as compose-lint does) turns
   one-off seeds into ongoing coverage of the `ig`/`docker` output parsers.
+- **Close the live-BPF / "meets intent" testing gap** — the hermetic core is
+  fully covered, but the kernel-facing half (real attach/attribution across
+  kernels + hardware, and a **closed-loop derive→apply→re-run proof** that a
+  derived config actually works) needs real-host coverage beyond the single
+  hosted-runner kernel. Strategy + tier map in **`docs/testing.md`**; the
+  actionable plan (repo-side work, the runner trust decision, host-side runs) is
+  tracked in **issue #116**.
 
 ## Out of scope
 

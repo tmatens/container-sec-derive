@@ -11,6 +11,8 @@ the relevant entry.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-17
+
 ### Added
 
 - **`--observe capadd`: the dangerous-`cap_add` validator (ROADMAP §v0.5,
@@ -183,7 +185,8 @@ First signed release — the capability observer.
   no public Rekor) with SBOM + OpenVEX attestations, built on a digest-pinned,
   cosign-verified vendored `ig`.
 
-[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/tmatens/container-sec-derive/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/tmatens/container-sec-derive/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/tmatens/container-sec-derive/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tmatens/container-sec-derive/compare/v0.1.0...v0.2.0

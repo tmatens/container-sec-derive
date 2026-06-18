@@ -64,9 +64,9 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build \
         -trimpath \
-        -ldflags "-s -w -X main.version=${CSD_VERSION}" \
+        -ldflags "-s -w -X github.com/tmatens/container-sec-derive/internal/cli.version=${CSD_VERSION}" \
         -o /out/csd \
-        .
+        ./cmd/csd
 
 # Fetch the vendored ig binary for the target arch and verify it
 # against the committed pin. The pin (ig-pin/SHA256SUMS) was signed

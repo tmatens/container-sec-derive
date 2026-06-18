@@ -34,8 +34,18 @@ Every observer plugs into the same four layers:
 
 Do **not** collapse the layering to ship a second observer faster — it is
 load-bearing. Observers added so far: caps (`cap_capable`), `fs` (`trace_open`
-write-intent), `devices` + `privileged` (`trace_open` on `/dev` + caps). See
-PLAN.md §Architecture.
+write-intent), `devices` + `privileged` (`trace_open` on `/dev` + caps),
+`capadd` (`cap_capable` reuse), `egress` (`trace_tcp`). See PLAN.md
+§Architecture.
+
+The layering is **enforced by package boundaries**, not just convention: a
+`cmd/csd` shim over `internal/cli`, foundation leaves (`internal/{exit,sidecar,
+ig,attrib}`), one `internal/observe/<name>` package per observer, and
+`internal/format`. The import direction only points "down," so the compiler
+rejects an observer that calls sideways. **[docs/organization.md](docs/organization.md)
+is the code-organization standard** — the package map, the import rules, where
+formatters live, and the "new observer = new `internal/observe/<name>` package"
+rule. Read it before adding or moving code.
 
 ## Output schema
 

@@ -38,7 +38,7 @@ releases per [docs/RELEASING.md](docs/RELEASING.md). See
 ```bash
 git clone https://github.com/tmatens/container-sec-derive.git
 cd container-sec-derive
-go build -o csd .
+go build -o csd ./cmd/csd
 ```
 
 Requires **Go 1.26+**. Live observation needs Inspektor Gadget (`ig`) at the
@@ -54,7 +54,7 @@ All must pass locally before you push. CI runs the same commands.
 gofmt -l .          # Formatting — must print nothing
 go vet ./...        # Vet
 go test ./...       # Tests
-go build -o csd .   # Build
+go build -o csd ./cmd/csd   # Build
 ```
 
 Live-BPF behavior is exercised separately in CI (`integration.yml`:
@@ -82,7 +82,16 @@ docker + the pinned `ig` + root). The kretprobe miss-rate harness
 Observers plug into the four-layer pipeline — **Observer → Attribution →
 Aggregator → Formatter** — that v0.1 (caps), v0.2 (`fs`), and v0.3
 (`devices`/`privileged`) all share. Don't collapse the layering to ship faster;
-it is load-bearing. A new observer typically needs:
+it is load-bearing.
+
+**Where the code goes is itself a reviewable part of the contribution.** A new
+observer is one new `internal/observe/<name>` package; read
+[docs/organization.md](docs/organization.md) first — it is the code-organization
+standard (the package map, the import-direction rules, where formatters live,
+the "new observer = new package" rule). An observer that lands as a pile of
+files in the repo root, or reaches for `os/exec` instead of `internal/ig`, is a
+reviewable omission, the same way a missing test type is. A new observer
+typically needs:
 
 1. **An event model + classifier** — the IG event subset you consume and the
    predicate that selects the relevant events (cf. `fileevent.go`'s write-intent
@@ -92,7 +101,7 @@ it is load-bearing. A new observer typically needs:
    multi-replica correlation (cf. `fsdecision.go`, `devdecision.go`).
 3. **An observe pipeline** — the live `ig run <gadget>` path plus a hermetic
    `--fixture` input (cf. `fsobserve.go`, `deviceobserve.go`).
-4. **A `--observe <name>` selector** wired in `main.go`.
+4. **A `--observe <name>` selector** wired in `internal/cli`.
 5. **An additive sidecar block** — new fields are `omitempty` so other
    observers' sidecars stay byte-identical; bump `SchemaVersion` within the
    current major (see [PLAN.md §Output schema](PLAN.md)).

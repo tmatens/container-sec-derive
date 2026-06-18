@@ -37,7 +37,7 @@ Subprocess, not library (Decisions item 5). IG schema is pinned per release via 
 
 ## Quality checks
 
-`go vet ./...`, `go test ./...`, `go build -o csd .`. All must pass.
+`go vet ./...`, `go test ./...`, `go build -o csd ./cmd/csd`. All must pass.
 
 **The full test-tier map — what each tier proves and where it runs (hermetic vs
 live vs real-host) — is `docs/testing.md`.** Read it before reasoning about

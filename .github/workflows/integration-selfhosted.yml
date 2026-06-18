@@ -44,7 +44,7 @@ jobs:
           cache: true
 
       - name: Build csd
-        run: go build -o csd .
+        run: go build -o csd ./cmd/csd
 
       # The whole point of a second runner: record ITS kernel (different from the
       # hosted ubuntu-24.04 one) + that the pinned ig is present. Host prereqs

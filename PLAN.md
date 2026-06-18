@@ -57,6 +57,19 @@ The architecture must accommodate future observers (read_only paths, devices, so
    - `compose-lint-profile` — YAML entry for contribution to the compose-lint catalog (see "Contribution loop with compose-lint" for the acceptance contract)
 5. **Validator (Phase 3)** — re-runs the container with the proposed config and the *same* workload, watches for new `cap_capable` denials, and reports consistency — not general sufficiency. See "Verify semantics" below.
 
+### Layers are enforced by package boundaries
+
+The four layers are not just a convention — they map to Go packages whose import
+direction makes the layering load-bearing (a `cmd/csd` shim over `internal/cli`,
+foundation leaves `internal/{exit,sidecar,ig,attrib}`, one
+`internal/observe/<name>` package per observer, the formatters in
+`internal/format`). Imports only point "down" toward the foundation, so the
+compiler rejects an observer that calls sideways into another observer or up
+into the CLI. The package map, the import-direction rules, and the "new observer
+= new package" rule are the code-organization standard in
+[docs/organization.md](docs/organization.md) (issue #149); `docs/testing.md`
+is its analog for the test suite.
+
 ### Three-phase workflow
 
 Borrowed from AppArmor's complain → enforce pattern (and SELinux audit2allow):

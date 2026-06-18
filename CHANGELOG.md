@@ -11,6 +11,8 @@ the relevant entry.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-17
+
 ### Security
 
 - **The evidence sidecar (`--out`) is now written `0600`, not `0666`
@@ -31,6 +33,20 @@ the relevant entry.
   forbids tabs for indentation, so the patch now errors (naming the offending
   line) and asks the user to re-indent with spaces. Applies to all five patch
   formatters (caps/capadd/fs/devices/privileged).
+
+- **`--observe capadd`: retain denied (`capable:false`) attempts so they can't
+  silently weaken a recommendation (deep-review L10).** Denied cap checks were
+  dropped outright, so a workload that attempted a *broad* operation (e.g.
+  `mount` under `CAP_SYS_ADMIN`) but was denied left no trace — and the validator
+  could then recommend finer-substituting or dropping that cap on the strength of
+  the held syscalls alone. Denied in-scope attempts are now kept (still **not**
+  counted as usage): a denied attempt for a syscall no finer capability covers
+  now **suppresses** the finer-grained substitution (the broad cap is kept, with
+  a caveat naming the denied attempt), and a granted cap that was *only* ever
+  attempted-and-denied is **no longer flagged removable**. A denied attempt for a
+  syscall that does map to a finer cap (e.g. `perf_event_open`) does not suppress
+  the substitution. No sidecar-schema change (`capadd_validation` shape
+  unchanged); recommendations are strictly more conservative.
 
 ### Fixed
 
@@ -76,21 +92,13 @@ the relevant entry.
   id/name is unaffected (it resolves to one replica); `--all-matching` remains an
   `--image`-only opt-in. Applies across all observers (caps/fs/devices/capadd).
 
-### Security
-
-- **`--observe capadd`: retain denied (`capable:false`) attempts so they can't
-  silently weaken a recommendation (deep-review L10).** Denied cap checks were
-  dropped outright, so a workload that attempted a *broad* operation (e.g.
-  `mount` under `CAP_SYS_ADMIN`) but was denied left no trace — and the validator
-  could then recommend finer-substituting or dropping that cap on the strength of
-  the held syscalls alone. Denied in-scope attempts are now kept (still **not**
-  counted as usage): a denied attempt for a syscall no finer capability covers
-  now **suppresses** the finer-grained substitution (the broad cap is kept, with
-  a caveat naming the denied attempt), and a granted cap that was *only* ever
-  attempted-and-denied is **no longer flagged removable**. A denied attempt for a
-  syscall that does map to a finer cap (e.g. `perf_event_open`) does not suppress
-  the substitution. No sidecar-schema change (`capadd_validation` shape
-  unchanged); recommendations are strictly more conservative.
+- **The observe path joins the `ig` stderr-drain goroutine before `cmd.Wait()`
+  and kills `ig` on an early aggregate error (deep-review L12/L13).** `cmd.Wait()`
+  had been called before the drain goroutine was joined, so a trailing `lost N`
+  line could be missed and under-count `EventsDropped`; and an early aggregate
+  error left `ig`'s stdout undrained, blocking `cmd.Wait()` for the full
+  `--duration`. The drain is now joined before `Wait`, and an early error cancels
+  the context so `ig` is killed promptly. (CI also gained `go test -race ./...`.)
 
 ## [0.4.0] - 2026-06-17
 
@@ -266,7 +274,8 @@ First signed release — the capability observer.
   no public Rekor) with SBOM + OpenVEX attestations, built on a digest-pinned,
   cosign-verified vendored `ig`.
 
-[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/tmatens/container-sec-derive/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/tmatens/container-sec-derive/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/tmatens/container-sec-derive/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/tmatens/container-sec-derive/compare/v0.2.0...v0.3.0

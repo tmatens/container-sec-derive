@@ -1,13 +1,13 @@
 # container-sec-derive
 
-Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.26+, MIT, one-shot CLI. Binary: `csd`. **v0.4.0 released** — v0.1 shipped the capability observer (signed binaries + private GHCR image); v0.2 added the read-only-filesystem + tmpfs observer (`--observe fs`). v0.3 added privileged-mode decomposition (`--observe devices` + `--observe privileged`); v0.3.1 flags that decomposition as partial (the AppArmor/seccomp `security_opt` dimension stays unobserved). **v0.4.0 adds the dangerous-`cap_add` validator (`--observe capadd`, ROADMAP §v0.5, CL-0011)** — pulled ahead of the ROADMAP §v0.4 Docker-socket observer, which is **deferred/signal-blocked** (no built-in IG gadget for AF_UNIX/HTTP at the pin; issue #110). Release numbering stays sequential (v0.4.0); ROADMAP phase labels are planning order, not release tags.
+Runtime tool that derives minimum container security config by observing a running container via eBPF (wraps Inspektor Gadget). Go 1.26+, MIT, one-shot CLI. Binary: `csd`. **v0.4.1 released** — v0.1 shipped the capability observer (signed binaries + private GHCR image); v0.2 added the read-only-filesystem + tmpfs observer (`--observe fs`). v0.3 added privileged-mode decomposition (`--observe devices` + `--observe privileged`); v0.3.1 flags that decomposition as partial (the AppArmor/seccomp `security_opt` dimension stays unobserved). **v0.4.0 adds the dangerous-`cap_add` validator (`--observe capadd`, ROADMAP §v0.5, CL-0011)** — pulled ahead of the ROADMAP §v0.4 Docker-socket observer, which is **deferred/signal-blocked** (no built-in IG gadget for AF_UNIX/HTTP at the pin; issue #110). Release numbering stays sequential (v0.4.0); ROADMAP phase labels are planning order, not release tags. **v0.4.1** is a maintenance release hardening the #120 deep-review findings (`0600` evidence sidecar, stricter `cap_add` validation, faithful `compose-patch` line I/O, tighter drop-rate + target-selection accounting; strictly more conservative, no schema change — `ToolVersion = 0.4.1`, `schema_version` stays 1.3).
 
 Authoritative design docs — read these before large changes:
 - `PLAN.md` — v1 architecture, decisions, success criteria, threat model
 - `ROADMAP.md` — post-v1 observers (read_only, privileged decomp, devices, egress, etc.)
 - `README.md` — user-facing overview and relationship to compose-lint
 
-## Current status (v0.3.1 released)
+## Current status (v0.4.1 released)
 
 **v0.1.0 shipped 2026-06-14** (release run 27483911054, all jobs green): the GitHub Release carries signed static binaries (`linux/amd64`, `linux/arm64`), signed SPDX + CycloneDX SBOMs, and a signed `SHA256SUMS`; the multi-arch container image is published to **private** `ghcr.io/tmatens/container-sec-derive` (`0.1.0`, `0.1`), manifest cosign-signed (key-based, no public Rekor), verified against `cosign.pub`, with SBOM + OpenVEX attestations. Release chain: #70 (Phase B publish) → #73 (pin cosign 2.x — 3.x dropped `--tlog-upload=false`) → #74 (image-SBOM upload flags) → tag `v0.1.0`.
 

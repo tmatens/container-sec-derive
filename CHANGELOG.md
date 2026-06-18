@@ -28,8 +28,16 @@ the relevant entry.
   hostname(s); `json` carries the structured fields. The egress confidence
   factor reflects whether DNS was observed. A TCP-only egress run (no
   `--dns-fixture`) is byte-identical to before save the schema version.
-  **Sidecar `schema_version` is now 1.5** (additive). The live two-gadget
-  concurrent path (trace_tcp + trace_dns) is a follow-on.
+  **Sidecar `schema_version` is now 1.5** (additive).
+- **`--observe egress` live two-gadget path (issue #159).** Live, the egress
+  observer now runs `trace_tcp` and `trace_dns` as two concurrent `ig`
+  subprocesses for one window (mirroring the privileged observer), so a live
+  `--observe egress` run derives hostnames and the DNS resolver automatically —
+  no fixture needed. The `trace_tcp` error stays fatal (it owns the allowlist);
+  a `trace_dns` error is non-fatal enrichment, surfaced on stderr with the run
+  continuing on the IP-only allowlist. The live `trace_dns` attach + parse is
+  gated by a new DNS leg in `scripts/smoke_egress.sh`: the workload issues DNS
+  queries to its gateway and `dns_resolvers` must contain `<gateway>:53`.
 
 ## [0.5.0] - 2026-06-18
 

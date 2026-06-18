@@ -159,8 +159,12 @@ Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/
 > into the sidecar (**schema 1.4 → 1.5**, additive) and the nftables /
 > NetworkPolicy formatters (UDP resolver rule first + hostname annotations). The
 > resolver-in-allowlist is the key correctness fix — a TCP-only default-DROP
-> allowlist silently breaks name resolution. The live two-gadget concurrent path
-> (trace_tcp + trace_dns) is the remaining step.
+> allowlist silently breaks name resolution. The **live two-gadget concurrent
+> path** (trace_tcp + trace_dns as concurrent `ig` streams) is in, so a live
+> `--observe egress` run derives hostnames + the resolver with no fixture; the
+> live trace_dns parse is gated by a DNS leg in `scripts/smoke_egress.sh`. A
+> `trace_dns` failure is non-fatal (the IP allowlist is unaffected). Remaining:
+> optional hostname-aware enforcement (e.g. Cilium FQDN policies) and DNS-over-TCP.
 
 For users running iptables/nftables egress filtering or Cilium-style network policies, observed outbound destinations form a minimum allowlist.
 

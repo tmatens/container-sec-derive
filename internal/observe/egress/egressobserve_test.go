@@ -186,6 +186,40 @@ func TestObserveEgress_FakeIG(t *testing.T) {
 	}
 }
 
+func TestObserveDNS_FakeIG(t *testing.T) {
+	// The live trace_dns path: a query + its response + a drop line. observeDNS
+	// must build the IP->hostname map, record the resolver, and surface drops.
+	nd := strings.Join([]string{
+		`{"qr":"Q","qr_raw":0,"name":"api.example.com.","id":1,"dst":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+		`{"qr":"R","qr_raw":1,"name":"api.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+	}, "\n")
+	fakeIG := obstest.FakeIGRun(t, nd, "level=info msg=starting\nlost 2 samples\n")
+
+	corr, err := observeDNS(context.Background(), fakeIG, attrib.Opts{}, io.Discard)
+	if err != nil {
+		t.Fatalf("observeDNS: %v", err)
+	}
+	if got := corr.HostnamesFor("1.1.1.1"); len(got) != 1 || got[0] != "api.example.com" {
+		t.Errorf("1.1.1.1 -> %v, want [api.example.com]", got)
+	}
+	if len(corr.Resolvers) != 1 || corr.Resolvers[0].Addr != "10.0.0.2" || corr.Resolvers[0].Port != 53 {
+		t.Errorf("Resolvers = %+v, want one 10.0.0.2:53", corr.Resolvers)
+	}
+	if corr.Dropped != 2 {
+		t.Errorf("Dropped = %d, want 2", corr.Dropped)
+	}
+}
+
+func TestObserveDNS_IGMissing(t *testing.T) {
+	_, err := observeDNS(context.Background(), "/nonexistent/csd-ig-dns-test", attrib.Opts{}, io.Discard)
+	if err == nil {
+		t.Fatal("expected missing-binary error")
+	}
+	if exit.CodeFor(err) != exit.IGMissing {
+		t.Errorf("exit = %d, want exit.IGMissing (%d); err=%v", exit.CodeFor(err), exit.IGMissing, err)
+	}
+}
+
 func TestObserveEgress_IGMissing(t *testing.T) {
 	_, err := observeEgress(context.Background(), "/nonexistent/csd-ig-egress-test", attrib.Opts{}, io.Discard)
 	if err == nil {

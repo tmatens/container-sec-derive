@@ -14,8 +14,18 @@
 # cycle. The gateway IP is read back from `docker inspect`, giving the exact
 # (addr, port) the egress observation must contain.
 #
-# Gate (hard — an empty allowlist is a real csd bug here, not a workload
-# artifact): egress_destinations ∋ <gateway>:<port>.
+# The same loop also issues DNS queries directed AT the gateway
+# (`nslookup <name> <gateway>`), so a query packet to <gateway>:53 fires every
+# cycle regardless of whether the gateway answers. The egress observer now runs
+# trace_tcp + trace_dns concurrently (issue #159), so this one run validates the
+# live trace_dns parse too: the resolver endpoint must show up in dns_resolvers.
+# (If the pinned ig's trace_dns JSON field names ever drift from dnsevent.go,
+# this gate fails.)
+#
+# Gates (both hard — an empty result is a real csd bug here, not a workload
+# artifact):
+#   - egress_destinations ∋ <gateway>:<port>
+#   - egress_recommendation.dns_resolvers ∋ <gateway>:53
 #
 # Requires: docker, csd (built; pass CSD=/path to override), jq, the vendored ig
 # binary on PATH (the IG version pin is enforced inside csd).
@@ -73,10 +83,13 @@ if [[ -z "${GW}" ]]; then
     exit 1
 fi
 
-# Tight outbound-connect loop to <gateway>:<port>. The port need not listen — the
-# connect() (and trace_tcp's tcp_connect hook) fire regardless.
+# Tight outbound-connect loop to <gateway>:<port>, plus a DNS query directed at
+# the gateway (<gateway>:53). The TCP port need not listen and the gateway need
+# not answer DNS — the connect() (trace_tcp's tcp_connect hook) and the DNS query
+# packet (trace_dns) fire regardless. Both target the gateway so the expected
+# (addr, port) is known exactly.
 docker exec -d "${CONTAINER}" sh -c \
-    "while true; do nc -w1 ${GW} ${PORT} </dev/null >/dev/null 2>&1 || true; sleep 0.2; done"
+    "while true; do nc -w1 ${GW} ${PORT} </dev/null >/dev/null 2>&1 || true; nslookup csd-egress-smoke-probe ${GW} >/dev/null 2>&1 || true; sleep 0.2; done"
 
 sidecar="${WORKDIR}/egress.json"
 log="${WORKDIR}/csd.log"
@@ -98,13 +111,31 @@ if [[ ! -s "${sidecar}" ]]; then
     exit 1
 fi
 
+fail=0
+
 if jq -e --arg gw "${GW}" --argjson port "${PORT}" \
     '(.egress_destinations // []) | any(.addr == $gw and .port == $port)' "${sidecar}" >/dev/null; then
     recorded="$(jq -r '.trace_health.events_recorded // 0' "${sidecar}")"
-    echo "PASS egress: egress_destinations ∋ ${GW}:${PORT} (events_recorded=${recorded})"
-    echo "smoke-egress: 1 passed, 0 failed"
+    echo "PASS egress(tcp): egress_destinations ∋ ${GW}:${PORT} (events_recorded=${recorded})"
 else
-    echo "FAIL egress: ${GW}:${PORT} not in egress_destinations; got $(jq -c '[(.egress_destinations//[])[] | "\(.addr):\(.port)"]' "${sidecar}")"
-    echo "smoke-egress: 0 passed, 1 failed"
+    echo "FAIL egress(tcp): ${GW}:${PORT} not in egress_destinations; got $(jq -c '[(.egress_destinations//[])[] | "\(.addr):\(.port)"]' "${sidecar}")"
+    fail=1
+fi
+
+# DNS leg (issue #159): the resolver the container queried (the gateway on :53)
+# must appear in the recommendation's dns_resolvers — proving the live trace_dns
+# attach + parse, not just fixture replay.
+if jq -e --arg gw "${GW}" \
+    '((.egress_recommendation.dns_resolvers) // []) | any(.addr == $gw and .port == 53)' "${sidecar}" >/dev/null; then
+    echo "PASS egress(dns): dns_resolvers ∋ ${GW}:53"
+else
+    echo "FAIL egress(dns): ${GW}:53 not in dns_resolvers; got $(jq -c '[((.egress_recommendation.dns_resolvers)//[])[] | "\(.addr):\(.port)"]' "${sidecar}")"
+    fail=1
+fi
+
+if [[ ${fail} -eq 0 ]]; then
+    echo "smoke-egress: 2 passed, 0 failed"
+else
+    echo "smoke-egress: $((2 - fail)) passed, ${fail} failed"
     exit 1
 fi

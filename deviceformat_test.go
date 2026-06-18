@@ -3,11 +3,13 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteDeviceCompose(t *testing.T) {
 	var b strings.Builder
-	rec := deviceRecommendation{
+	rec := sidecar.DeviceRecommendation{
 		Devices:     []string{"/dev/dri/card0", "/dev/net/tun"},
 		DerivedCaps: []string{"CAP_NET_ADMIN"},
 	}
@@ -29,7 +31,7 @@ func TestWriteDeviceCompose(t *testing.T) {
 
 func TestWriteDeviceComposeEmpty(t *testing.T) {
 	var b strings.Builder
-	if err := writeDeviceCompose(&b, deviceRecommendation{}); err != nil {
+	if err := writeDeviceCompose(&b, sidecar.DeviceRecommendation{}); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()

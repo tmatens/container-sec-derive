@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeFSCompose emits the docker-compose stanza for the v0.2 read-only-fs
@@ -16,7 +18,7 @@ import (
 // disposable cache write from data that needs persistence, so a human decides
 // whether any tmpfs path should instead be a volume (issue #77 foot-gun). The
 // comment is YAML-safe, so the output stays paste-ready.
-func writeFSCompose(w io.Writer, rec fsRecommendation) error {
+func writeFSCompose(w io.Writer, rec sidecar.FSRecommendation) error {
 	if _, err := fmt.Fprintln(w, "read_only: true"); err != nil {
 		return err
 	}

@@ -3,25 +3,9 @@ package main
 import (
 	"path"
 	"strings"
-)
 
-// fsRecommendation is the v0.2 read-only-filesystem decision derived from the
-// observed write paths and the container's mount configuration:
-//   - ReadOnly is the headline recommendation (compose `read_only: true`).
-//   - TmpfsPaths are directory prefixes that must be writable but are not backed
-//     by a volume — incidental runtime state, mounted `tmpfs:`.
-//   - VolumeCovered are observed writes already satisfied by an existing
-//     bind-mount / named volume (informational; left as-is).
-//
-// Foot-gun (issue #77): csd does NOT try to decide whether a rootfs write is
-// disposable cache or data that needs persistence. TmpfsPaths are emitted as
-// tmpfs *candidates*; a human reviews whether any belongs in a real volume.
-// csd never silently turns data writes into tmpfs.
-type fsRecommendation struct {
-	ReadOnly      bool     `json:"read_only"`
-	TmpfsPaths    []string `json:"tmpfs_paths"`
-	VolumeCovered []string `json:"volume_covered"`
-}
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // pseudoFSPrefixes are kernel virtual-filesystem mount points. Writes under
 // them are not container-rootfs writes: /proc and /sys are procfs/sysfs (a
@@ -56,8 +40,13 @@ func isRootfsWrite(p string) bool {
 // by directory prefix and collapsed to ancestors). `read_only: true` is always
 // the recommendation — tmpfs covers the incidental rootfs writes. writePaths is
 // expected sorted (as aggregateWrites returns it).
-func correlateWrites(writePaths, mounts []string) fsRecommendation {
-	rec := fsRecommendation{ReadOnly: true}
+//
+// Foot-gun (issue #77): csd does NOT try to decide whether a rootfs write is
+// disposable cache or data that needs persistence. TmpfsPaths are emitted as
+// tmpfs *candidates*; a human reviews whether any belongs in a real volume.
+// csd never silently turns data writes into tmpfs.
+func correlateWrites(writePaths, mounts []string) sidecar.FSRecommendation {
+	rec := sidecar.FSRecommendation{ReadOnly: true}
 	tmpfs := map[string]struct{}{}
 	for _, p := range writePaths {
 		if underAnyMount(p, mounts) {

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeDeviceCompose emits the docker-compose `devices:` stanza for the v0.3
@@ -19,7 +21,7 @@ import (
 // `cap_add:` the workload may not need. The comment points the user at
 // `--observe caps` / `--observe privileged`, which confirm the cap from
 // observed trace_capabilities events rather than the static hint table.
-func writeDeviceCompose(w io.Writer, rec deviceRecommendation) error {
+func writeDeviceCompose(w io.Writer, rec sidecar.DeviceRecommendation) error {
 	if len(rec.Devices) == 0 {
 		_, err := fmt.Fprintln(w, "# no non-default device opens observed; no devices: grant required")
 		return err

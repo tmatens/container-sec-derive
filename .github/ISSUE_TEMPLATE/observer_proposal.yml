@@ -31,7 +31,7 @@ body:
     attributes:
       label: Signal and gadget
       description: |
-        Which kernel behavior is the signal, and which Inspektor Gadget gadget exposes it at the pinned IG version (`PinnedIGVersion` in main.go)? If no stock gadget exists at the pin, say so — that usually means the observer is blocked or scoped down (cf. the v0.3 security_opt deferral).
+        Which kernel behavior is the signal, and which Inspektor Gadget gadget exposes it at the pinned IG version (`PinnedIGVersion` in internal/ig/ig.go)? If no stock gadget exists at the pin, say so — that usually means the observer is blocked or scoped down (cf. the v0.3 security_opt deferral).
       placeholder: |
         Signal: connect() to outbound TCP/UDP destinations.
         Gadget: trace_tcp / trace_network — available at v0.51.0? ...

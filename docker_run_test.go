@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteDockerRun_StandardCapSet(t *testing.T) {
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "CHOWN"},
 		{Name: "DAC_OVERRIDE"},
 		{Name: "SETUID"},
@@ -27,7 +29,7 @@ func TestWriteDockerRun_EmptyCapSetOmitsCapAdd(t *testing.T) {
 	// Mirror writeCompose: the "drop everything, add nothing" shape is
 	// --cap-drop=ALL alone. Emitting a bare `--cap-add=` or an empty token
 	// would be a docker-run syntax error, so the formatter must elide.
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	var buf bytes.Buffer
 	if err := writeDockerRun(&buf, s); err != nil {
 		t.Fatalf("writeDockerRun: %v", err)
@@ -40,8 +42,8 @@ func TestWriteDockerRun_EmptyCapSetOmitsCapAdd(t *testing.T) {
 func TestWriteDockerRun_PreservesAggregatorOrder(t *testing.T) {
 	// The aggregator sorts caps ascending; the formatter must not reorder
 	// them. Downstream diffing across digest bumps relies on stable order.
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "A"}, {Name: "B"}, {Name: "C"},
 	}
 	var buf bytes.Buffer

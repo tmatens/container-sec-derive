@@ -3,12 +3,14 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteDeviceComposePatchInsert(t *testing.T) {
 	const in = "services:\n  gpu:\n    image: gpu:1\n"
 	var b strings.Builder
-	rec := deviceRecommendation{Devices: []string{"/dev/dri/card0", "/dev/net/tun"}}
+	rec := sidecar.DeviceRecommendation{Devices: []string{"/dev/dri/card0", "/dev/net/tun"}}
 	if err := writeDeviceComposePatch(&b, rec, []byte(in), "compose.yml", "gpu"); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +25,7 @@ func TestWriteDeviceComposePatchInsert(t *testing.T) {
 func TestWriteDeviceComposePatchReplace(t *testing.T) {
 	const in = "services:\n  gpu:\n    image: gpu:1\n    devices:\n      - /dev/old:/dev/old\n"
 	var b strings.Builder
-	rec := deviceRecommendation{Devices: []string{"/dev/kvm"}}
+	rec := sidecar.DeviceRecommendation{Devices: []string{"/dev/kvm"}}
 	if err := writeDeviceComposePatch(&b, rec, []byte(in), "compose.yml", "gpu"); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +40,7 @@ func TestWriteDeviceComposePatchEmptyNoChange(t *testing.T) {
 	// user's existing devices: block (issue #92 foot-gun).
 	const in = "services:\n  gpu:\n    image: gpu:1\n    devices:\n      - /dev/keep:/dev/keep\n"
 	var b strings.Builder
-	if err := writeDeviceComposePatch(&b, deviceRecommendation{}, []byte(in), "compose.yml", "gpu"); err != nil {
+	if err := writeDeviceComposePatch(&b, sidecar.DeviceRecommendation{}, []byte(in), "compose.yml", "gpu"); err != nil {
 		t.Fatal(err)
 	}
 	if b.String() != "" {
@@ -47,7 +49,7 @@ func TestWriteDeviceComposePatchEmptyNoChange(t *testing.T) {
 }
 
 func TestWriteDeviceComposePatchMissingService(t *testing.T) {
-	rec := deviceRecommendation{Devices: []string{"/dev/kvm"}}
+	rec := sidecar.DeviceRecommendation{Devices: []string{"/dev/kvm"}}
 	if err := writeDeviceComposePatch(nil, rec, []byte("services:\n  other:\n    image: x\n"), "compose.yml", "gpu"); err == nil {
 		t.Fatal("expected error for service not found")
 	}

@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // capaddGranted is the validate-set the fixture-driven tests use: a granted set
@@ -16,7 +19,7 @@ import (
 // (SYS_MODULE, never observed).
 const capaddGranted = "SYS_ADMIN,NET_RAW,SYS_MODULE,SYS_PTRACE"
 
-func capaddSidecarFromFixture(t *testing.T, granted string, hasGranted bool) *Sidecar {
+func capaddSidecarFromFixture(t *testing.T, granted string, hasGranted bool) *sidecar.Sidecar {
 	t.Helper()
 	f, err := os.Open("testdata/capadd/sample.ndjson")
 	if err != nil {
@@ -29,12 +32,12 @@ func capaddSidecarFromFixture(t *testing.T, granted string, hasGranted bool) *Si
 	if active == nil {
 		active = dangerousCaps
 	}
-	obs, err := aggregateCapadd(f, aggregateOpts{Container: "aabbccddeeff0011"}, active)
+	obs, err := aggregateCapadd(f, attrib.Opts{Container: "aabbccddeeff0011"}, active)
 	if err != nil {
 		t.Fatalf("aggregateCapadd: %v", err)
 	}
 	s := capaddToSidecar(obs, capaddPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "aabbccddeeff0011"},
+		AggregateOpts: attrib.Opts{Container: "aabbccddeeff0011"},
 		ActiveSet:     active,
 		Granted:       hasGranted,
 	})
@@ -85,7 +88,7 @@ func TestAggregateCapadd_Filtering(t *testing.T) {
 	defer f.Close()
 
 	granted := parseCapSet(capaddGranted)
-	obs, err := aggregateCapadd(f, aggregateOpts{Container: "aabbccddeeff0011"}, granted)
+	obs, err := aggregateCapadd(f, attrib.Opts{Container: "aabbccddeeff0011"}, granted)
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -274,13 +277,13 @@ func TestCapaddValidation_DeniedAttempts(t *testing.T) {
 {"syscall":"open_by_handle_at","cap":"CAP_DAC_OVERRIDE","capable":false,"proc":{"comm":"app","pid":11},"runtime":{"containerId":"c1","containerImageName":"i:1"}}
 `
 	active := parseCapSet("SYS_ADMIN,SYS_MODULE,DAC_OVERRIDE")
-	obs, err := aggregateCapadd(strings.NewReader(fixture), aggregateOpts{Container: "c1"}, active)
+	obs, err := aggregateCapadd(strings.NewReader(fixture), attrib.Opts{Container: "c1"}, active)
 	if err != nil {
 		t.Fatalf("aggregateCapadd: %v", err)
 	}
 	v := capaddToValidation(obs, active, true)
 
-	byCap := map[string]CapaddFinding{}
+	byCap := map[string]sidecar.CapaddFinding{}
 	for _, f := range v.Findings {
 		byCap[f.Cap] = f
 	}

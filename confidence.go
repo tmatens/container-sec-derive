@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // computeConfidence populates s.Confidence by mechanically applying
 // PLAN.md §Confidence scoring to the inputs available on the sidecar.
@@ -36,7 +40,7 @@ import "fmt"
 //
 // Reporting deferred factors honestly (rather than silently grading
 // High) keeps the rubric trustworthy while the rest of the inputs land.
-func computeConfidence(s *Sidecar) {
+func computeConfidence(s *sidecar.Sidecar) {
 	var factors []string
 	moderateHits := 0
 	forceLow := false
@@ -117,17 +121,17 @@ func computeConfidence(s *Sidecar) {
 	// populated ExpectedCapsFromEntrypoint + CoverageWarnings fields
 	// remain the authoritative record regardless of grade pressure.
 	switch {
-	case s.crossCheckStatus == "":
+	case s.CrossCheckStatus == "":
 		// Skipped (fixture mode without --inspect-fixture, or no image
 		// reference available in a path that didn't attempt inspect).
 		// Emit no factor -- absence of evidence isn't evidence of
 		// absence, and the sidecar's empty ExpectedCapsFromEntrypoint
 		// + empty CoverageWarnings already tell the reviewer.
-	case s.crossCheckStatus != crossCheckStatusOK:
+	case s.CrossCheckStatus != sidecar.CrossCheckStatusOK:
 		// Attempted but failed (docker daemon down, image not present,
 		// etc.). Informational factor with the truncated reason so the
 		// reviewer can see why the check couldn't run.
-		addInfo("entrypoint cross-check unavailable: " + s.crossCheckStatus)
+		addInfo("entrypoint cross-check unavailable: " + s.CrossCheckStatus)
 	case len(s.CoverageWarnings) > 0:
 		addLow(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
 	case len(s.ExpectedCapsFromEntrypoint) == 0:
@@ -146,9 +150,9 @@ func computeConfidence(s *Sidecar) {
 	s.Confidence.Factors = factors
 	switch {
 	case forceLow, moderateHits >= 2:
-		s.Confidence.Level = ConfidenceLow
+		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
 		// Capped at moderate while deferred preconditions stand.
-		s.Confidence.Level = ConfidenceModerate
+		s.Confidence.Level = sidecar.ConfidenceModerate
 	}
 }

@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // computeCapaddConfidence is the v0.5 validator's confidence rubric. The risk it
 // prices is the inverse of the other observers' incompleteness risk: the cap
@@ -16,7 +20,7 @@ import "fmt"
 // There is NO event-count floor: a dangerous cap fires sparsely (a profiler hits
 // perf_event_open at startup; a debugger ptraces a handful of times), so volume
 // is not a useful proxy for coverage here — the same call the device rubric makes.
-func computeCapaddConfidence(s *Sidecar) {
+func computeCapaddConfidence(s *sidecar.Sidecar) {
 	var factors []string
 	moderateHits := 0
 	forceLow := false
@@ -107,8 +111,8 @@ func computeCapaddConfidence(s *Sidecar) {
 	s.Confidence.Factors = factors
 	switch {
 	case forceLow, moderateHits >= 2:
-		s.Confidence.Level = ConfidenceLow
+		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
-		s.Confidence.Level = ConfidenceModerate
+		s.Confidence.Level = sidecar.ConfidenceModerate
 	}
 }

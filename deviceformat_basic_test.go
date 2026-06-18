@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteDeviceDockerRun(t *testing.T) {
 	var b strings.Builder
-	rec := deviceRecommendation{Devices: []string{"/dev/dri/card0", "/dev/net/tun"}, DerivedCaps: []string{"CAP_NET_ADMIN"}}
+	rec := sidecar.DeviceRecommendation{Devices: []string{"/dev/dri/card0", "/dev/net/tun"}, DerivedCaps: []string{"CAP_NET_ADMIN"}}
 	if err := writeDeviceDockerRun(&b, rec); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +23,7 @@ func TestWriteDeviceDockerRun(t *testing.T) {
 	}
 
 	var e strings.Builder
-	if err := writeDeviceDockerRun(&e, deviceRecommendation{}); err != nil {
+	if err := writeDeviceDockerRun(&e, sidecar.DeviceRecommendation{}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(e.String(), "# no non-default device") {
@@ -31,7 +33,7 @@ func TestWriteDeviceDockerRun(t *testing.T) {
 
 func TestWriteDeviceK8s(t *testing.T) {
 	var b strings.Builder
-	if err := writeDeviceK8s(&b, deviceRecommendation{Devices: []string{"/dev/dri/card0"}}); err != nil {
+	if err := writeDeviceK8s(&b, sidecar.DeviceRecommendation{Devices: []string{"/dev/dri/card0"}}); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
@@ -44,7 +46,7 @@ func TestWriteDeviceK8s(t *testing.T) {
 
 func TestWriteDeviceOCIValidJSONAnnotations(t *testing.T) {
 	var b strings.Builder
-	rec := deviceRecommendation{Devices: []string{"/dev/dri/card0", "/dev/net/tun"}, DerivedCaps: []string{"CAP_NET_ADMIN"}}
+	rec := sidecar.DeviceRecommendation{Devices: []string{"/dev/dri/card0", "/dev/net/tun"}, DerivedCaps: []string{"CAP_NET_ADMIN"}}
 	if err := writeDeviceOCI(&b, rec); err != nil {
 		t.Fatal(err)
 	}

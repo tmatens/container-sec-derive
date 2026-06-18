@@ -10,13 +10,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 const egressFixture = "testdata/ig-versions/v0.51.0/trace_tcp_sample.ndjson"
 
 func TestProduceEgressObservation_Fixture(t *testing.T) {
 	s, err := produceEgressObservation(egressPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "egress-target"},
+		AggregateOpts: attrib.Opts{Container: "egress-target"},
 		Fixture:       egressFixture,
 		Workload:      "/tmp/load.sh",
 	}, io.Discard)
@@ -40,7 +44,7 @@ func TestProduceEgressObservation_Fixture(t *testing.T) {
 		t.Error("non-egress observer blocks should be empty on an egress run")
 	}
 	// Workload present + clean trace → not forced low.
-	if s.Confidence.Level == ConfidenceLow {
+	if s.Confidence.Level == sidecar.ConfidenceLow {
 		t.Errorf("confidence = %s with a workload + zero drops, want moderate; factors=%v", s.Confidence.Level, s.Confidence.Factors)
 	}
 }
@@ -51,11 +55,11 @@ func TestEgressSidecar_Golden(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	eg, err := aggregateEgress(f, aggregateOpts{Container: "egress-target"})
+	eg, err := aggregateEgress(f, attrib.Opts{Container: "egress-target"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := egressToSidecar(eg, aggregateOpts{Container: "egress-target"})
+	s := egressToSidecar(eg, attrib.Opts{Container: "egress-target"})
 	s.ObservedAt = time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
 	s.DurationSeconds = 600
 	s.Workload = "/tmp/load.sh"
@@ -95,7 +99,7 @@ func TestObserveEgress_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := fakeIGRun(t, nd, "level=info msg=starting\nlost 4 samples\n")
 
-	obs, err := observeEgress(context.Background(), ig, aggregateOpts{}, io.Discard)
+	obs, err := observeEgress(context.Background(), ig, attrib.Opts{}, io.Discard)
 	if err != nil {
 		t.Fatalf("observeEgress: %v", err)
 	}
@@ -108,32 +112,32 @@ func TestObserveEgress_FakeIG(t *testing.T) {
 }
 
 func TestObserveEgress_IGMissing(t *testing.T) {
-	_, err := observeEgress(context.Background(), "/nonexistent/csd-ig-egress-test", aggregateOpts{}, io.Discard)
+	_, err := observeEgress(context.Background(), "/nonexistent/csd-ig-egress-test", attrib.Opts{}, io.Discard)
 	if err == nil {
 		t.Fatal("expected missing-binary error")
 	}
-	if exitCodeFor(err) != ExitIGMissing {
-		t.Errorf("exit = %d, want ExitIGMissing (%d); err=%v", exitCodeFor(err), ExitIGMissing, err)
+	if exit.CodeFor(err) != exit.IGMissing {
+		t.Errorf("exit = %d, want exit.IGMissing (%d); err=%v", exit.CodeFor(err), exit.IGMissing, err)
 	}
 }
 
 func TestComputeEgressConfidence(t *testing.T) {
 	// No workload → forced low (inverted risk: an allowlist from idle traffic
 	// will almost certainly be incomplete and will block real destinations).
-	s := NewSidecar()
-	s.EgressDestinations = []EgressDestination{{Addr: "1.1.1.1", Port: 443, EventCount: 2}}
+	s := sidecar.NewSidecar()
+	s.EgressDestinations = []sidecar.EgressDestination{{Addr: "1.1.1.1", Port: 443, EventCount: 2}}
 	computeEgressConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("no-workload confidence = %s, want low; factors=%v", s.Confidence.Level, s.Confidence.Factors)
 	}
 
 	// Workload present, clean trace, single replica → moderate (capped while the
 	// deferred preconditions stand).
-	s2 := NewSidecar()
+	s2 := sidecar.NewSidecar()
 	s2.Workload = "/tmp/load.sh"
-	s2.EgressDestinations = []EgressDestination{{Addr: "1.1.1.1", Port: 443, EventCount: 2}}
+	s2.EgressDestinations = []sidecar.EgressDestination{{Addr: "1.1.1.1", Port: 443, EventCount: 2}}
 	computeEgressConfidence(s2)
-	if s2.Confidence.Level != ConfidenceModerate {
+	if s2.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("workload confidence = %s, want moderate; factors=%v", s2.Confidence.Level, s2.Confidence.Factors)
 	}
 }
@@ -150,7 +154,7 @@ func TestRunEgress_FormatGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("egress --format json: %v", err)
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if jerr := json.Unmarshal(out.Bytes(), &s); jerr != nil {
 		t.Fatalf("stdout is not valid sidecar JSON: %v", jerr)
 	}
@@ -163,7 +167,7 @@ func TestRunEgress_FormatGuard(t *testing.T) {
 		"--observe", "egress", "--container", "egress-target",
 		"--fixture", egressFixture, "--format", "compose",
 	}, &o2, &e2)
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("egress --format compose: exit = %d, want ExitUsage (%d)", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("egress --format compose: exit = %d, want exit.Usage (%d)", exit.CodeFor(err), exit.Usage)
 	}
 }

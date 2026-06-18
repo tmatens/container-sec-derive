@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func runEgressFormat(t *testing.T, format string) string {
@@ -59,16 +62,16 @@ func TestEgressFormat_GuardNonEgress(t *testing.T) {
 			"--observe", "caps", "--container", "x",
 			"--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--format", f,
 		}, &out, &errBuf)
-		if exitCodeFor(err) != ExitUsage {
-			t.Errorf("caps --format %s: exit = %d, want ExitUsage (%d)", f, exitCodeFor(err), ExitUsage)
+		if exit.CodeFor(err) != exit.Usage {
+			t.Errorf("caps --format %s: exit = %d, want exit.Usage (%d)", f, exit.CodeFor(err), exit.Usage)
 		}
 	}
 }
 
 func TestWriteEgress_EmptyAndIPv6(t *testing.T) {
 	// Empty allowlist → deny-all, with the warning comment in both formats.
-	empty := NewSidecar()
-	empty.EgressRecommendation = &egressRecommendation{Allowlist: nil, Caveat: EgressCaveat}
+	empty := sidecar.NewSidecar()
+	empty.EgressRecommendation = &sidecar.EgressRecommendation{Allowlist: nil, Caveat: EgressCaveat}
 	var nft bytes.Buffer
 	if err := writeEgressNftables(&nft, empty); err != nil {
 		t.Fatal(err)
@@ -78,10 +81,10 @@ func TestWriteEgress_EmptyAndIPv6(t *testing.T) {
 	}
 
 	// IPv6 destination → ip6 daddr / /128.
-	v6 := NewSidecar()
+	v6 := sidecar.NewSidecar()
 	v6.Image = "svc:2"
-	v6.EgressRecommendation = &egressRecommendation{
-		Allowlist: []egressDest{{Addr: "2606:4700:4700::1111", Port: 853, Version: 6}},
+	v6.EgressRecommendation = &sidecar.EgressRecommendation{
+		Allowlist: []sidecar.EgressDest{{Addr: "2606:4700:4700::1111", Port: 853, Version: 6}},
 		Caveat:    EgressCaveat,
 	}
 	var n6, k6 bytes.Buffer
@@ -109,7 +112,7 @@ func TestEgressPolicyName(t *testing.T) {
 		{"postgres:16", "", "postgres-egress"},
 	}
 	for _, c := range cases {
-		s := NewSidecar()
+		s := sidecar.NewSidecar()
 		s.Image = c.image
 		s.Target.Selector = c.selector
 		if got := egressPolicyName(s); got != c.want {

@@ -7,25 +7,28 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // cleanSidecar returns a Sidecar that clears every compose-lint-profile
 // acceptance-contract term. Tests that exercise a failing term mutate one
 // field on the returned value; everything else stays valid so the
 // assertion isolates the condition under test.
-func cleanSidecar(t *testing.T, workloadPath string) *Sidecar {
+func cleanSidecar(t *testing.T, workloadPath string) *sidecar.Sidecar {
 	t.Helper()
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
 	s.ImageDigest = "sha256:deadbeef"
 	s.Workload = workloadPath
 	s.DurationSeconds = 600
 	s.ObservedAt = time.Date(2026, 4, 22, 12, 0, 0, 0, time.UTC)
-	s.Capabilities = []Capability{
+	s.Capabilities = []sidecar.Capability{
 		{Name: "CHOWN"}, {Name: "DAC_OVERRIDE"}, {Name: "FOWNER"},
 		{Name: "SETGID"}, {Name: "SETUID"},
 	}
-	s.Confidence = Confidence{Level: ConfidenceModerate}
+	s.Confidence = sidecar.Confidence{Level: sidecar.ConfidenceModerate}
 	return s
 }
 
@@ -87,20 +90,20 @@ func TestWriteComposeLintProfile_RefusesOnUnmetContract(t *testing.T) {
 	// attributable; every other field stays at its clean-sidecar value.
 	cases := []struct {
 		name     string
-		mutate   func(*Sidecar)
+		mutate   func(*sidecar.Sidecar)
 		wantHint string
 	}{
-		{"low confidence", func(s *Sidecar) { s.Confidence.Level = ConfidenceLow }, "confidence.level"},
-		{"missing digest", func(s *Sidecar) { s.ImageDigest = "" }, "image_digest missing"},
-		{"short duration", func(s *Sidecar) { s.DurationSeconds = 60 }, "duration_seconds 60 < 300"},
-		{"coverage warning present", func(s *Sidecar) {
+		{"low confidence", func(s *sidecar.Sidecar) { s.Confidence.Level = sidecar.ConfidenceLow }, "confidence.level"},
+		{"missing digest", func(s *sidecar.Sidecar) { s.ImageDigest = "" }, "image_digest missing"},
+		{"short duration", func(s *sidecar.Sidecar) { s.DurationSeconds = 60 }, "duration_seconds 60 < 300"},
+		{"coverage warning present", func(s *sidecar.Sidecar) {
 			s.CoverageWarnings = []string{"coverage_warning: entrypoint references `chown` but CHOWN was not observed"}
 		}, "coverage_warnings non-empty"},
-		{"drop rate at 1%", func(s *Sidecar) { s.TraceHealth.DropRate = 0.01 }, "trace_health.drop_rate"},
-		{"replica disagreement", func(s *Sidecar) { s.Target.ReplicaCapDisagreement = []string{"FOWNER"} }, "replica_cap_disagreement"},
-		{"missing workload path", func(s *Sidecar) { s.Workload = "" }, "workload path not set"},
-		{"unreadable workload", func(s *Sidecar) { s.Workload = "/does/not/exist.sh" }, "workload file"},
-		{"schema outside major", func(s *Sidecar) { s.SchemaVersion = "2.0" }, "schema_version"},
+		{"drop rate at 1%", func(s *sidecar.Sidecar) { s.TraceHealth.DropRate = 0.01 }, "trace_health.drop_rate"},
+		{"replica disagreement", func(s *sidecar.Sidecar) { s.Target.ReplicaCapDisagreement = []string{"FOWNER"} }, "replica_cap_disagreement"},
+		{"missing workload path", func(s *sidecar.Sidecar) { s.Workload = "" }, "workload path not set"},
+		{"unreadable workload", func(s *sidecar.Sidecar) { s.Workload = "/does/not/exist.sh" }, "workload file"},
+		{"schema outside major", func(s *sidecar.Sidecar) { s.SchemaVersion = "2.0" }, "schema_version"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -124,7 +127,7 @@ func TestWriteComposeLintProfile_RefusesOnUnmetContract(t *testing.T) {
 
 func TestWriteComposeLintProfile_ExploratoryAnnotatesViolations(t *testing.T) {
 	s := cleanSidecar(t, writableWorkload(t))
-	s.Confidence.Level = ConfidenceLow
+	s.Confidence.Level = sidecar.ConfidenceLow
 	s.CoverageWarnings = []string{"coverage_warning: entrypoint references `chown` but CHOWN was not observed"}
 
 	var buf bytes.Buffer
@@ -166,7 +169,7 @@ func TestComposeLintKey_StripsRegistryAndTag(t *testing.T) {
 		{"", "unknown"},
 	}
 	for _, tc := range cases {
-		s := NewSidecar()
+		s := sidecar.NewSidecar()
 		s.Image = tc.image
 		if got := composeLintKey(s); got != tc.want {
 			t.Errorf("composeLintKey(%q) = %q, want %q", tc.image, got, tc.want)
@@ -188,8 +191,8 @@ func TestRun_FormatComposeLintProfile_RefuseSurfacesEXUsage(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected refuse, got stdout:\n%s", stdout.String())
 	}
-	if code := exitCodeFor(err); code != ExitUsage {
-		t.Errorf("exit code = %d, want %d (ExitUsage)", code, ExitUsage)
+	if code := exit.CodeFor(err); code != exit.Usage {
+		t.Errorf("exit code = %d, want %d (exit.Usage)", code, exit.Usage)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("refuse path must not write to stdout, got:\n%s", stdout.String())
@@ -240,7 +243,7 @@ func TestRun_AllowExploratoryRejectedForOtherFormats(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected usage error, got stdout:\n%s", stdout.String())
 	}
-	if code := exitCodeFor(err); code != ExitUsage {
-		t.Errorf("exit code = %d, want %d (ExitUsage)", code, ExitUsage)
+	if code := exit.CodeFor(err); code != exit.Usage {
+		t.Errorf("exit code = %d, want %d (exit.Usage)", code, exit.Usage)
 	}
 }

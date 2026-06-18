@@ -1,6 +1,18 @@
-package main
+// Package sidecar defines the canonical JSON evidence artifact and the
+// evidence/recommendation types every observer fills in and every formatter
+// reads back. It is the schema source of truth (PLAN.md §Output schema): the
+// observers (internal/observe/*) derive these types from kernel signals, and
+// the formatters (internal/format) render them. It is a foundation leaf —
+// stdlib-only, imported by the layers above, importing none of them — so the
+// recommendation structs live here rather than in the observer packages to
+// keep the import direction one-way.
+package sidecar
 
-import "time"
+import (
+	"net"
+	"strconv"
+	"time"
+)
 
 // Canonical evidence-artifact identity fields.
 //
@@ -50,6 +62,11 @@ const (
 	TargetModeAllMatching = "all-matching"
 )
 
+// CrossCheckStatusOK is the sentinel CrossCheckStatus value used when the
+// entrypoint cross-check ran successfully (cap sets are authoritative
+// regardless of whether signals fired).
+const CrossCheckStatusOK = "ok"
+
 // Sidecar is the canonical JSON evidence artifact. All formatters derive
 // from this struct; it is the single source of truth for an observation run.
 // See PLAN.md §Output schema for the full field-by-field contract.
@@ -75,7 +92,7 @@ type Sidecar struct {
 	// capability scaffolding (Capabilities/ExpectedCaps/...) stays empty
 	// and these carry the observation.
 	WritablePaths    []WritablePath    `json:"writable_paths,omitempty"`
-	FSRecommendation *fsRecommendation `json:"fs_recommendation,omitempty"`
+	FSRecommendation *FSRecommendation `json:"fs_recommendation,omitempty"`
 
 	// v0.3 device-decomposition observer section. Both fields are
 	// omitempty + nil on a capability or fs run, so those sidecars serialize
@@ -83,7 +100,7 @@ type Sidecar struct {
 	// `--observe devices` run the capability and fs scaffolding stay empty
 	// and these carry the observation.
 	DevicePaths          []DevicePath          `json:"device_paths,omitempty"`
-	DeviceRecommendation *deviceRecommendation `json:"device_recommendation,omitempty"`
+	DeviceRecommendation *DeviceRecommendation `json:"device_recommendation,omitempty"`
 
 	// v0.3 privileged-mode decomposition (the --observe privileged composition).
 	// omitempty + nil on every single-observer run; present only when both the
@@ -91,14 +108,14 @@ type Sidecar struct {
 	// minimum non-privileged equivalent. The Capabilities + DeviceRecommendation
 	// blocks above carry the full evidence; this block is the headline
 	// conclusion (drop privileged: true → cap_add + devices).
-	PrivilegedDecomposition *privilegedDecomposition `json:"privileged_decomposition,omitempty"`
+	PrivilegedDecomposition *PrivilegedDecomposition `json:"privileged_decomposition,omitempty"`
 
 	// v0.5 dangerous-cap_add validator section (the --observe capadd mode).
 	// omitempty + nil on every other observer's run, so caps/fs/device/privileged
 	// sidecars serialize byte-identically under the 1.3 schema bump (PLAN.md
 	// §Output schema). On an `--observe capadd` run the other observers'
 	// scaffolding stays empty and this block carries the per-cap validation.
-	CapaddValidation *capaddValidation `json:"capadd_validation,omitempty"`
+	CapaddValidation *CapaddValidation `json:"capadd_validation,omitempty"`
 
 	// v0.8 network-egress observer section (the --observe egress mode).
 	// omitempty + nil on every other observer's run, so prior sidecars
@@ -107,14 +124,14 @@ type Sidecar struct {
 	// stays empty and these carry the observed outbound destinations + the
 	// minimum allowlist recommendation.
 	EgressDestinations   []EgressDestination   `json:"egress_destinations,omitempty"`
-	EgressRecommendation *egressRecommendation `json:"egress_recommendation,omitempty"`
+	EgressRecommendation *EgressRecommendation `json:"egress_recommendation,omitempty"`
 
 	TraceHealth TraceHealth `json:"trace_health"`
 	Confidence  Confidence  `json:"confidence"`
 	Caveat      string      `json:"caveat"`
 
-	// crossCheckStatus is an internal (unserialized) handoff from the
-	// observe/run path to computeConfidence. Empty = skipped (e.g.
+	// CrossCheckStatus is an internal (unserialized) handoff from the
+	// observe/run path to the confidence rubric. Empty = skipped (e.g.
 	// fixture mode without --inspect-fixture, or no image reference
 	// available). "ok" = ran successfully (cap sets are authoritative
 	// regardless of whether signals fired). Any other non-empty value
@@ -124,7 +141,7 @@ type Sidecar struct {
 	// not define a sidecar field for cross-check status; the public
 	// contract is ExpectedCapsFromEntrypoint + CoverageWarnings, and
 	// everything else is internal telemetry.
-	crossCheckStatus string `json:"-"`
+	CrossCheckStatus string `json:"-"`
 }
 
 // Target captures which container(s) produced the observation and how
@@ -238,7 +255,73 @@ type EgressDestination struct {
 	CommSamples []string `json:"comm_samples,omitempty"`
 }
 
-// privilegedDecomposition is the v0.3 headline conclusion of the
+// FSRecommendation is the v0.2 read-only-filesystem conclusion: make the
+// rootfs read-only and route the observed rootfs writes to tmpfs, leaving
+// writes already covered by a bind/volume mount as-is. The fs observer's
+// decision layer (internal/observe/fs) derives it; the formatters render it.
+type FSRecommendation struct {
+	ReadOnly      bool     `json:"read_only"`
+	TmpfsPaths    []string `json:"tmpfs_paths"`
+	VolumeCovered []string `json:"volume_covered"`
+}
+
+// DeviceRecommendation is the v0.3 device conclusion: the minimum set of
+// non-default device nodes to grant, plus any capabilities those nodes imply.
+type DeviceRecommendation struct {
+	Devices     []string `json:"devices"`
+	DerivedCaps []string `json:"derived_caps,omitempty"`
+}
+
+// EgressDest is one (addr, port) destination in an egress allowlist — the
+// minimal triple, distinct from EgressDestination which also carries the
+// per-destination evidence. It is the serialized element of an
+// EgressRecommendation allowlist.
+type EgressDest struct {
+	Addr    string `json:"addr"`
+	Port    int    `json:"port"`
+	Version int    `json:"version,omitempty"` // 4 or 6
+}
+
+func (d EgressDest) String() string {
+	return net.JoinHostPort(d.Addr, strconv.Itoa(d.Port))
+}
+
+// EgressRecommendation is the v0.8 conclusion: the minimum outbound allowlist
+// the workload exercised, with a non-strippable caveat that a too-tight
+// allowlist blocks destinations the workload never contacted.
+type EgressRecommendation struct {
+	Allowlist []EgressDest `json:"allowlist"`
+	Caveat    string       `json:"caveat"`
+}
+
+// CapaddValidation is the v0.5 dangerous-cap_add conclusion: per-cap findings
+// (was the granted cap actually exercised, and by which syscalls) plus, when a
+// granted set was provided, the minimized cap_add recommendation.
+type CapaddValidation struct {
+	Findings           []CapaddFinding `json:"findings"`
+	GrantedSetProvided bool            `json:"granted_set_provided"`
+	RecommendedCapAdd  []string        `json:"recommended_cap_add"`
+}
+
+// CapaddFinding is one granted dangerous capability's validation result.
+type CapaddFinding struct {
+	Cap        string        `json:"cap"`
+	Used       bool          `json:"used"`
+	Removable  bool          `json:"removable"`
+	EventCount int           `json:"event_count"`
+	Syscalls   []SyscallStat `json:"syscalls"`
+	Advice     string        `json:"advice"`
+	FinerCaps  []string      `json:"finer_caps,omitempty"`
+}
+
+// SyscallStat is one syscall name and how many times it was observed
+// exercising the capability under validation.
+type SyscallStat struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// PrivilegedDecomposition is the v0.3 headline conclusion of the
 // --observe privileged composition: `privileged: true` is not required, and the
 // minimum non-privileged equivalent is the observed cap set plus the observed
 // device nodes. The decomposition is PARTIAL: security_opt (AppArmor/seccomp
@@ -247,7 +330,7 @@ type EgressDestination struct {
 // PrivilegedSecurityOptCaveat — naming the uncovered dimension to any JSON
 // consumer, not just the stdout reader. When a denial gadget lands and the MAC
 // dimension is observed, Partial flips false and SecurityOpt empties.
-type privilegedDecomposition struct {
+type PrivilegedDecomposition struct {
 	DropPrivileged bool     `json:"drop_privileged"`
 	CapAdd         []string `json:"cap_add"`
 	Devices        []string `json:"devices"`

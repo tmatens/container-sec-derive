@@ -67,7 +67,7 @@ fi
 # inflate the deficit). The ref tracks PinnedIGVersion, same source as the
 # image build. Best-effort: if it fails, the warmup is the fallback.
 if command -v ig >/dev/null 2>&1; then
-    ig_ver="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go 2>/dev/null || true)"
+    ig_ver="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go 2>/dev/null || true)"
     if [[ -n "${ig_ver}" ]]; then
         gadget="ghcr.io/inspektor-gadget/gadget/trace_capabilities:${ig_ver}"
         echo "missrate: pre-pulling ${gadget}"

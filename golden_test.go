@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // updateGolden regenerates testdata/sidecar_golden.json from the current
@@ -28,7 +31,7 @@ func TestSidecar_GoldenPostgres1(t *testing.T) {
 	}
 	defer f.Close()
 
-	s, err := aggregate(f, aggregateOpts{Container: "postgres-1", InitWindowMs: 500})
+	s, err := aggregate(f, attrib.Opts{Container: "postgres-1", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -74,7 +77,7 @@ func TestFSSidecar_Golden(t *testing.T) {
 		t.Fatalf("open fixture: %v", err)
 	}
 	defer f.Close()
-	writes, err := aggregateWrites(f, aggregateOpts{Container: "postgres-1"})
+	writes, err := aggregateWrites(f, attrib.Opts{Container: "postgres-1"})
 	if err != nil {
 		t.Fatalf("aggregateWrites: %v", err)
 	}
@@ -82,7 +85,7 @@ func TestFSSidecar_Golden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadMountsFixture: %v", err)
 	}
-	s := fsToSidecar(writes, mounts, aggregateOpts{Container: "postgres-1"})
+	s := fsToSidecar(writes, mounts, attrib.Opts{Container: "postgres-1"})
 	s.ObservedAt = time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
 	s.DurationSeconds = 600
 	computeFSConfidence(s)
@@ -134,7 +137,7 @@ func TestRun_InspectFixturePopulatesCrossCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read sidecar: %v", err)
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("parse sidecar: %v", err)
 	}
@@ -162,7 +165,7 @@ func TestRun_InspectFixturePopulatesCrossCheck(t *testing.T) {
 	if !strings.Contains(joined, "low: 1 entrypoint coverage warnings present") {
 		t.Errorf("factors should include coverage-warnings low:\n%s", joined)
 	}
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("warnings should force low; got %q", s.Confidence.Level)
 	}
 
@@ -191,7 +194,7 @@ func TestRun_InspectFixtureCleanCrossCheck(t *testing.T) {
 	}
 
 	data, _ := os.ReadFile(out)
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("parse sidecar: %v", err)
 	}
@@ -244,7 +247,7 @@ func TestRun_OutFlagWritesSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read sidecar: %v", err)
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("sidecar is not valid JSON: %v", err)
 	}

@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestParseMountDestinations(t *testing.T) {
@@ -76,7 +80,7 @@ func TestLoadMountsFixture(t *testing.T) {
 // log/run-dir writes as tmpfs candidates.
 func TestProduceFSObservationFixture(t *testing.T) {
 	s, err := produceFSObservation(fsPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "postgres-1"},
+		AggregateOpts: attrib.Opts{Container: "postgres-1"},
 		Fixture:       "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
 		MountsFixture: "testdata/postgres/mounts.json",
 	}, nil)
@@ -101,10 +105,10 @@ func TestProduceFSObservationFixture(t *testing.T) {
 	for _, wp := range s.WritablePaths {
 		dispByPath[wp.Path] = wp.Disposition
 	}
-	if dispByPath["/var/lib/postgresql/data/base/1/1259"] != DispositionVolumeCovered {
+	if dispByPath["/var/lib/postgresql/data/base/1/1259"] != sidecar.DispositionVolumeCovered {
 		t.Errorf("data write disposition = %q, want volume_covered", dispByPath["/var/lib/postgresql/data/base/1/1259"])
 	}
-	if dispByPath["/var/log/postgresql/postgresql.log"] != DispositionTmpfsCandidate {
+	if dispByPath["/var/log/postgresql/postgresql.log"] != sidecar.DispositionTmpfsCandidate {
 		t.Errorf("log write disposition = %q, want tmpfs_candidate", dispByPath["/var/log/postgresql/postgresql.log"])
 	}
 	if got := len(s.WritablePaths); got != 3 {
@@ -119,7 +123,7 @@ func TestProduceFSObservationFixture(t *testing.T) {
 		t.Errorf("Capabilities = %v, want empty on an fs run", s.Capabilities)
 	}
 	// Confidence is scored (3 events < 100 + no workload → low).
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("confidence = %q, want low (sparse + no workload)", s.Confidence.Level)
 	}
 }
@@ -129,7 +133,7 @@ func TestProduceFSObservationFixture(t *testing.T) {
 // candidate (the data write is no longer volume-covered).
 func TestProduceFSObservationNoMountsFixture(t *testing.T) {
 	s, err := produceFSObservation(fsPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "postgres-1"},
+		AggregateOpts: attrib.Opts{Container: "postgres-1"},
 		Fixture:       "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
 	}, nil)
 	if err != nil {
@@ -145,7 +149,7 @@ func TestProduceFSObservationNoMountsFixture(t *testing.T) {
 	}
 	// With no mounts, every observed write is a tmpfs candidate.
 	for _, wp := range s.WritablePaths {
-		if wp.Disposition != DispositionTmpfsCandidate {
+		if wp.Disposition != sidecar.DispositionTmpfsCandidate {
 			t.Errorf("path %s disposition = %q, want tmpfs_candidate (no mounts)", wp.Path, wp.Disposition)
 		}
 	}
@@ -178,8 +182,8 @@ func TestRun_ObserveFSFixtureCompose(t *testing.T) {
 func TestRun_ObserveUnrecognized(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	err := run([]string{"--observe", "bogus", "--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit code = %d, want %d (EX_USAGE)", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit code = %d, want %d (EX_USAGE)", exit.CodeFor(err), exit.Usage)
 	}
 }
 
@@ -196,7 +200,7 @@ func TestRun_ObserveFSJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v (stderr: %s)", err, errBuf.String())
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(out.Bytes(), &s); err != nil {
 		t.Fatalf("sidecar JSON did not parse: %v\n%s", err, out.String())
 	}
@@ -238,7 +242,7 @@ func TestRun_ObserveFSOutAndWorkload(t *testing.T) {
 	if readErr != nil {
 		t.Fatalf("sidecar not written: %v", readErr)
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("sidecar file did not parse: %v", err)
 	}
@@ -250,7 +254,7 @@ func TestRun_ObserveFSOutAndWorkload(t *testing.T) {
 func TestRun_MountsFixtureRequiresFSObserver(t *testing.T) {
 	var out, errBuf bytes.Buffer
 	err := run([]string{"--mounts-fixture", "testdata/postgres/mounts.json", "--fixture", "testdata/ig-versions/v0.51.0/sample.ndjson", "--container", "postgres-1"}, &out, &errBuf)
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit code = %d, want %d (EX_USAGE)", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit code = %d, want %d (EX_USAGE)", exit.CodeFor(err), exit.Usage)
 	}
 }

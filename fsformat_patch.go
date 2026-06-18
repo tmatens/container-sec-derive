@@ -5,6 +5,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeFSComposePatch emits a unified diff that sets services.<service>'s
@@ -23,7 +25,7 @@ import (
 // and silently proposing to delete a declared tmpfs is the issue-#77 foot-gun.
 // VolumeCovered paths are never emitted — the user's existing mounts satisfy
 // them.
-func writeFSComposePatch(w io.Writer, rec fsRecommendation, original []byte, inPath, service string) error {
+func writeFSComposePatch(w io.Writer, rec sidecar.FSRecommendation, original []byte, inPath, service string) error {
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}

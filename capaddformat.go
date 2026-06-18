@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The v0.5 capadd formatters express a VALIDATION, not a from-scratch config, so
@@ -15,7 +17,7 @@ import (
 // capaddDropped returns the caps flagged removable (granted but unused) in finding
 // order — the explicit "dropped" list the formatters surface so a reader sees
 // what the recommended cap_add left out, rather than inferring it.
-func capaddDropped(val *capaddValidation) []string {
+func capaddDropped(val *sidecar.CapaddValidation) []string {
 	var out []string
 	for _, f := range val.Findings {
 		if f.Removable && !f.Used {
@@ -30,7 +32,7 @@ func capaddDropped(val *capaddValidation) []string {
 // — the dropped-cap list. Used by every text formatter so the advisory is
 // consistent across compose / docker-run / k8s. commentPrefix lets a caller
 // indent the block (e.g. inside an exploratory: profile); pass "" for none.
-func writeCapaddComment(w io.Writer, val *capaddValidation, commentPrefix string) error {
+func writeCapaddComment(w io.Writer, val *sidecar.CapaddValidation, commentPrefix string) error {
 	cp := commentPrefix
 	if _, err := fmt.Fprintf(w, "%s# csd dangerous cap_add validation (workload-bounded — NOT a correctness proof).\n", cp); err != nil {
 		return err
@@ -64,7 +66,7 @@ func writeCapaddComment(w io.Writer, val *capaddValidation, commentPrefix string
 // holding the recommended minimized set (finer substitutions applied, unused caps
 // dropped). Without a granted set it emits the advisory alone: there is no
 // declared cap_add for csd to rewrite, and proposing one would be fabrication.
-func writeCapaddCompose(w io.Writer, val *capaddValidation) error {
+func writeCapaddCompose(w io.Writer, val *sidecar.CapaddValidation) error {
 	if err := writeCapaddComment(w, val, ""); err != nil {
 		return err
 	}

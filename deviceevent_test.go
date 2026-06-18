@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 func TestIsDeviceOpen(t *testing.T) {
@@ -60,7 +62,7 @@ func TestAggregateDevices(t *testing.T) {
 {"syscall":"openat","flags_raw":1,"fpath":"/dev/null","proc":{"comm":"X"},"runtime":{"containerId":"aaa111aaa111","containerName":"gpu-1","containerImageName":"gpu:1"}}
 {"syscall":"openat","flags_raw":2,"fpath":"/dev/net/tun","proc":{"comm":"vpn"},"runtime":{"containerId":"bbb222bbb222","containerName":"vpn-1","containerImageName":"vpn:1"}}
 `
-	obs, err := aggregateDevices(strings.NewReader(nd), aggregateOpts{})
+	obs, err := aggregateDevices(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +86,7 @@ func TestAggregateDevices(t *testing.T) {
 	}
 
 	// Target selection: only gpu-1's devices.
-	sel, err := aggregateDevices(strings.NewReader(nd), aggregateOpts{Container: "gpu-1"})
+	sel, err := aggregateDevices(strings.NewReader(nd), attrib.Opts{Container: "gpu-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +102,11 @@ func TestAggregateDevicesImageAmbiguity(t *testing.T) {
 {"syscall":"openat","flags_raw":2,"fpath":"/dev/kvm","proc":{"comm":"q"},"runtime":{"containerId":"aaa111aaa111","containerName":"vm-1","containerImageName":"vm:1"}}
 {"syscall":"openat","flags_raw":2,"fpath":"/dev/kvm","proc":{"comm":"q"},"runtime":{"containerId":"bbb222bbb222","containerName":"vm-2","containerImageName":"vm:1"}}
 `
-	if _, err := aggregateDevices(strings.NewReader(nd), aggregateOpts{Image: "vm:1"}); err == nil {
+	if _, err := aggregateDevices(strings.NewReader(nd), attrib.Opts{Image: "vm:1"}); err == nil {
 		t.Fatal("expected ambiguous-selection error for >1 replica under --image")
 	}
 	// --all-matching unions them.
-	obs, err := aggregateDevices(strings.NewReader(nd), aggregateOpts{Image: "vm:1", AllMatching: true})
+	obs, err := aggregateDevices(strings.NewReader(nd), attrib.Opts{Image: "vm:1", AllMatching: true})
 	if err != nil {
 		t.Fatalf("--all-matching should union, got %v", err)
 	}

@@ -10,6 +10,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // privilegedPipelineOpts bundles every input the v0.3 privileged-mode
@@ -21,7 +26,7 @@ import (
 // fixture mode (an absent half contributes nothing). This mirrors how the fs
 // observer added --mounts-fixture as a second hermetic input.
 type privilegedPipelineOpts struct {
-	AggregateOpts  aggregateOpts
+	AggregateOpts  attrib.Opts
 	Fixture        string // trace_capabilities NDJSON (caps half)
 	DeviceFixture  string // trace_open NDJSON (devices half)
 	FixtureStderr  string
@@ -48,10 +53,10 @@ type privilegedPipelineOpts struct {
 // stderr advisory in emitAdvisoryWarnings — so a user cannot read the headline
 // "drop privileged: true" without also seeing that the relaxed-MAC dimension is
 // unobserved and may still be load-bearing.
-func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer) (*Sidecar, error) {
+func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
-		capS *Sidecar
+		capS *sidecar.Sidecar
 		dev  *deviceObservation
 		err  error
 	)
@@ -70,7 +75,7 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 				if openErrErr != nil {
 					return nil, fmt.Errorf("open fixture-stderr: %w", openErrErr)
 				}
-				capS.TraceHealth.EventsDropped = parseIGStderr(errSrc, nil)
+				capS.TraceHealth.EventsDropped = ig.ParseIGStderr(errSrc, nil)
 				errSrc.Close()
 			}
 		}
@@ -86,7 +91,7 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 		// Live mode: trace_capabilities + trace_open run concurrently for one
 		// window, each its own ig subprocess.
 		noteWSL2IfDetected(stderr)
-		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -119,9 +124,9 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 		}
 	}
 	if err != nil {
-		var amb *ambiguousSelectionError
+		var amb *exit.AmbiguousSelectionError
 		if errors.As(err, &amb) {
-			return nil, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
 	}
@@ -131,9 +136,9 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 	// yields a well-formed empty cap sidecar.
 	s := capS
 	if s == nil {
-		s = NewSidecar()
-		s.Target.Mode = opts.AggregateOpts.modeLabel()
-		s.Target.Selector = opts.AggregateOpts.selector()
+		s = sidecar.NewSidecar()
+		s.Target.Mode = opts.AggregateOpts.ModeLabel()
+		s.Target.Selector = opts.AggregateOpts.Selector()
 	}
 
 	if dev != nil {
@@ -151,12 +156,12 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 	if s.DeviceRecommendation != nil {
 		devices = s.DeviceRecommendation.Devices
 	}
-	s.PrivilegedDecomposition = &privilegedDecomposition{
+	s.PrivilegedDecomposition = &sidecar.PrivilegedDecomposition{
 		DropPrivileged: true,
 		CapAdd:         s.CapNames(),
 		Devices:        devices,
 		Partial:        true,
-		SecurityOpt:    PrivilegedSecurityOptCaveat,
+		SecurityOpt:    sidecar.PrivilegedSecurityOptCaveat,
 	}
 
 	s.ObservedAt = observedAt
@@ -172,7 +177,7 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 // confident cap set paired with a sparse, unverified device observation is only
 // as good as the device half, and vice versa. The two sub-rubrics each write
 // s.Confidence, so this snapshots around them.
-func computePrivilegedConfidence(s *Sidecar) {
+func computePrivilegedConfidence(s *sidecar.Sidecar) {
 	computeConfidence(s)
 	capLevel := s.Confidence.Level
 	capFactors := prefixFactors("caps", s.Confidence.Factors)
@@ -198,9 +203,9 @@ func prefixFactors(observer string, factors []string) []string {
 // confidenceRank orders the levels low < moderate < high for worseConfidence.
 func confidenceRank(level string) int {
 	switch level {
-	case ConfidenceHigh:
+	case sidecar.ConfidenceHigh:
 		return 2
-	case ConfidenceModerate:
+	case sidecar.ConfidenceModerate:
 		return 1
 	default:
 		return 0

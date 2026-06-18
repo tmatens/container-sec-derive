@@ -12,15 +12,15 @@
 #   https://github.com/tmatens/container-sec-derive/attestations/ig-provenance/v1
 #
 # The data is exactly what already gates the build: the IG version
-# (main.go PinnedIGVersion), the upstream per-arch tarball digests
+# (internal/ig/ig.go PinnedIGVersion), the upstream per-arch tarball digests
 # (ig-pin/SHA256SUMS — itself cosign-signed by IG, see ig-pin/README.md),
 # and the fingerprint of IG's public key. Values are hex digests / a vX.Y.Z
 # version string, so the heredoc emits valid JSON without escaping.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
-[ -n "$version" ] || { echo "gen-ig-provenance: could not read PinnedIGVersion from main.go" >&2; exit 1; }
+version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
+[ -n "$version" ] || { echo "gen-ig-provenance: could not read PinnedIGVersion from internal/ig/ig.go" >&2; exit 1; }
 
 pin="ig-pin/SHA256SUMS"
 [ -f "$pin" ] || { echo "gen-ig-provenance: $pin not found" >&2; exit 1; }

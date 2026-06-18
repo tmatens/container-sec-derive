@@ -7,6 +7,10 @@ import (
 	"io"
 	"os"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // runVerify is the entry point for `csd verify`. Two input shapes:
@@ -51,10 +55,10 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 		workload       = fs.String("workload", "", "run-mode: path to the workload script that exercised the container under the proposed config")
 	)
 	if err := fs.Parse(args); err != nil {
-		return wrapCoded(ExitUsage, err)
+		return exit.WrapCoded(exit.Usage, err)
 	}
 	if *baseline == "" {
-		return codedErrorf(ExitUsage, "csd verify requires --baseline <sidecar>")
+		return exit.CodedErrorf(exit.Usage, "csd verify requires --baseline <sidecar>")
 	}
 
 	// Mode selection: --observation picks sidecar-vs-sidecar; presence
@@ -62,35 +66,35 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 	// usage error -- the user is asking for two different things.
 	hasRunModeSelector := *container != "" || *image != "" || *fixture != ""
 	if *observation == "" && !hasRunModeSelector {
-		return codedErrorf(ExitUsage,
+		return exit.CodedErrorf(exit.Usage,
 			"csd verify needs either --observation <sidecar> (sidecar-vs-sidecar) or one of --container/--image/--fixture (run-mode)")
 	}
 	if *observation != "" && hasRunModeSelector {
-		return codedErrorf(ExitUsage,
+		return exit.CodedErrorf(exit.Usage,
 			"--observation is mutually exclusive with --container/--image/--fixture; sidecar-vs-sidecar mode reads a pre-existing sidecar, run-mode produces one internally")
 	}
 	if *allMatching && *image == "" {
-		return codedErrorf(ExitUsage, "--all-matching requires --image")
+		return exit.CodedErrorf(exit.Usage, "--all-matching requires --image")
 	}
 	if *container != "" && *image != "" {
-		return codedErrorf(ExitUsage, "--container and --image are mutually exclusive")
+		return exit.CodedErrorf(exit.Usage, "--container and --image are mutually exclusive")
 	}
 	if *workload != "" {
 		if _, err := os.Stat(*workload); err != nil {
-			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("--workload %q: %w", *workload, err))
 		}
 	}
 
 	baseSidecar, err := loadSidecar(*baseline)
 	if err != nil {
-		return wrapCoded(ExitUsage, fmt.Errorf("--baseline: %w", err))
+		return exit.WrapCoded(exit.Usage, fmt.Errorf("--baseline: %w", err))
 	}
 
-	var obsSidecar *Sidecar
+	var obsSidecar *sidecar.Sidecar
 	if *observation != "" {
 		obsSidecar, err = loadSidecar(*observation)
 		if err != nil {
-			return wrapCoded(ExitUsage, fmt.Errorf("--observation: %w", err))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("--observation: %w", err))
 		}
 	} else {
 		// Run-mode: produce the verify-time observation from the
@@ -98,7 +102,7 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 		// (the user restarted it before invoking verify); we just
 		// observe it under the same workload.
 		obsSidecar, err = produceObservation(observePipelineOpts{
-			AggregateOpts: aggregateOpts{
+			AggregateOpts: attrib.Opts{
 				Container:    *container,
 				Image:        *image,
 				AllMatching:  *allMatching,
@@ -120,12 +124,12 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 	if err := writeVerifyResult(stdout, vr); err != nil {
 		return fmt.Errorf("write verify result: %w", err)
 	}
-	if code != ExitOK {
+	if code != exit.OK {
 		// The verify result is the artifact even on nonzero exit; the
 		// code is what tells CI that the proposed profile failed (10)
 		// or trimming is possible (11). Wrap a short message so stderr
 		// names the outcome without the user having to grep stdout.
-		return codedErrorf(code, "csd verify outcome: %s", vr.Outcome)
+		return exit.CodedErrorf(code, "csd verify outcome: %s", vr.Outcome)
 	}
 	return nil
 }
@@ -192,7 +196,7 @@ type VerifyDenial struct {
 // if any verify-time cap fired that the baseline didn't list, that's
 // the most actionable signal and takes precedence over unused caps.
 // Returns *VerifyResult and the corresponding exit code.
-func classifyVerify(baselineCaps []string, observation *Sidecar, verifyOfPath string) (*VerifyResult, int) {
+func classifyVerify(baselineCaps []string, observation *sidecar.Sidecar, verifyOfPath string) (*VerifyResult, int) {
 	baselineSet := map[string]struct{}{}
 	for _, c := range baselineCaps {
 		baselineSet[c] = struct{}{}
@@ -237,13 +241,13 @@ func classifyVerify(baselineCaps []string, observation *Sidecar, verifyOfPath st
 	switch {
 	case len(newDenials) > 0:
 		vr.Outcome = VerifyOutcomeInsufficient
-		return vr, ExitVerifyInsufficient
+		return vr, exit.VerifyInsufficient
 	case len(unused) > 0:
 		vr.Outcome = VerifyOutcomeOverPermissioned
-		return vr, ExitVerifyOverPermissioned
+		return vr, exit.VerifyOverPermissioned
 	default:
 		vr.Outcome = VerifyOutcomeConsistent
-		return vr, ExitOK
+		return vr, exit.OK
 	}
 }
 
@@ -251,12 +255,12 @@ func classifyVerify(baselineCaps []string, observation *Sidecar, verifyOfPath st
 // schema_version major must match the binary's view of the canonical
 // schema (PLAN.md §Output schema "Schema evolution policy"); a different
 // major is rejected up front rather than parsed leniently.
-func loadSidecar(path string) (*Sidecar, error) {
+func loadSidecar(path string) (*sidecar.Sidecar, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(data, &s); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}

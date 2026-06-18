@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteCompose_StandardCapSet(t *testing.T) {
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "CHOWN"},
 		{Name: "DAC_OVERRIDE"},
 		{Name: "SETUID"},
@@ -27,7 +30,7 @@ func TestWriteCompose_EmptyCapSetOmitsCapAdd(t *testing.T) {
 	// "Drop everything, add nothing" is a valid compose shape. cap_add with
 	// an empty list would be technically legal YAML but semantically noisy;
 	// the formatter elides it so reviewers see the signal, not the scaffolding.
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	var buf bytes.Buffer
 	if err := writeCompose(&buf, s); err != nil {
 		t.Fatalf("writeCompose: %v", err)
@@ -41,8 +44,8 @@ func TestWriteCompose_EmptyCapSetOmitsCapAdd(t *testing.T) {
 func TestWriteCompose_PreservesAggregatorOrder(t *testing.T) {
 	// The aggregator sorts caps ascending; the formatter must not reorder
 	// them. If it did, golden tests and downstream diffing would drift.
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "A"}, {Name: "B"}, {Name: "C"},
 	}
 	var buf bytes.Buffer
@@ -73,8 +76,8 @@ func TestRun_UnknownFormatIsUsageError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected usage error for --format xml")
 	}
-	if code := exitCodeFor(err); code != ExitUsage {
-		t.Errorf("exit code = %d, want %d (ExitUsage)", code, ExitUsage)
+	if code := exit.CodeFor(err); code != exit.Usage {
+		t.Errorf("exit code = %d, want %d (exit.Usage)", code, exit.Usage)
 	}
 	if !strings.Contains(err.Error(), "supported:") {
 		t.Errorf("error should list supported formats, got: %v", err)

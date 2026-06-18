@@ -248,8 +248,8 @@ jobs:
       - name: Resolve build args
         id: vars
         run: |
-          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
-          [ -n "${ig_version}" ] || { echo "::error::could not extract PinnedIGVersion from main.go"; exit 1; }
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
+          [ -n "${ig_version}" ] || { echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go"; exit 1; }
           echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
           # csd --version prints "csd <version>"; strip the leading v to
           # match the tag-without-v convention the verify step asserts.

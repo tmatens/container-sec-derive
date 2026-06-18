@@ -62,7 +62,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # Resolve IG_VERSION from main.go so the build arg, the
+      # Resolve IG_VERSION from internal/ig/ig.go so the build arg, the
       # ig-pin/SHA256SUMS lookup, and the runtime schema check all
       # reference one source of truth. CSD_VERSION uses the workflow
       # SHA so the smoke test below can assert an exact match without
@@ -70,9 +70,9 @@ jobs:
       - name: Resolve build args
         id: vars
         run: |
-          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
           if [ -z "${ig_version}" ]; then
-            echo "::error::could not extract PinnedIGVersion from main.go"
+            echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go"
             exit 1
           fi
           echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"

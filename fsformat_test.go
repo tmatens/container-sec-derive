@@ -3,12 +3,14 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteFSCompose(t *testing.T) {
 	t.Run("read_only only when no rootfs writes", func(t *testing.T) {
 		var b strings.Builder
-		if err := writeFSCompose(&b, fsRecommendation{ReadOnly: true}); err != nil {
+		if err := writeFSCompose(&b, sidecar.FSRecommendation{ReadOnly: true}); err != nil {
 			t.Fatal(err)
 		}
 		if got := b.String(); got != "read_only: true\n" {
@@ -18,7 +20,7 @@ func TestWriteFSCompose(t *testing.T) {
 
 	t.Run("read_only + tmpfs list", func(t *testing.T) {
 		var b strings.Builder
-		rec := fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
+		rec := sidecar.FSRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
 		if err := writeFSCompose(&b, rec); err != nil {
 			t.Fatal(err)
 		}

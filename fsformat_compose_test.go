@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 const fsPatchCompose = `services:
@@ -18,7 +22,7 @@ const fsPatchCompose = `services:
 
 func TestWriteFSComposePatch_InsertsReadOnlyAndTmpfs(t *testing.T) {
 	var b bytes.Buffer
-	rec := fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/run", "/tmp"}}
+	rec := sidecar.FSRecommendation{ReadOnly: true, TmpfsPaths: []string{"/run", "/tmp"}}
 	if err := writeFSComposePatch(&b, rec, []byte(fsPatchCompose), "compose.yml", "web"); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +44,7 @@ func TestWriteFSComposePatch_EmptyTmpfsKeepsExisting(t *testing.T) {
       - /var/cache
 `
 	var b bytes.Buffer
-	rec := fsRecommendation{ReadOnly: true} // no tmpfs candidates
+	rec := sidecar.FSRecommendation{ReadOnly: true} // no tmpfs candidates
 	if err := writeFSComposePatch(&b, rec, []byte(in), "compose.yml", "web"); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +59,7 @@ func TestWriteFSComposePatch_EmptyTmpfsKeepsExisting(t *testing.T) {
 
 func TestWriteFSComposePatch_UnknownService(t *testing.T) {
 	var b bytes.Buffer
-	err := writeFSComposePatch(&b, fsRecommendation{ReadOnly: true}, []byte(fsPatchCompose), "compose.yml", "nope")
+	err := writeFSComposePatch(&b, sidecar.FSRecommendation{ReadOnly: true}, []byte(fsPatchCompose), "compose.yml", "nope")
 	if err == nil {
 		t.Error("expected error for unknown service")
 	}
@@ -63,20 +67,20 @@ func TestWriteFSComposePatch_UnknownService(t *testing.T) {
 
 // cleanFSSidecar builds a sidecar that clears the compose-lint acceptance
 // contract, so the formatter emits a non-exploratory entry.
-func cleanFSSidecar(t *testing.T) *Sidecar {
+func cleanFSSidecar(t *testing.T) *sidecar.Sidecar {
 	t.Helper()
 	wl := filepath.Join(t.TempDir(), "wl.sh")
 	if err := os.WriteFile(wl, []byte("#!/bin/sh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
 	s.ImageDigest = "sha256:abc"
 	s.Workload = wl
 	s.DurationSeconds = 600
 	s.ObservedAt = time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
-	s.Confidence.Level = ConfidenceModerate
-	s.FSRecommendation = &fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
+	s.Confidence.Level = sidecar.ConfidenceModerate
+	s.FSRecommendation = &sidecar.FSRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
 	return s
 }
 
@@ -107,7 +111,7 @@ func TestWriteFSComposeLintProfile_ContractGate(t *testing.T) {
 	// A sparse fixture-derived sidecar (no digest, low confidence) fails the
 	// gate: rejected without --allow-exploratory, emitted with it.
 	s, err := produceFSObservation(fsPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "postgres-1"},
+		AggregateOpts: attrib.Opts{Container: "postgres-1"},
 		Fixture:       "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
 		MountsFixture: "testdata/postgres/mounts.json",
 	}, nil)
@@ -157,7 +161,7 @@ func TestRun_ObserveFSComposePatchAndProfile(t *testing.T) {
 	out.Reset()
 	errBuf.Reset()
 	bad := append(append([]string{}, base...), "--format", "compose-patch", "--compose-in", composeFile)
-	if exitCodeFor(run(bad, &out, &errBuf)) != ExitUsage {
+	if exit.CodeFor(run(bad, &out, &errBuf)) != exit.Usage {
 		t.Error("compose-patch without --service should be EX_USAGE")
 	}
 

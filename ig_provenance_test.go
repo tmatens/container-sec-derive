@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/ig"
 )
 
 // TestIGProvenancePredicate runs scripts/gen-ig-provenance.sh and asserts the
@@ -47,11 +49,11 @@ func TestIGProvenancePredicate(t *testing.T) {
 	if p.Component != "inspektor-gadget" {
 		t.Errorf("component = %q, want inspektor-gadget", p.Component)
 	}
-	if p.Version != PinnedIGVersion {
-		t.Errorf("version = %q, want PinnedIGVersion %q", p.Version, PinnedIGVersion)
+	if p.Version != ig.PinnedIGVersion {
+		t.Errorf("version = %q, want PinnedIGVersion %q", p.Version, ig.PinnedIGVersion)
 	}
-	if !strings.HasSuffix(p.Source, PinnedIGVersion) {
-		t.Errorf("source %q does not end in PinnedIGVersion %q", p.Source, PinnedIGVersion)
+	if !strings.HasSuffix(p.Source, ig.PinnedIGVersion) {
+		t.Errorf("source %q does not end in PinnedIGVersion %q", p.Source, ig.PinnedIGVersion)
 	}
 	if !p.Verification.CosignVerified {
 		t.Error("verification.cosignVerified = false, want true")

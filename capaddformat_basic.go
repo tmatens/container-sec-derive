@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The v0.5 capadd docker-run / k8s / oci formatters carry the same validation as
@@ -16,7 +18,7 @@ import (
 // granted set was given — a `--cap-add` flag string realizing the recommended
 // minimized set. An empty recommendation (all caps unused) yields a comment
 // rather than an empty flag string.
-func writeCapaddDockerRun(w io.Writer, val *capaddValidation) error {
+func writeCapaddDockerRun(w io.Writer, val *sidecar.CapaddValidation) error {
 	if err := writeCapaddComment(w, val, ""); err != nil {
 		return err
 	}
@@ -40,7 +42,7 @@ func writeCapaddDockerRun(w io.Writer, val *capaddValidation) error {
 // (drop: [ALL] + add: [...] is the k8s idiom the cap formatter uses, so a reviewer
 // gets a complete, self-contained context rather than a bare add list). Without a
 // granted set it emits the advisory alone.
-func writeCapaddK8s(w io.Writer, val *capaddValidation) error {
+func writeCapaddK8s(w io.Writer, val *sidecar.CapaddValidation) error {
 	if err := writeCapaddComment(w, val, ""); err != nil {
 		return err
 	}
@@ -71,7 +73,7 @@ func writeCapaddK8s(w io.Writer, val *capaddValidation) error {
 // `annotations` map: a per-cap verdict summary plus, when a granted set was given,
 // the recommended add list. Inert to runtimes that ignore annotations,
 // informative to humans and tooling that read them.
-func writeCapaddOCI(w io.Writer, val *capaddValidation) error {
+func writeCapaddOCI(w io.Writer, val *sidecar.CapaddValidation) error {
 	annotations := map[string]string{
 		"org.containersecderive.capadd-note": "workload-bounded dangerous-cap_add validation; not a correctness proof. Verify before removing or substituting any capability.",
 	}

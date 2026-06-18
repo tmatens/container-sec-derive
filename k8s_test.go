@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteK8s_StandardCapSet(t *testing.T) {
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "CHOWN"},
 		{Name: "DAC_OVERRIDE"},
 		{Name: "SETUID"},
@@ -35,7 +37,7 @@ func TestWriteK8s_EmptyCapSetOmitsAdd(t *testing.T) {
 	// is a valid k8s shape. An empty `add:` key would be legal YAML but
 	// semantically noisy; the formatter elides it so reviewers see the
 	// signal, not scaffolding.
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	var buf bytes.Buffer
 	if err := writeK8s(&buf, s); err != nil {
 		t.Fatalf("writeK8s: %v", err)
@@ -52,8 +54,8 @@ func TestWriteK8s_EmptyCapSetOmitsAdd(t *testing.T) {
 func TestWriteK8s_PreservesAggregatorOrder(t *testing.T) {
 	// The aggregator sorts caps ascending; the formatter must not reorder
 	// them. Downstream diffing across digest bumps relies on stable order.
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "A"}, {Name: "B"}, {Name: "C"},
 	}
 	var buf bytes.Buffer

@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // computeEgressConfidence is the v0.8 egress observer's analog of
 // computeDeviceConfidence. The risk it prices is *incompleteness* — and for
@@ -15,7 +19,7 @@ import "fmt"
 // raw connect volume is not a useful coverage proxy. Drop rate, duration floor,
 // and replica disagreement transfer unchanged. The grade is reproducible from
 // Factors and capped at moderate while the deferred preconditions stand.
-func computeEgressConfidence(s *Sidecar) {
+func computeEgressConfidence(s *sidecar.Sidecar) {
 	var factors []string
 	moderateHits := 0
 	forceLow := false
@@ -81,8 +85,8 @@ func computeEgressConfidence(s *Sidecar) {
 	s.Confidence.Factors = factors
 	switch {
 	case forceLow, moderateHits >= 2:
-		s.Confidence.Level = ConfidenceLow
+		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
-		s.Confidence.Level = ConfidenceModerate
+		s.Confidence.Level = sidecar.ConfidenceModerate
 	}
 }

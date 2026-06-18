@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeComposeLintProfile emits a YAML entry for contribution to the
@@ -30,7 +32,7 @@ import (
 // CI pipeline appends `ci-smoke` once the profile passes the smoke
 // gate, per PLAN.md's two-source convention. Emitting both from csd
 // would overclaim -- we didn't run that CI.
-func writeComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) error {
+func writeComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := checkComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
 		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
@@ -102,7 +104,7 @@ const ComposeLintMaxDropRate = 0.01
 // a fixed check order. Empty slice means the sidecar clears the gate.
 // Order matters: the output is the user-facing diagnostic and also
 // becomes the exploratory-mode annotation, so it must be deterministic.
-func checkComposeLintContract(s *Sidecar) []string {
+func checkComposeLintContract(s *sidecar.Sidecar) []string {
 	var v []string
 	switch {
 	case s.SchemaVersion == "":
@@ -125,7 +127,7 @@ func checkComposeLintContract(s *Sidecar) []string {
 		v = append(v, fmt.Sprintf("duration_seconds %d < %d", s.DurationSeconds, ComposeLintMinDurationSeconds))
 	}
 	switch s.Confidence.Level {
-	case ConfidenceHigh, ConfidenceModerate:
+	case sidecar.ConfidenceHigh, sidecar.ConfidenceModerate:
 		// ok
 	case "":
 		v = append(v, "confidence.level not set")
@@ -150,7 +152,7 @@ func checkComposeLintContract(s *Sidecar) []string {
 // digest, and tag to land on that shape. Empty image ref falls back to
 // "unknown" -- the profile can still be edited by hand before landing
 // in a PR; refusing to emit here would hide the violation output.
-func composeLintKey(s *Sidecar) string {
+func composeLintKey(s *sidecar.Sidecar) string {
 	ref := s.Image
 	if ref == "" {
 		return "unknown"

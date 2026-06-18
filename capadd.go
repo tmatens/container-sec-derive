@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 // The v0.5 dangerous-cap_add validator (ROADMAP §v0.5, CL-0011) is the inverse
@@ -102,7 +104,7 @@ type capaddObservation struct {
 // records per-cap syscall usage. The >1-replica ambiguity guard mirrors
 // aggregate()/aggregateDevices exactly: --image matching multiple replicas
 // without --all-matching is refused rather than silently unioned.
-func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struct{}) (*capaddObservation, error) {
+func aggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{}) (*capaddObservation, error) {
 	used := map[string]*capUsage{}
 	denied := map[string]map[string]int{}
 	perReplica := map[string]map[string]struct{}{}
@@ -125,7 +127,7 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 		// alike: an off-target, runc/init, or out-of-set check is noise either
 		// way. (This filtering used to short-circuit on !Capable before matching;
 		// it now matches first so a denied in-scope attempt can be retained — L10.)
-		if !opts.matches(ev) {
+		if !optsMatch(opts, ev) {
 			continue
 		}
 		if isInitComm(ev.Proc.Comm) {
@@ -189,7 +191,7 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 	// matched >1 replica without --all-matching. Same guard as
 	// aggregate()/aggregateDevices — refuse to silently union the dangerous-cap
 	// usage of replicas the user didn't opt into aggregating.
-	if opts.ambiguous(len(perReplica)) {
+	if opts.Ambiguous(len(perReplica)) {
 		labels := make([]string, 0, len(perReplica))
 		for rid := range perReplica {
 			if name := perReplicaName[rid]; name != "" {
@@ -199,7 +201,7 @@ func aggregateCapadd(r io.Reader, opts aggregateOpts, activeSet map[string]struc
 			}
 		}
 		sort.Strings(labels)
-		return nil, opts.newAmbiguousSelectionError(labels)
+		return nil, opts.NewAmbiguousSelectionError(labels)
 	}
 
 	obs := &capaddObservation{

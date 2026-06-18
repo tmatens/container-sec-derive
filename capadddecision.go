@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The v0.5 decision layer turns observed dangerous-cap usage into a validation:
@@ -17,40 +19,6 @@ import (
 // reference guidance, not an authoritative "safe to drop": every conclusion is
 // workload-bounded (the standing Caveat), and the unused -> removable call is the
 // sharpest edge — the v0.5 analog of csd verify's over_permissioned WARN.
-
-// SyscallStat is one syscall that invoked a held cap_capable check for a
-// capability, with its held-event count. Sorted by name in a finding.
-type SyscallStat struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-}
-
-// CapaddFinding is the validation verdict for one capability in the validate-set.
-// Used=false with Removable=true means the cap was explicitly granted (--cap-add)
-// but no held check fired under the workload — a removal candidate. FinerCaps is
-// the concrete substitute set when every observed syscall is covered by a
-// finer-grained capability (e.g. SYS_ADMIN used only via perf_event_open ->
-// PERFMON); empty otherwise.
-type CapaddFinding struct {
-	Cap        string        `json:"cap"`
-	Used       bool          `json:"used"`
-	Removable  bool          `json:"removable"`
-	EventCount int           `json:"event_count"`
-	Syscalls   []SyscallStat `json:"syscalls"`
-	Advice     string        `json:"advice"`
-	FinerCaps  []string      `json:"finer_caps,omitempty"`
-}
-
-// capaddValidation is the v0.5 sidecar block. GrantedSetProvided records whether
-// the user passed --cap-add (the explicit granted set): only then can unused caps
-// be flagged and a RecommendedCapAdd synthesized. Without it the validator
-// reports only the dangerous caps actually observed in use, and RecommendedCapAdd
-// is empty (there is no granted set to rewrite).
-type capaddValidation struct {
-	Findings           []CapaddFinding `json:"findings"`
-	GrantedSetProvided bool            `json:"granted_set_provided"`
-	RecommendedCapAdd  []string        `json:"recommended_cap_add"`
-}
 
 // capKBEntry is one capability's knowledge-base entry: an honest base advisory
 // for when no clean finer substitution applies, and an optional per-syscall map
@@ -181,9 +149,9 @@ func capAdvice(capName string, syscalls, deniedSyscalls []string) (advice string
 // their finer substitute if one exists, otherwise to themselves; unused caps are
 // dropped. Without an explicit set, only the dangerous caps actually observed are
 // reported and no recommendation is produced (there is no granted set to rewrite).
-func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, granted bool) *capaddValidation {
-	v := &capaddValidation{
-		Findings:           []CapaddFinding{},
+func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, granted bool) *sidecar.CapaddValidation {
+	v := &sidecar.CapaddValidation{
+		Findings:           []sidecar.CapaddFinding{},
 		GrantedSetProvided: granted,
 		RecommendedCapAdd:  []string{},
 	}
@@ -207,21 +175,21 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 			// it and caveat instead of recommending removal. (u==nil is reached
 			// only in granted mode; default mode reports only observed-used caps.)
 			if len(deniedNames) > 0 {
-				v.Findings = append(v.Findings, CapaddFinding{
+				v.Findings = append(v.Findings, sidecar.CapaddFinding{
 					Cap:      c,
 					Used:     false,
-					Syscalls: []SyscallStat{},
+					Syscalls: []sidecar.SyscallStat{},
 					Advice: fmt.Sprintf("no held check fired, but denied (capable:false) attempt(s) observed via %s — the workload attempted this capability under a grant it could not exercise; do not drop it without verifying those paths.",
 						strings.Join(deniedNames, ", ")),
 				})
 				recommend[c] = struct{}{}
 				continue
 			}
-			v.Findings = append(v.Findings, CapaddFinding{
+			v.Findings = append(v.Findings, sidecar.CapaddFinding{
 				Cap:       c,
 				Used:      false,
 				Removable: granted,
-				Syscalls:  []SyscallStat{},
+				Syscalls:  []sidecar.SyscallStat{},
 				Advice:    "no capability check fired under this workload — candidate for removal. Workload-bounded: verify with a fuller workload before dropping.",
 			})
 			continue
@@ -232,7 +200,7 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 		}
 		sort.Strings(names)
 		advice, finer := capAdvice(c, names, deniedNames)
-		v.Findings = append(v.Findings, CapaddFinding{
+		v.Findings = append(v.Findings, sidecar.CapaddFinding{
 			Cap:        c,
 			Used:       true,
 			EventCount: u.events,
@@ -255,10 +223,10 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 }
 
 // syscallStats turns a syscall->count map into a name-sorted SyscallStat slice.
-func syscallStats(m map[string]int) []SyscallStat {
-	out := make([]SyscallStat, 0, len(m))
+func syscallStats(m map[string]int) []sidecar.SyscallStat {
+	out := make([]sidecar.SyscallStat, 0, len(m))
 	for name, count := range m {
-		out = append(out, SyscallStat{Name: name, Count: count})
+		out = append(out, sidecar.SyscallStat{Name: name, Count: count})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

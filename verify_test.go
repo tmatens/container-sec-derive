@@ -7,19 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // makeSidecar builds a minimal valid Sidecar with the named caps plus
 // optional knobs. Tests use it instead of inlining literal sidecar
 // JSON so a future schema-additive bump touches one helper.
-func makeSidecar(image, digest, workload string, durationSeconds int, caps ...string) *Sidecar {
-	s := NewSidecar()
+func makeSidecar(image, digest, workload string, durationSeconds int, caps ...string) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
 	s.Image = image
 	s.ImageDigest = digest
 	s.Workload = workload
 	s.DurationSeconds = durationSeconds
 	for _, c := range caps {
-		s.Capabilities = append(s.Capabilities, Capability{
+		s.Capabilities = append(s.Capabilities, sidecar.Capability{
 			Name:              c,
 			EventCount:        1,
 			FirstSeenOffsetMs: 0,
@@ -30,7 +33,7 @@ func makeSidecar(image, digest, workload string, durationSeconds int, caps ...st
 	return s
 }
 
-func writeSidecarFile(t *testing.T, dir, name string, s *Sidecar) string {
+func writeSidecarFile(t *testing.T, dir, name string, s *sidecar.Sidecar) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
 	f, err := os.Create(path)
@@ -51,8 +54,8 @@ func TestClassifyVerify_Consistent(t *testing.T) {
 	if vr.Outcome != VerifyOutcomeConsistent {
 		t.Errorf("outcome = %q, want %q", vr.Outcome, VerifyOutcomeConsistent)
 	}
-	if code != ExitOK {
-		t.Errorf("code = %d, want %d", code, ExitOK)
+	if code != exit.OK {
+		t.Errorf("code = %d, want %d", code, exit.OK)
 	}
 	if len(vr.NewDenials) != 0 {
 		t.Errorf("expected no new denials, got %+v", vr.NewDenials)
@@ -78,8 +81,8 @@ func TestClassifyVerify_Insufficient(t *testing.T) {
 	if vr.Outcome != VerifyOutcomeInsufficient {
 		t.Errorf("outcome = %q, want %q", vr.Outcome, VerifyOutcomeInsufficient)
 	}
-	if code != ExitVerifyInsufficient {
-		t.Errorf("code = %d, want %d", code, ExitVerifyInsufficient)
+	if code != exit.VerifyInsufficient {
+		t.Errorf("code = %d, want %d", code, exit.VerifyInsufficient)
 	}
 	if len(vr.NewDenials) != 1 || vr.NewDenials[0].Cap != "SYS_PTRACE" {
 		t.Errorf("new_denials = %+v, want [SYS_PTRACE]", vr.NewDenials)
@@ -96,8 +99,8 @@ func TestClassifyVerify_OverPermissioned(t *testing.T) {
 	if vr.Outcome != VerifyOutcomeOverPermissioned {
 		t.Errorf("outcome = %q, want %q", vr.Outcome, VerifyOutcomeOverPermissioned)
 	}
-	if code != ExitVerifyOverPermissioned {
-		t.Errorf("code = %d, want %d", code, ExitVerifyOverPermissioned)
+	if code != exit.VerifyOverPermissioned {
+		t.Errorf("code = %d, want %d", code, exit.VerifyOverPermissioned)
 	}
 	if !equalSlice(vr.UnusedCaps, []string{"FOWNER"}) {
 		t.Errorf("unused_caps = %v, want [FOWNER]", vr.UnusedCaps)
@@ -113,8 +116,8 @@ func TestClassifyVerify_InsufficientWinsOverOverPermissioned(t *testing.T) {
 	if vr.Outcome != VerifyOutcomeInsufficient {
 		t.Errorf("outcome = %q, want %q", vr.Outcome, VerifyOutcomeInsufficient)
 	}
-	if code != ExitVerifyInsufficient {
-		t.Errorf("code = %d, want %d", code, ExitVerifyInsufficient)
+	if code != exit.VerifyInsufficient {
+		t.Errorf("code = %d, want %d", code, exit.VerifyInsufficient)
 	}
 	// Unused caps still recorded so the user sees the trim opportunity
 	// after they fix the insufficiency.
@@ -156,8 +159,8 @@ func TestRunVerify_InsufficientExit10(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for insufficient outcome")
 	}
-	if got := exitCodeFor(err); got != ExitVerifyInsufficient {
-		t.Errorf("exit = %d, want %d", got, ExitVerifyInsufficient)
+	if got := exit.CodeFor(err); got != exit.VerifyInsufficient {
+		t.Errorf("exit = %d, want %d", got, exit.VerifyInsufficient)
 	}
 }
 
@@ -170,8 +173,8 @@ func TestRunVerify_OverPermissionedExit11(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for over_permissioned outcome")
 	}
-	if got := exitCodeFor(err); got != ExitVerifyOverPermissioned {
-		t.Errorf("exit = %d, want %d", got, ExitVerifyOverPermissioned)
+	if got := exit.CodeFor(err); got != exit.VerifyOverPermissioned {
+		t.Errorf("exit = %d, want %d", got, exit.VerifyOverPermissioned)
 	}
 }
 
@@ -181,8 +184,8 @@ func TestRunVerify_RequiresBaselineEXUsage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected EX_USAGE for missing --baseline")
 	}
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit = %d, want %d", exit.CodeFor(err), exit.Usage)
 	}
 }
 
@@ -194,8 +197,8 @@ func TestRunVerify_RequiresObservationOrSelectorEXUsage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected EX_USAGE for --baseline without --observation or run-mode selector")
 	}
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit = %d, want %d", exit.CodeFor(err), exit.Usage)
 	}
 	if !strings.Contains(err.Error(), "--observation") {
 		t.Errorf("error should guide the user toward both modes: %v", err)
@@ -212,8 +215,8 @@ func TestRunVerify_ObservationAndRunModeMutuallyExclusive(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected EX_USAGE for mixing --observation with run-mode flags")
 	}
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit = %d, want %d", exit.CodeFor(err), exit.Usage)
 	}
 }
 
@@ -258,8 +261,8 @@ func TestRunVerify_RunMode_FixtureInsufficientWhenBaselineTooSmall(t *testing.T)
 	if err == nil {
 		t.Fatal("expected nonzero exit for insufficient outcome")
 	}
-	if got := exitCodeFor(err); got != ExitVerifyInsufficient {
-		t.Errorf("exit = %d, want %d", got, ExitVerifyInsufficient)
+	if got := exit.CodeFor(err); got != exit.VerifyInsufficient {
+		t.Errorf("exit = %d, want %d", got, exit.VerifyInsufficient)
 	}
 	var vr VerifyResult
 	if err := json.Unmarshal(stdout.Bytes(), &vr); err != nil {
@@ -289,8 +292,8 @@ func TestRunVerify_RunMode_FixtureOverPermissionedWhenBaselineTooLarge(t *testin
 	if err == nil {
 		t.Fatal("expected nonzero exit for over_permissioned outcome")
 	}
-	if got := exitCodeFor(err); got != ExitVerifyOverPermissioned {
-		t.Errorf("exit = %d, want %d", got, ExitVerifyOverPermissioned)
+	if got := exit.CodeFor(err); got != exit.VerifyOverPermissioned {
+		t.Errorf("exit = %d, want %d", got, exit.VerifyOverPermissioned)
 	}
 	var vr VerifyResult
 	if err := json.Unmarshal(stdout.Bytes(), &vr); err != nil {
@@ -309,8 +312,8 @@ func TestRunVerify_MissingBaselineFileEXUsage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing baseline file")
 	}
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit = %d, want %d", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit = %d, want %d", exit.CodeFor(err), exit.Usage)
 	}
 }
 

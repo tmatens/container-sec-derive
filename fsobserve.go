@@ -14,6 +14,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // fsPipelineOpts bundles every input the v0.2 read-only-filesystem observe
@@ -22,7 +27,7 @@ import (
 // container's mount config (volume correlation); MountsFixture supplies the
 // latter hermetically, the same way Fixture supplies trace_open NDJSON.
 type fsPipelineOpts struct {
-	AggregateOpts aggregateOpts
+	AggregateOpts attrib.Opts
 	Fixture       string // trace_open NDJSON; empty → live ig
 	MountsFixture string // docker-inspect .Mounts JSON; empty → live docker inspect (or none in fixture mode)
 	IGBin         string
@@ -40,7 +45,7 @@ type fsPipelineOpts struct {
 //
 // Scope (issue #77): multi-replica fs correlation under --image is deferred to
 // PR-C; see acquireMounts.
-func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*Sidecar, error) {
+func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
 		writes *writeObservation
@@ -55,7 +60,7 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*Sidecar, erro
 		writes, err = aggregateWrites(src, opts.AggregateOpts)
 	} else {
 		noteWSL2IfDetected(stderr)
-		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -65,9 +70,9 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*Sidecar, erro
 		writes, err = observeWrites(ctx, opts.IGBin, opts.AggregateOpts, stderr)
 	}
 	if err != nil {
-		var amb *ambiguousSelectionError
+		var amb *exit.AmbiguousSelectionError
 		if errors.As(err, &amb) {
-			return nil, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
 	}
@@ -93,10 +98,10 @@ func produceFSObservation(opts fsPipelineOpts, stderr io.Writer) (*Sidecar, erro
 // NewSidecar's empty defaults; the fs section (writable_paths +
 // fs_recommendation) carries the observation. PLAN.md §Output schema: one
 // observer per run populates its own block.
-func fsToSidecar(writes *writeObservation, mounts []string, opts aggregateOpts) *Sidecar {
-	s := NewSidecar()
-	s.Target.Mode = opts.modeLabel()
-	s.Target.Selector = opts.selector()
+func fsToSidecar(writes *writeObservation, mounts []string, opts attrib.Opts) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Target.Mode = opts.ModeLabel()
+	s.Target.Selector = opts.Selector()
 	s.Target.ReplicasObserved = len(writes.PerReplica)
 	for rid, c := range writes.PerReplicaCount {
 		s.Target.PerReplicaEventCounts[rid] = c
@@ -110,13 +115,13 @@ func fsToSidecar(writes *writeObservation, mounts []string, opts aggregateOpts) 
 	rec := correlateWrites(writes.Paths, mounts)
 	s.FSRecommendation = &rec
 
-	wp := make([]WritablePath, 0, len(writes.Paths))
+	wp := make([]sidecar.WritablePath, 0, len(writes.Paths))
 	for _, p := range writes.Paths {
-		disp := DispositionTmpfsCandidate
+		disp := sidecar.DispositionTmpfsCandidate
 		if underAnyMount(p, mounts) {
-			disp = DispositionVolumeCovered
+			disp = sidecar.DispositionVolumeCovered
 		}
-		entry := WritablePath{Path: p, Disposition: disp}
+		entry := sidecar.WritablePath{Path: p, Disposition: disp}
 		if st := writes.Stats[p]; st != nil {
 			entry.EventCount = st.eventCount
 			entry.CommSamples = sortedKeys(st.commSamples)
@@ -166,8 +171,8 @@ func fsToSidecar(writes *writeObservation, mounts []string, opts aggregateOpts) 
 // through parseIGStderr so it can't block the pipe and its diagnostics still
 // reach the operator; the ringbuf-loss count it returns lands on
 // writeObservation.Dropped and feeds trace_health.
-func observeWrites(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*writeObservation, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", TraceOpenGadget, "--paths", "--output", "json")
+func observeWrites(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*writeObservation, error) {
+	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceOpenGadget, "--paths", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -177,8 +182,8 @@ func observeWrites(ctx context.Context, igBin string, opts aggregateOpts, stderr
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		if isIGMissing(err) {
-			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		if exit.IsIGMissing(err) {
+			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
 		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
@@ -190,7 +195,7 @@ func observeWrites(ctx context.Context, igBin string, opts aggregateOpts, stderr
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lost = parseIGStderr(stderrPipe, stderrSink)
+		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	obs, aggErr := aggregateWrites(stdout, opts)

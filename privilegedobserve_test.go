@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 const privCapsFixture = `{"timestamp":1700000005000,"syscall":"socket","cap":"CAP_NET_ADMIN","cap_raw":12,"capable":true,"proc":{"comm":"vpn","pid":5001},"runtime":{"runtimeName":"docker","containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
@@ -28,7 +31,7 @@ func TestProducePrivilegedBothHalves(t *testing.T) {
 	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
 	dev := writeTemp(t, "dev.ndjson", privDevFixture)
 	s, err := producePrivilegedObservation(privilegedPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "gpu-1", InitWindowMs: 0},
+		AggregateOpts: attrib.Opts{Container: "gpu-1", InitWindowMs: 0},
 		Fixture:       caps,
 		DeviceFixture: dev,
 	}, nil)
@@ -72,7 +75,7 @@ func TestProducePrivilegedBothHalves(t *testing.T) {
 func TestProducePrivilegedCapsOnly(t *testing.T) {
 	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
 	s, err := producePrivilegedObservation(privilegedPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "gpu-1", InitWindowMs: 0},
+		AggregateOpts: attrib.Opts{Container: "gpu-1", InitWindowMs: 0},
 		Fixture:       caps,
 	}, nil)
 	if err != nil {
@@ -88,10 +91,10 @@ func TestProducePrivilegedCapsOnly(t *testing.T) {
 
 func TestWorseConfidence(t *testing.T) {
 	cases := []struct{ a, b, want string }{
-		{ConfidenceHigh, ConfidenceLow, ConfidenceLow},
-		{ConfidenceModerate, ConfidenceHigh, ConfidenceModerate},
-		{ConfidenceHigh, ConfidenceHigh, ConfidenceHigh},
-		{ConfidenceLow, ConfidenceModerate, ConfidenceLow},
+		{sidecar.ConfidenceHigh, sidecar.ConfidenceLow, sidecar.ConfidenceLow},
+		{sidecar.ConfidenceModerate, sidecar.ConfidenceHigh, sidecar.ConfidenceModerate},
+		{sidecar.ConfidenceHigh, sidecar.ConfidenceHigh, sidecar.ConfidenceHigh},
+		{sidecar.ConfidenceLow, sidecar.ConfidenceModerate, sidecar.ConfidenceLow},
 	}
 	for _, c := range cases {
 		if got := worseConfidence(c.a, c.b); got != c.want {
@@ -101,9 +104,9 @@ func TestWorseConfidence(t *testing.T) {
 }
 
 func TestWritePrivilegedCompose(t *testing.T) {
-	s := NewSidecar()
-	s.Capabilities = []Capability{{Name: "SYS_NICE"}}
-	s.DeviceRecommendation = &deviceRecommendation{Devices: []string{"/dev/dri/card0"}}
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{{Name: "SYS_NICE"}}
+	s.DeviceRecommendation = &sidecar.DeviceRecommendation{Devices: []string{"/dev/dri/card0"}}
 	var b strings.Builder
 	if err := writePrivilegedCompose(&b, s); err != nil {
 		t.Fatal(err)
@@ -125,9 +128,9 @@ func TestWritePrivilegedCompose(t *testing.T) {
 }
 
 func TestWritePrivilegedComposeNoDevices(t *testing.T) {
-	s := NewSidecar()
-	s.Capabilities = []Capability{{Name: "SYS_NICE"}}
-	s.DeviceRecommendation = &deviceRecommendation{}
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{{Name: "SYS_NICE"}}
+	s.DeviceRecommendation = &sidecar.DeviceRecommendation{}
 	var b strings.Builder
 	if err := writePrivilegedCompose(&b, s); err != nil {
 		t.Fatal(err)

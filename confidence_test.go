@@ -3,14 +3,17 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // helperSidecar returns a Sidecar with one "clean" replica's worth of
 // inputs that no rubric factor would downgrade. Tests then mutate one
 // dimension at a time and assert the resulting grade transition.
-func helperSidecar() *Sidecar {
-	s := NewSidecar()
-	s.Target.Mode = TargetModeContainer
+func helperSidecar() *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Target.Mode = sidecar.TargetModeContainer
 	s.Target.Selector = "test"
 	s.Target.ReplicasObserved = 1
 	s.Target.PerReplicaEventCounts["r1"] = 5000
@@ -29,8 +32,8 @@ func helperSidecar() *Sidecar {
 func TestConfidence_AllGreenCapsAtModerate(t *testing.T) {
 	s := helperSidecar()
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceModerate {
-		t.Fatalf("level = %q, want %q\nfactors: %v", s.Confidence.Level, ConfidenceModerate, s.Confidence.Factors)
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
+		t.Fatalf("level = %q, want %q\nfactors: %v", s.Confidence.Level, sidecar.ConfidenceModerate, s.Confidence.Factors)
 	}
 	// Deferred markers must be present so reviewers see why we capped.
 	// Step 15 (v0.1.0-rc) removed the entrypoint cross-check deferred
@@ -75,7 +78,7 @@ func TestConfidence_NoWorkloadIsModerateNotLow(t *testing.T) {
 	}
 	// PLAN.md §Confidence scoring lists "no workload" as a Moderate
 	// condition, not a Low one. On its own it should not force low.
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("no-workload alone should be moderate, got %q\nfactors: %v", s.Confidence.Level, s.Confidence.Factors)
 	}
 }
@@ -86,7 +89,7 @@ func TestConfidence_NoWorkloadStacksWithAnotherModerateToLow(t *testing.T) {
 	s.Workload = ""
 	s.Target.DistinctComms = 2
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("no-workload + low comm diversity should downgrade to low; got %q\nfactors: %v",
 			s.Confidence.Level, s.Confidence.Factors)
 	}
@@ -96,8 +99,8 @@ func TestConfidence_LowEventCountForcesLow(t *testing.T) {
 	s := helperSidecar()
 	s.Target.PerReplicaEventCounts["r1"] = 50
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
-		t.Errorf("level = %q, want %q", s.Confidence.Level, ConfidenceLow)
+	if s.Confidence.Level != sidecar.ConfidenceLow {
+		t.Errorf("level = %q, want %q", s.Confidence.Level, sidecar.ConfidenceLow)
 	}
 }
 
@@ -105,8 +108,8 @@ func TestConfidence_ModerateEventCountIsSingleHit(t *testing.T) {
 	s := helperSidecar()
 	s.Target.PerReplicaEventCounts["r1"] = 500
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceModerate {
-		t.Errorf("level = %q, want %q\nfactors: %v", s.Confidence.Level, ConfidenceModerate, s.Confidence.Factors)
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
+		t.Errorf("level = %q, want %q\nfactors: %v", s.Confidence.Level, sidecar.ConfidenceModerate, s.Confidence.Factors)
 	}
 }
 
@@ -115,7 +118,7 @@ func TestConfidence_TwoModerateHitsDowngradeToLow(t *testing.T) {
 	s.Target.PerReplicaEventCounts["r1"] = 500 // moderate hit #1
 	s.Target.DistinctComms = 2                 // moderate hit #2
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("two moderates should yield low, got %q\nfactors: %v", s.Confidence.Level, s.Confidence.Factors)
 	}
 }
@@ -126,7 +129,7 @@ func TestConfidence_HighDropRateForcesLow(t *testing.T) {
 	s.TraceHealth.EventsDropped = 20
 	s.TraceHealth.DropRate = 0.02
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("drop rate >= 1%% should force low, got %q", s.Confidence.Level)
 	}
 }
@@ -137,7 +140,7 @@ func TestConfidence_TinyDropRateIsModerate(t *testing.T) {
 	s.TraceHealth.EventsDropped = 1
 	s.TraceHealth.DropRate = 0.0001
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("drop rate <1%% should keep moderate, got %q\nfactors: %v", s.Confidence.Level, s.Confidence.Factors)
 	}
 }
@@ -149,7 +152,7 @@ func TestConfidence_OneCapDisagreementIsModerate(t *testing.T) {
 	s.Target.PerReplicaCaps["r2"] = []string{"CHOWN"}
 	s.Target.ReplicaCapDisagreement = []string{"SETUID"}
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("1-cap disagreement should be moderate, got %q\nfactors: %v", s.Confidence.Level, s.Confidence.Factors)
 	}
 }
@@ -158,7 +161,7 @@ func TestConfidence_MultiCapDisagreementForcesLow(t *testing.T) {
 	s := helperSidecar()
 	s.Target.ReplicaCapDisagreement = []string{"FOWNER", "SETGID"}
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf(">1-cap disagreement should be low, got %q", s.Confidence.Level)
 	}
 }
@@ -167,7 +170,7 @@ func TestConfidence_ShortDurationForcesLow(t *testing.T) {
 	s := helperSidecar()
 	s.DurationSeconds = 30
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("duration <60s should force low, got %q", s.Confidence.Level)
 	}
 }
@@ -178,7 +181,7 @@ func TestConfidence_UnmeasuredDurationDoesNotDowngrade(t *testing.T) {
 	s := helperSidecar()
 	s.DurationSeconds = 0
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("duration=0 (unknown) should not force low, got %q\nfactors: %v", s.Confidence.Level, s.Confidence.Factors)
 	}
 }
@@ -187,7 +190,7 @@ func TestConfidence_LowCommDiversityForcesLow(t *testing.T) {
 	s := helperSidecar()
 	s.Target.DistinctComms = 1
 	computeConfidence(s)
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("comm diversity <2 should force low, got %q", s.Confidence.Level)
 	}
 }
@@ -228,7 +231,7 @@ func TestConfidence_CrossCheckSkippedEmitsNoFactor(t *testing.T) {
 // Phase A: grade stays at moderate (deferred cap), not high.
 func TestConfidence_CrossCheckCleanEmitsOkFactor(t *testing.T) {
 	s := helperSidecar()
-	s.crossCheckStatus = crossCheckStatusOK
+	s.CrossCheckStatus = sidecar.CrossCheckStatusOK
 	s.ExpectedCapsFromEntrypoint = []string{"CHOWN", "SETUID"}
 	// CoverageWarnings empty -- observed covers expected.
 	computeConfidence(s)
@@ -236,7 +239,7 @@ func TestConfidence_CrossCheckCleanEmitsOkFactor(t *testing.T) {
 	if !strings.Contains(joined, "entrypoint cross-check clean") {
 		t.Errorf("expected clean-cross-check factor; got:\n%s", joined)
 	}
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("phase A clean cross-check should leave grade at moderate (deferred cap), got %q", s.Confidence.Level)
 	}
 }
@@ -245,7 +248,7 @@ func TestConfidence_CrossCheckCleanEmitsOkFactor(t *testing.T) {
 // sees we tried. Distinguishes from skipped (no factor at all).
 func TestConfidence_CrossCheckNoSignalsEmitsOkFactor(t *testing.T) {
 	s := helperSidecar()
-	s.crossCheckStatus = crossCheckStatusOK
+	s.CrossCheckStatus = sidecar.CrossCheckStatusOK
 	// ExpectedCapsFromEntrypoint empty; CoverageWarnings empty.
 	computeConfidence(s)
 	joined := strings.Join(s.Confidence.Factors, "\n")
@@ -260,7 +263,7 @@ func TestConfidence_CrossCheckNoSignalsEmitsOkFactor(t *testing.T) {
 // entrypoint-mismatch is the same regardless of other rubric inputs.
 func TestConfidence_CrossCheckWarningsForceLow(t *testing.T) {
 	s := helperSidecar()
-	s.crossCheckStatus = crossCheckStatusOK
+	s.CrossCheckStatus = sidecar.CrossCheckStatusOK
 	s.ExpectedCapsFromEntrypoint = []string{"CHOWN", "FOWNER"}
 	s.CoverageWarnings = []string{
 		"entrypoint references `chown` but FOWNER was not observed. Likely cause: workload did not exercise a code path that needs it.",
@@ -270,7 +273,7 @@ func TestConfidence_CrossCheckWarningsForceLow(t *testing.T) {
 	if !strings.Contains(joined, "low: 1 entrypoint coverage warnings present") {
 		t.Errorf("expected warnings-present low factor; got:\n%s", joined)
 	}
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("warnings should force low in phase B; got %q", s.Confidence.Level)
 	}
 }
@@ -280,13 +283,13 @@ func TestConfidence_CrossCheckWarningsForceLow(t *testing.T) {
 // coverage-gap evidence.
 func TestConfidence_CrossCheckUnavailableEmitsOkFactor(t *testing.T) {
 	s := helperSidecar()
-	s.crossCheckStatus = "docker inspect postgres:16: exec: \"docker\": executable file not found"
+	s.CrossCheckStatus = "docker inspect postgres:16: exec: \"docker\": executable file not found"
 	computeConfidence(s)
 	joined := strings.Join(s.Confidence.Factors, "\n")
 	if !strings.Contains(joined, "entrypoint cross-check unavailable: docker inspect postgres:16") {
 		t.Errorf("expected unavailable-with-reason factor; got:\n%s", joined)
 	}
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("unavailable cross-check should not change grade; got %q", s.Confidence.Level)
 	}
 }
@@ -296,7 +299,7 @@ func TestConfidence_PopulatedByAggregatePlusFinalize(t *testing.T) {
 	input := `{"timestamp":1000,"cap":"CAP_CHOWN","proc":{"comm":"postgres","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":""}}
 {"timestamp":1600,"cap":"CAP_SETUID","proc":{"comm":"initdb","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":""}}
 `
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -306,7 +309,7 @@ func TestConfidence_PopulatedByAggregatePlusFinalize(t *testing.T) {
 	}
 	computeConfidence(s)
 	// Two events + 1 distinct comm → low.
-	if s.Confidence.Level != ConfidenceLow {
-		t.Errorf("level = %q, want %q\nfactors: %v", s.Confidence.Level, ConfidenceLow, s.Confidence.Factors)
+	if s.Confidence.Level != sidecar.ConfidenceLow {
+		t.Errorf("level = %q, want %q\nfactors: %v", s.Confidence.Level, sidecar.ConfidenceLow, s.Confidence.Factors)
 	}
 }

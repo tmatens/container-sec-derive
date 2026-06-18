@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The fuzz targets below harden csd's parsers of untrusted subprocess output —
@@ -49,7 +52,7 @@ func FuzzAggregateCapadd(f *testing.F) {
 	f.Add("not json\n")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, data string) {
-		obs, err := aggregateCapadd(strings.NewReader(data), aggregateOpts{}, dangerousCaps)
+		obs, err := aggregateCapadd(strings.NewReader(data), attrib.Opts{}, dangerousCaps)
 		if err != nil || obs == nil {
 			return // parse / ambiguity errors are fine; a panic is not
 		}
@@ -70,8 +73,8 @@ func FuzzAggregateCapadd(f *testing.F) {
 // malformed compose file is a prime panic (index-out-of-range) target. A patch
 // failure (service not found, etc.) is fine; a panic is not.
 func FuzzCapaddComposePatch(f *testing.F) {
-	val := &capaddValidation{
-		Findings:           []CapaddFinding{{Cap: "SYS_ADMIN", Used: true}},
+	val := &sidecar.CapaddValidation{
+		Findings:           []sidecar.CapaddFinding{{Cap: "SYS_ADMIN", Used: true}},
 		GrantedSetProvided: true,
 		RecommendedCapAdd:  []string{"NET_RAW", "PERFMON"},
 	}

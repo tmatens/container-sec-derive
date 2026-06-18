@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 func TestFileEventUnmarshal(t *testing.T) {
@@ -88,7 +90,7 @@ func TestAggregateWrites(t *testing.T) {
 {"syscall":"openat","flags_raw":0,"fpath":"/etc/hosts","proc":{"comm":"app"},"runtime":{"containerId":"aaa111aaa111","containerName":"web-1","containerImageName":"web:1"}}
 {"syscall":"openat","flags_raw":66,"fpath":"/data/db","proc":{"comm":"db"},"runtime":{"containerId":"bbb222bbb222","containerName":"db-1","containerImageName":"db:1"}}
 `
-	obs, err := aggregateWrites(strings.NewReader(nd), aggregateOpts{})
+	obs, err := aggregateWrites(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +111,7 @@ func TestAggregateWrites(t *testing.T) {
 	}
 
 	// Target selection: only web-1's writes.
-	sel, err := aggregateWrites(strings.NewReader(nd), aggregateOpts{Container: "web-1"})
+	sel, err := aggregateWrites(strings.NewReader(nd), attrib.Opts{Container: "web-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,13 +17,16 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // version is the csd release string. Set at build time via
@@ -35,34 +38,6 @@ import (
 // Surfaced through `csd --version` so smoke tests (image and binary)
 // can assert the running build matches the published tag.
 var version = "dev"
-
-// Pinned IG release. v0.1 targets a single upstream version; MIN/MAX
-// equal the pin until we've smoke-tested against a widening window.
-// PLAN.md §IG version pinning defines the v1 semantics. Step 33
-// promoted the version-mismatch path from warn-and-continue to a
-// hard ExitSchemaMismatch (checkIGVersion below); the fixture path
-// is unaffected because produceObservation short-circuits to
-// aggregate() before checkIGVersion runs.
-const (
-	PinnedIGVersion    = "v0.51.0"
-	MinIGVersion       = "v0.51.0"
-	MaxTestedIGVersion = "v0.51.0"
-
-	// TraceCapabilitiesGadget is the OCI reference ig pulls to run the
-	// trace_capabilities gadget. ig v0.51.0 is fully image-based: a bare
-	// "trace_capabilities" is not a valid argument to `ig run`. We tag to
-	// PinnedIGVersion so the gadget image and the ig binary advance
-	// together; bumping the pin means re-pulling this tag.
-	TraceCapabilitiesGadget = "ghcr.io/inspektor-gadget/gadget/trace_capabilities:" + PinnedIGVersion
-
-	// TraceOpenGadget is the OCI reference for the trace_open gadget, the
-	// signal source for the v0.2 read-only-filesystem observer: it traces
-	// open/openat and reports the open flags (so write-intent opens can be
-	// filtered) and the symlink-resolved full path (with --paths). Tagged
-	// to PinnedIGVersion in lockstep with TraceCapabilitiesGadget — bumping
-	// the pin re-pulls both. See ROADMAP §v0.2 and the design in issue #77.
-	TraceOpenGadget = "ghcr.io/inspektor-gadget/gadget/trace_open:" + PinnedIGVersion
-)
 
 // --observe selector values. caps is the v0.1 capability observer (default);
 // fs is the v0.2 read-only-filesystem + tmpfs observer. PLAN.md §Architecture:
@@ -173,89 +148,12 @@ func (e *capEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// igLostSamplesRE matches ig's ringbuf-loss stderr warnings. v0.51.0
-// emits these as logrus-formatted lines rather than typed stdout
-// events; parsing them is the only way to surface drop counts on
-// real hosts. PLAN.md §Event-loss reporting.
-var igLostSamplesRE = regexp.MustCompile(`lost (\d+) samples`)
-
-// aggregateOpts collects the knobs that control a single aggregate()
-// pass. It exists because the aggregator now takes a selector (container
-// or image), a multi-replica opt-in, and a filter window -- four
-// positional args was about to become five, which is where selection
-// vs. behavior start to get confused at call sites.
-type aggregateOpts struct {
-	Container    string // --container: exact id / name / id-prefix
-	Image        string // --image: image reference (may match N replicas)
-	AllMatching  bool   // --all-matching: aggregate across N replicas
-	InitWindowMs int    // --init-window-ms (0 disables)
-}
-
-func (o aggregateOpts) matches(ev capEvent) bool {
-	return o.matchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage)
-}
-
-// matchesRuntime is the observer-agnostic target selection shared by the
-// capability and file-write observers — their events carry the same runtime
-// attribution fields (containerId / containerName / containerImageName), so
-// the container/image/id-prefix selection logic lives here once.
-func (o aggregateOpts) matchesRuntime(containerID, containerName, image string) bool {
-	if o.Container == "" && o.Image == "" {
-		return true
-	}
-	if o.Container != "" {
-		if containerID == o.Container || containerName == o.Container {
-			return true
-		}
-		if len(o.Container) >= 6 && strings.HasPrefix(containerID, o.Container) {
-			return true
-		}
-	}
-	if o.Image != "" && image == o.Image {
-		return true
-	}
-	return false
-}
-
-// ambiguous reports whether the active selector matched more replicas than the
-// user opted into aggregating. A bare --image without --all-matching is
-// ambiguous; so is a --container id-prefix that matched >1 container (an exact
-// id/name match yields one replica, so this only fires for a too-short prefix —
-// deep-review M3). Emitting the union would be an over-permissioned profile
-// (PLAN.md §Target selection). The no-selector case (whole-host / --fixture
-// replay) is intentionally not ambiguous. --all-matching requires --image, so it
-// only ever clears the image path.
-func (o aggregateOpts) ambiguous(replicaCount int) bool {
-	if replicaCount <= 1 || o.AllMatching {
-		return false
-	}
-	return o.Image != "" || o.Container != ""
-}
-
-// newAmbiguousSelectionError builds the typed error for the active selector,
-// naming the right flag and only offering --all-matching as a remedy for --image.
-func (o aggregateOpts) newAmbiguousSelectionError(labels []string) *ambiguousSelectionError {
-	if o.Image != "" {
-		return &ambiguousSelectionError{flag: "--image", selector: o.Image, replicas: labels, allMatchingHint: true}
-	}
-	return &ambiguousSelectionError{flag: "--container", selector: o.Container, replicas: labels}
-}
-
-func (o aggregateOpts) modeLabel() string {
-	if o.Image != "" {
-		if o.AllMatching {
-			return TargetModeAllMatching
-		}
-		return TargetModeImage
-	}
-	return TargetModeContainer
-}
-
-func (o aggregateOpts) selector() string {
-	if o.Image != "" {
-		return o.Image
-	}
-	return o.Container
+// optsMatch reports whether a capability event belongs to the selected
+// target. It lives here rather than on attrib.Opts because attrib must stay
+// event-type-agnostic (it would otherwise have to import the caps event type);
+// the generic string-level decision is attrib.Opts.MatchesRuntime.
+func optsMatch(o attrib.Opts, ev capEvent) bool {
+	return o.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage)
 }
 
 func main() {
@@ -263,7 +161,7 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "csd:", err)
 	}
-	os.Exit(exitCodeFor(err))
+	os.Exit(exit.CodeFor(err))
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
@@ -316,44 +214,44 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
 		// flags as parse errors. CI integrators want both as EX_USAGE.
-		return wrapCoded(ExitUsage, err)
+		return exit.WrapCoded(exit.Usage, err)
 	}
 
 	if *container != "" && *image != "" {
-		return codedErrorf(ExitUsage, "--container and --image are mutually exclusive")
+		return exit.CodedErrorf(exit.Usage, "--container and --image are mutually exclusive")
 	}
 	if *allMatching && *image == "" {
-		return codedErrorf(ExitUsage, "--all-matching requires --image")
+		return exit.CodedErrorf(exit.Usage, "--all-matching requires --image")
 	}
 	if *fixture == "" && *container == "" && *image == "" {
-		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
+		return exit.CodedErrorf(exit.Usage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
 	switch *format {
 	case FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI, FormatNftables, FormatK8sNetworkPolicy:
 		// implemented
 	default:
-		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI, FormatNftables, FormatK8sNetworkPolicy)
+		return exit.CodedErrorf(exit.Usage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI, FormatNftables, FormatK8sNetworkPolicy)
 	}
 	// nftables / k8s-networkpolicy are the v0.8 egress output family and are not
 	// meaningful for the compose-security observers; reject early rather than
 	// silently no-op in their formatter switches.
 	if (*format == FormatNftables || *format == FormatK8sNetworkPolicy) && *observe != ObserveEgress {
-		return codedErrorf(ExitUsage, "--format %s is only valid with --observe %s", *format, ObserveEgress)
+		return exit.CodedErrorf(exit.Usage, "--format %s is only valid with --observe %s", *format, ObserveEgress)
 	}
 	switch *observe {
 	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd, ObserveEgress:
 		// recognized
 	default:
-		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd, ObserveEgress)
+		return exit.CodedErrorf(exit.Usage, "--observe %q not recognized; supported: %s, %s, %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd, ObserveEgress)
 	}
 	if *observe != ObserveFS && *mountsFixture != "" {
-		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
+		return exit.CodedErrorf(exit.Usage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
 	}
 	if *observe != ObservePrivileged && *deviceFixture != "" {
-		return codedErrorf(ExitUsage, "--device-fixture is only meaningful with --observe %s", ObservePrivileged)
+		return exit.CodedErrorf(exit.Usage, "--device-fixture is only meaningful with --observe %s", ObservePrivileged)
 	}
 	if *observe != ObserveCapadd && *capAddIn != "" {
-		return codedErrorf(ExitUsage, "--cap-add is only meaningful with --observe %s", ObserveCapadd)
+		return exit.CodedErrorf(exit.Usage, "--cap-add is only meaningful with --observe %s", ObserveCapadd)
 	}
 	// Workload is recorded on the sidecar and surfaced as a confidence factor
 	// (both observers); the compose-lint contribution gate also requires the
@@ -361,7 +259,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// path fails fast (EX_USAGE) rather than after a full observation window.
 	if *workload != "" {
 		if _, err := os.Stat(*workload); err != nil {
-			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("--workload %q: %w", *workload, err))
 		}
 	}
 	// The v0.8 egress observer (trace_tcp) derives an outbound allowlist into a
@@ -377,10 +275,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatJSON, FormatNftables, FormatK8sNetworkPolicy:
 			// implemented
 		default:
-			return codedErrorf(ExitUsage, "--observe %s supports --format %s, %s, or %s (not %s)", ObserveEgress, FormatJSON, FormatNftables, FormatK8sNetworkPolicy, *format)
+			return exit.CodedErrorf(exit.Usage, "--observe %s supports --format %s, %s, or %s (not %s)", ObserveEgress, FormatJSON, FormatNftables, FormatK8sNetworkPolicy, *format)
 		}
 		s, err := produceEgressObservation(egressPipelineOpts{
-			AggregateOpts: aggregateOpts{
+			AggregateOpts: attrib.Opts{
 				Container:    *container,
 				Image:        *image,
 				AllMatching:  *allMatching,
@@ -413,10 +311,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("write sidecar: %w", err)
 			}
 		}
-		if s.TraceHealth.DropRate >= DropRateAbort {
-			return codedErrorf(ExitDropRateExcessive,
+		if s.TraceHealth.DropRate >= exit.DropRateAbort {
+			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
-				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.DropRate, exit.DropRateAbort,
 				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
 			)
 		}
@@ -434,19 +332,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// compose-lint-profile honors --allow-exploratory.
 		if *format == FormatComposePatch {
 			if *composeIn == "" || *composeService == "" {
-				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
 			}
 			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
 			}
 		} else if *composeIn != "" || *composeService != "" {
-			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
 		}
 		if *allowExploratory && *format != FormatComposeLintEntry {
-			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		s, err := produceFSObservation(fsPipelineOpts{
-			AggregateOpts: aggregateOpts{
+			AggregateOpts: attrib.Opts{
 				Container:   *container,
 				Image:       *image,
 				AllMatching: *allMatching,
@@ -484,14 +382,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatComposePatch:
 			raw, readErr := os.ReadFile(*composeIn)
 			if readErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
 			}
 			if err := writeFSComposePatch(stdout, *s.FSRecommendation, raw, *composeIn, *composeService); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write fs compose-patch: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write fs compose-patch: %w", err))
 			}
 		case FormatComposeLintEntry:
 			if err := writeFSComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write fs compose-lint-profile: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write fs compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {
@@ -499,10 +397,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("write sidecar: %w", err)
 			}
 		}
-		if s.TraceHealth.DropRate >= DropRateAbort {
-			return codedErrorf(ExitDropRateExcessive,
+		if s.TraceHealth.DropRate >= exit.DropRateAbort {
+			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
-				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.DropRate, exit.DropRateAbort,
 				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
 			)
 		}
@@ -521,19 +419,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// cap/fs paths); compose-lint-profile honors --allow-exploratory.
 		if *format == FormatComposePatch {
 			if *composeIn == "" || *composeService == "" {
-				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
 			}
 			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
 			}
 		} else if *composeIn != "" || *composeService != "" {
-			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
 		}
 		if *allowExploratory && *format != FormatComposeLintEntry {
-			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		s, err := produceDeviceObservation(devicePipelineOpts{
-			AggregateOpts: aggregateOpts{
+			AggregateOpts: attrib.Opts{
 				Container:   *container,
 				Image:       *image,
 				AllMatching: *allMatching,
@@ -570,14 +468,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatComposePatch:
 			raw, readErr := os.ReadFile(*composeIn)
 			if readErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
 			}
 			if err := writeDeviceComposePatch(stdout, *s.DeviceRecommendation, raw, *composeIn, *composeService); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write device compose-patch: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write device compose-patch: %w", err))
 			}
 		case FormatComposeLintEntry:
 			if err := writeDeviceComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write device compose-lint-profile: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write device compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {
@@ -585,10 +483,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("write sidecar: %w", err)
 			}
 		}
-		if s.TraceHealth.DropRate >= DropRateAbort {
-			return codedErrorf(ExitDropRateExcessive,
+		if s.TraceHealth.DropRate >= exit.DropRateAbort {
+			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
-				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.DropRate, exit.DropRateAbort,
 				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
 			)
 		}
@@ -606,19 +504,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// --allow-exploratory (shared shape with the cap/fs/device paths).
 		if *format == FormatComposePatch {
 			if *composeIn == "" || *composeService == "" {
-				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
 			}
 			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
 			}
 		} else if *composeIn != "" || *composeService != "" {
-			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
 		}
 		if *allowExploratory && *format != FormatComposeLintEntry {
-			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		s, err := producePrivilegedObservation(privilegedPipelineOpts{
-			AggregateOpts: aggregateOpts{
+			AggregateOpts: attrib.Opts{
 				Container:    *container,
 				Image:        *image,
 				AllMatching:  *allMatching,
@@ -659,14 +557,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatComposePatch:
 			raw, readErr := os.ReadFile(*composeIn)
 			if readErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
 			}
 			if err := writePrivilegedComposePatch(stdout, s, raw, *composeIn, *composeService); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write privileged compose-patch: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write privileged compose-patch: %w", err))
 			}
 		case FormatComposeLintEntry:
 			if err := writePrivilegedComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write privileged compose-lint-profile: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write privileged compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {
@@ -675,10 +573,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 			}
 		}
 		emitAdvisoryWarnings(s, stderr)
-		if s.TraceHealth.DropRate >= DropRateAbort {
-			return codedErrorf(ExitDropRateExcessive,
+		if s.TraceHealth.DropRate >= exit.DropRateAbort {
+			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
-				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.DropRate, exit.DropRateAbort,
 				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
 			)
 		}
@@ -693,16 +591,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *observe == ObserveCapadd {
 		if *format == FormatComposePatch {
 			if *composeIn == "" || *composeService == "" {
-				return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
 			}
 			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
 			}
 		} else if *composeIn != "" || *composeService != "" {
-			return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
 		}
 		if *allowExploratory && *format != FormatComposeLintEntry {
-			return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
 		// The granted set (--cap-add) is the validate-set when supplied — and the
 		// switch that enables unused-cap detection + a recommended minimized
@@ -715,7 +613,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 			activeSet = dangerousCaps
 		}
 		s, err := produceCapaddObservation(capaddPipelineOpts{
-			AggregateOpts: aggregateOpts{
+			AggregateOpts: attrib.Opts{
 				Container:   *container,
 				Image:       *image,
 				AllMatching: *allMatching,
@@ -754,14 +652,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		case FormatComposePatch:
 			raw, readErr := os.ReadFile(*composeIn)
 			if readErr != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
 			}
 			if err := writeCapaddComposePatch(stdout, s.CapaddValidation, raw, *composeIn, *composeService); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write capadd compose-patch: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write capadd compose-patch: %w", err))
 			}
 		case FormatComposeLintEntry:
 			if err := writeCapaddComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return wrapCoded(ExitUsage, fmt.Errorf("write capadd compose-lint-profile: %w", err))
+				return exit.WrapCoded(exit.Usage, fmt.Errorf("write capadd compose-lint-profile: %w", err))
 			}
 		}
 		if *outPath != "" {
@@ -770,34 +668,34 @@ func run(args []string, stdout, stderr io.Writer) error {
 			}
 		}
 		emitAdvisoryWarnings(s, stderr)
-		if s.TraceHealth.DropRate >= DropRateAbort {
-			return codedErrorf(ExitDropRateExcessive,
+		if s.TraceHealth.DropRate >= exit.DropRateAbort {
+			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
-				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.DropRate, exit.DropRateAbort,
 				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
 			)
 		}
 		return nil
 	}
 	if *allowExploratory && *format != FormatComposeLintEntry {
-		return codedErrorf(ExitUsage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
+		return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 	}
 	// compose-patch needs both --compose-in and --service; reject the
 	// flags elsewhere so a future user doesn't believe they have an
 	// effect with another formatter.
 	if *format == FormatComposePatch {
 		if *composeIn == "" || *composeService == "" {
-			return codedErrorf(ExitUsage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+			return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
 		}
 		if _, err := os.Stat(*composeIn); err != nil {
-			return wrapCoded(ExitUsage, fmt.Errorf("--compose-in %q: %w", *composeIn, err))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, err))
 		}
 	} else if *composeIn != "" || *composeService != "" {
-		return codedErrorf(ExitUsage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
 	}
 
 	s, err := produceObservation(observePipelineOpts{
-		AggregateOpts: aggregateOpts{
+		AggregateOpts: attrib.Opts{
 			Container:    *container,
 			Image:        *image,
 			AllMatching:  *allMatching,
@@ -821,13 +719,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case FormatComposePatch:
 		raw, readErr := os.ReadFile(*composeIn)
 		if readErr != nil {
-			return wrapCoded(ExitUsage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
 		}
 		if err := writeComposePatch(stdout, s, raw, *composeIn, *composeService); err != nil {
 			// Service-not-found / services-block-missing are usage
 			// errors: the user pointed at a file that can't host the
 			// patch, not a runtime failure of csd.
-			return wrapCoded(ExitUsage, fmt.Errorf("write compose-patch: %w", err))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("write compose-patch: %w", err))
 		}
 	case FormatDockerRun:
 		if err := writeDockerRun(stdout, s); err != nil {
@@ -851,7 +749,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 			// for a contribution-ready profile and the artifact didn't
 			// clear the bar. Surface as EX_USAGE so CI pipelines catch
 			// it rather than quietly accepting a silently-empty stdout.
-			return wrapCoded(ExitUsage, fmt.Errorf("write compose-lint-profile: %w", err))
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("write compose-lint-profile: %w", err))
 		}
 	}
 
@@ -869,10 +767,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// Drop rate >= 10% is "artifact-with-caveat" per PLAN.md §Exit codes:
 	// caps have already been printed; the nonzero exit is what tells CI
 	// the profile isn't trustworthy.
-	if s.TraceHealth.DropRate >= DropRateAbort {
-		return codedErrorf(ExitDropRateExcessive,
+	if s.TraceHealth.DropRate >= exit.DropRateAbort {
+		return exit.CodedErrorf(exit.DropRateExcessive,
 			"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
-			s.TraceHealth.DropRate, DropRateAbort,
+			s.TraceHealth.DropRate, exit.DropRateAbort,
 			s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
 		)
 	}
@@ -885,14 +783,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 // recorded on the sidecar but only useful if reviewers can see them
 // without reading the JSON. Both are non-fatal (the ≥10% drop abort
 // stays); silent stderr is the cheapest path to making them obvious.
-func emitAdvisoryWarnings(s *Sidecar, stderr io.Writer) {
+func emitAdvisoryWarnings(s *sidecar.Sidecar, stderr io.Writer) {
 	if stderr == nil {
 		return
 	}
-	if s.TraceHealth.DropRate > 0 && s.TraceHealth.DropRate < DropRateAbort {
+	if s.TraceHealth.DropRate > 0 && s.TraceHealth.DropRate < exit.DropRateAbort {
 		fmt.Fprintf(stderr,
 			"csd: warning: trace_health drop_rate %.4f (%d dropped / %d recorded); below %.2f abort threshold but profile may be incomplete\n",
-			s.TraceHealth.DropRate, s.TraceHealth.EventsDropped, s.TraceHealth.EventsRecorded, DropRateAbort,
+			s.TraceHealth.DropRate, s.TraceHealth.EventsDropped, s.TraceHealth.EventsRecorded, exit.DropRateAbort,
 		)
 	}
 	if len(s.Target.ReplicaCapDisagreement) > 0 {
@@ -952,7 +850,7 @@ func looksLikeWSL2(procVersion string) bool {
 // come from, how long the live window runs, the workload script
 // recorded on the sidecar).
 type observePipelineOpts struct {
-	AggregateOpts  aggregateOpts
+	AggregateOpts  attrib.Opts
 	Fixture        string
 	FixtureStderr  string
 	InspectFixture string
@@ -968,17 +866,17 @@ type observePipelineOpts struct {
 // any future fix to the pipeline lands in one place.
 //
 // Errors that the run path translated to typed exit codes are
-// translated here: ambiguous-selection becomes ExitTargetAmbiguous,
+// translated here: ambiguous-selection becomes exit.TargetAmbiguous,
 // ig-missing flows through observe()'s wrapped error verbatim. Drop-
 // rate abort is NOT applied here -- callers may want to emit the
 // formatted artifact (run) or the verify result (runVerify) before
 // surfacing the abort, and centralising that here would force a flag
 // on this helper that neither caller needs.
-func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, error) {
+func produceObservation(opts observePipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 
 	var (
-		s   *Sidecar
+		s   *sidecar.Sidecar
 		err error
 	)
 	if opts.Fixture != "" {
@@ -996,12 +894,12 @@ func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, e
 			if openErrErr != nil {
 				return nil, fmt.Errorf("open fixture-stderr: %w", openErrErr)
 			}
-			s.TraceHealth.EventsDropped = parseIGStderr(errSrc, nil)
+			s.TraceHealth.EventsDropped = ig.ParseIGStderr(errSrc, nil)
 			errSrc.Close()
 		}
 	} else {
 		noteWSL2IfDetected(stderr)
-		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -1017,9 +915,9 @@ func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, e
 		finaliseTraceHealth(&s.TraceHealth)
 	}
 	if err != nil {
-		var amb *ambiguousSelectionError
+		var amb *exit.AmbiguousSelectionError
 		if errors.As(err, &amb) {
-			return nil, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
 	}
@@ -1035,8 +933,8 @@ func produceObservation(opts observePipelineOpts, stderr io.Writer) (*Sidecar, e
 // events for the lifetime of ctx. ig's stderr is tee'd through
 // parseIGStderr so the ringbuf-loss counter (v0.51.0 emits these as
 // stderr warnings, not typed stdout events) lands on the sidecar.
-func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*Sidecar, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", TraceCapabilitiesGadget, "--output", "json")
+func observe(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*sidecar.Sidecar, error) {
+	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceCapabilitiesGadget, "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -1046,8 +944,8 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		if isIGMissing(err) {
-			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		if exit.IsIGMissing(err) {
+			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
 		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
@@ -1059,7 +957,7 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lost = parseIGStderr(stderrPipe, stderrSink)
+		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	s, aggErr := aggregate(stdout, opts)
@@ -1069,7 +967,7 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 		// target-selection ambiguity) with ig's stdout pipe undrained; ig will
 		// block on the full pipe and never exit, so kill it now rather than let
 		// the stderr drain and cmd.Wait() below stall for the rest of the
-		// --duration window (a fast ExitTargetAmbiguous is the intended path).
+		// --duration window (a fast exit.TargetAmbiguous is the intended path).
 		_ = cmd.Process.Kill()
 	}
 	// Join the stderr-drain goroutine BEFORE cmd.Wait(): Wait closes the pipe,
@@ -1090,50 +988,13 @@ func observe(ctx context.Context, igBin string, opts aggregateOpts, stderrSink i
 	return s, nil
 }
 
-// parseIGStderr scans ig's stderr stream for ringbuf-loss warnings
-// of the form `lost N samples` (ig v0.51.0 format) and returns the
-// cumulative total. Every line is echoed to sink so operators still
-// see ig's diagnostics; passing nil for sink silences passthrough.
-//
-// It reads with bufio.Reader.ReadString, NOT bufio.Scanner: a scanner's fixed
-// line cap silently STOPS on an oversized line, dropping every subsequent
-// `lost N` count and under-reporting drops — which would defeat the >=1%
-// confidence downgrade and the >=10% ExitDropRateExcessive abort on an
-// adversarial / pathological ig stderr stream (esp. via --fixture-stderr).
-// ReadString has no line cap, so an outsized line is read through and parsing
-// continues, and it always reads to EOF so the stderr pipe is fully drained
-// (it can never block the observe path).
-func parseIGStderr(r io.Reader, sink io.Writer) int {
-	total := 0
-	br := bufio.NewReader(r)
-	for {
-		line, err := br.ReadString('\n')
-		if len(line) > 0 {
-			line = strings.TrimRight(line, "\r\n")
-			if sink != nil {
-				fmt.Fprintln(sink, line)
-			}
-			m := igLostSamplesRE.FindStringSubmatch(line)
-			if len(m) == 2 {
-				if n, convErr := strconv.Atoi(m[1]); convErr == nil {
-					total += n
-				}
-			}
-		}
-		if err != nil { // io.EOF or a read error: stream is exhausted
-			break
-		}
-	}
-	return total
-}
-
 // finaliseTraceHealth computes DropRate once both sides of the ratio
 // are known. recorded is the count of events csd parsed; dropped is
 // ig's stderr-reported loss. Ratio is dropped / recorded to preserve
 // the pre-Step-11 rubric thresholds; recomputing against the total
 // population (dropped + recorded) would shift every threshold and is
 // out of scope for the parser realignment.
-func finaliseTraceHealth(th *TraceHealth) {
+func finaliseTraceHealth(th *sidecar.TraceHealth) {
 	if th.EventsRecorded > 0 {
 		th.DropRate = float64(th.EventsDropped) / float64(th.EventsRecorded)
 	} else if th.EventsDropped > 0 {
@@ -1142,62 +1003,6 @@ func finaliseTraceHealth(th *TraceHealth) {
 		// run with losses would look clean.
 		th.DropRate = 1.0
 	}
-}
-
-// checkIGVersion runs `ig version` and returns ExitSchemaMismatch when
-// the detected release is outside [MinIGVersion, MaxTestedIGVersion].
-// ig v0.51.0 does not support --output json on `version`; the
-// subcommand emits a single plain-text line like "v0.51.0". We take
-// the first whitespace-delimited token so future ig releases that
-// add trailing metadata still parse.
-//
-// Step 33 promotes this to a hard SchemaMismatch exit per PLAN.md
-// §IG version pinning. Phase A (Steps 11.1..32) was warn-and-continue
-// so we'd learn about drift without breaking fixture-only users; the
-// fixture path doesn't reach this function (produceObservation
-// short-circuits to aggregate() before the version check), so the
-// hard-fail only affects live observe.
-//
-// Failures of `ig version` itself (binary missing, exec error) are
-// NOT treated as SchemaMismatch — observe() will surface ExitIGMissing
-// for the same condition. Returning nil here keeps the version-check
-// out of that error's blast radius.
-// igVersionCheckTimeout bounds the `ig version` probe in checkIGVersion. ig
-// version is near-instant; this is a generous ceiling that only fires if the
-// binary hangs.
-const igVersionCheckTimeout = 10 * time.Second
-
-func checkIGVersion(igBin string, stderr io.Writer) error {
-	// Bound the probe and honor Ctrl-C/SIGTERM: a hung `ig version` used to
-	// ignore both because it ran via context-less exec.Command (deep-review L1).
-	// The signal context is short-lived (just this probe) — the observe path
-	// installs its own afterwards.
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	ctx, timeoutCancel := context.WithTimeout(ctx, igVersionCheckTimeout)
-	defer timeoutCancel()
-	out, err := exec.CommandContext(ctx, igBin, "version").Output()
-	if err != nil {
-		if stderr != nil {
-			fmt.Fprintf(stderr, "csd: ig version check skipped: %v\n", err)
-		}
-		return nil
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return nil
-	}
-	detected := fields[0]
-	if detected == "" {
-		return nil
-	}
-	if detected != PinnedIGVersion {
-		return codedErrorf(ExitSchemaMismatch,
-			"ig %s detected, PINNED_IG_VERSION=%s (tested window %s..%s); refusing to parse — see PLAN.md §IG version pinning",
-			detected, PinnedIGVersion, MinIGVersion, MaxTestedIGVersion,
-		)
-	}
-	return nil
 }
 
 // replicaState accumulates per-replica data as aggregate() streams events.
@@ -1264,7 +1069,7 @@ func (c *capStats) observe(tsMs int64, comm string) {
 // Timestamps are assumed to be milliseconds (fixture convention, matching
 // `ig run trace_capabilities --output json` at the pinned release).
 // Revisit if Step 11's IG version pin exposes a different unit.
-func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
+func aggregate(r io.Reader, opts attrib.Opts) (*sidecar.Sidecar, error) {
 	replicas := map[string]*replicaState{}
 	capUnion := map[string]*capStats{}
 	var recorded int
@@ -1288,7 +1093,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			// benign diagnostic line.
 			return nil, fmt.Errorf("parse trace_capabilities event: %w", err)
 		}
-		if !opts.matches(ev) {
+		if !optsMatch(opts, ev) {
 			continue
 		}
 		recorded++
@@ -1372,7 +1177,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	// matched >1 replica without --all-matching. PLAN.md §Target selection
 	// requires an error here so the tool never silently emits the union of
 	// replica cap sets as a single profile.
-	if opts.ambiguous(len(replicas)) {
+	if opts.Ambiguous(len(replicas)) {
 		labels := make([]string, 0, len(replicas))
 		for rid, st := range replicas {
 			if st.sampleName != "" {
@@ -1382,12 +1187,12 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 			}
 		}
 		sort.Strings(labels)
-		return nil, opts.newAmbiguousSelectionError(labels)
+		return nil, opts.NewAmbiguousSelectionError(labels)
 	}
 
-	s := NewSidecar()
-	s.Target.Mode = opts.modeLabel()
-	s.Target.Selector = opts.selector()
+	s := sidecar.NewSidecar()
+	s.Target.Mode = opts.ModeLabel()
+	s.Target.Selector = opts.Selector()
 	s.Target.ReplicasObserved = len(replicas)
 
 	commUnion := map[string]struct{}{}
@@ -1420,7 +1225,7 @@ func aggregate(r io.Reader, opts aggregateOpts) (*Sidecar, error) {
 	allNames := sortedKeys(capUnion)
 	for _, n := range allNames {
 		cs := capUnion[n]
-		cap := Capability{
+		cap := sidecar.Capability{
 			Name:        n,
 			EventCount:  cs.eventCount,
 			CommSamples: sortedKeys(cs.commSamples),
@@ -1497,7 +1302,7 @@ func isInitComm(comm string) bool {
 //
 // Routes through writeJSON so the --out file and `--format json` stdout
 // are byte-identical.
-func writeSidecar(s *Sidecar, path string) error {
+func writeSidecar(s *sidecar.Sidecar, path string) error {
 	// 0600, not os.Create's 0666: the sidecar is security evidence written by a
 	// root-equivalent process; it should not be world- or group-readable
 	// (deep-review L4).

@@ -5,14 +5,17 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // helperSidecarWithCaps returns a Sidecar carrying caps in the order
 // supplied; matches what aggregate() produces for downstream formatters.
-func helperSidecarWithCaps(caps ...string) *Sidecar {
-	s := NewSidecar()
+func helperSidecarWithCaps(caps ...string) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
 	for _, c := range caps {
-		s.Capabilities = append(s.Capabilities, Capability{Name: c})
+		s.Capabilities = append(s.Capabilities, sidecar.Capability{Name: c})
 	}
 	return s
 }
@@ -277,8 +280,8 @@ func TestRun_ComposePatchMissingFlagsFailsEXUsage(t *testing.T) {
 			t.Errorf("case %d: expected error", i)
 			continue
 		}
-		if exitCodeFor(err) != ExitUsage {
-			t.Errorf("case %d: exit code = %d, want %d", i, exitCodeFor(err), ExitUsage)
+		if exit.CodeFor(err) != exit.Usage {
+			t.Errorf("case %d: exit code = %d, want %d", i, exit.CodeFor(err), exit.Usage)
 		}
 	}
 }
@@ -294,8 +297,8 @@ func TestRun_ComposePatchFlagsRejectedWithOtherFormats(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected --compose-in rejected with --format compose")
 	}
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit code = %d, want %d", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit code = %d, want %d", exit.CodeFor(err), exit.Usage)
 	}
 }
 

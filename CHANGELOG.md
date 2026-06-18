@@ -11,6 +11,8 @@ the relevant entry.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-18
+
 ### Added
 
 - **`--observe egress` DNS/hostname correlation (issue #159), fixture path.**
@@ -330,7 +332,8 @@ First signed release — the capability observer.
   no public Rekor) with SBOM + OpenVEX attestations, built on a digest-pinned,
   cosign-verified vendored `ig`.
 
-[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/tmatens/container-sec-derive/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/tmatens/container-sec-derive/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/tmatens/container-sec-derive/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/tmatens/container-sec-derive/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/tmatens/container-sec-derive/compare/v0.3.1...v0.4.0

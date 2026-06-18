@@ -3,12 +3,18 @@ package egress
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"sort"
+	"sync"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -106,4 +112,58 @@ func aggregateDNS(r io.Reader, opts attrib.Opts) (*dnsCorrelation, error) {
 	}
 	c.Resolvers = sortedDests(resolverSet)
 	return c, nil
+}
+
+// observeDNS spawns `ig run trace_dns --output json` and builds the DNS
+// correlation for the lifetime of ctx. It is observeEgress with aggregateDNS
+// swapped in and the trace_dns gadget — the same stderr-drain + ringbuf-loss
+// accounting and early-error kill; only the gadget and aggregator differ. It
+// runs concurrently with observeEgress (see ProduceEgressObservation), so it
+// must not share state with it; it returns its own *dnsCorrelation.
+func observeDNS(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*dnsCorrelation, error) {
+	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceDnsGadget, "--output", "json")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		if exit.IsIGMissing(err) {
+			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		}
+		return nil, fmt.Errorf("start %s: %w", igBin, err)
+	}
+
+	var (
+		wg   sync.WaitGroup
+		lost int
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
+	}()
+
+	corr, aggErr := aggregateDNS(stdout, opts)
+	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
+	if earlyErr {
+		// Undrained stdout on early error → ig blocks and never exits; kill it so
+		// the stderr drain + cmd.Wait() don't stall (matches observeEgress).
+		_ = cmd.Process.Kill()
+	}
+	wg.Wait()
+	waitErr := cmd.Wait()
+	if earlyErr {
+		return nil, aggErr
+	}
+	if waitErr != nil && ctx.Err() == nil {
+		return nil, fmt.Errorf("ig exited: %w", waitErr)
+	}
+	if corr != nil {
+		corr.Dropped = lost
+	}
+	return corr, nil
 }

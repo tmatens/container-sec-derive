@@ -40,17 +40,34 @@ type EgressPipelineOpts struct {
 func ProduceEgressObservation(opts EgressPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
-		eg  *egressObservation
-		err error
+		eg   *egressObservation
+		corr *dnsCorrelation // DNS/hostname correlation (#159); nil → TCP-only v0.5.0 shape
+		err  error
 	)
 	if opts.Fixture != "" {
+		// Fixture mode: trace_tcp from --fixture, trace_dns from the optional
+		// --dns-fixture. An absent DNS half leaves corr nil (graceful degradation).
 		src, openErr := os.Open(opts.Fixture)
 		if openErr != nil {
 			return nil, fmt.Errorf("open fixture: %w", openErr)
 		}
 		defer src.Close()
 		eg, err = aggregateEgress(src, opts.AggregateOpts)
+		if err == nil && opts.DNSFixture != "" {
+			dnsSrc, openErr := os.Open(opts.DNSFixture)
+			if openErr != nil {
+				return nil, fmt.Errorf("open dns fixture: %w", openErr)
+			}
+			defer dnsSrc.Close()
+			corr, err = aggregateDNS(dnsSrc, opts.AggregateOpts)
+		}
 	} else {
+		// Live mode: trace_tcp + trace_dns run concurrently for one window, each
+		// its own ig subprocess (mirrors the privileged observer's two-gadget
+		// path). The trace_tcp error is fatal — it owns the allowlist. A trace_dns
+		// error is non-fatal enrichment: it is surfaced on stderr and the run
+		// continues with no correlation (the IP allowlist is unaffected; the
+		// "no DNS observed" confidence factor then fires).
 		observe.NoteWSL2IfDetected(stderr)
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
@@ -59,7 +76,26 @@ func ProduceEgressObservation(opts EgressPipelineOpts, stderr io.Writer) (*sidec
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
 		defer timeoutCancel()
-		eg, err = observeEgress(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+
+		var (
+			wg            sync.WaitGroup
+			egErr, dnsErr error
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			eg, egErr = observeEgress(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+		}()
+		go func() {
+			defer wg.Done()
+			corr, dnsErr = observeDNS(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+		}()
+		wg.Wait()
+		err = egErr
+		if dnsErr != nil && egErr == nil {
+			fmt.Fprintf(stderr, "csd: egress DNS correlation skipped (no hostnames/resolver this run): %v\n", dnsErr)
+			corr = nil
+		}
 	}
 	if err != nil {
 		var amb *exit.AmbiguousSelectionError
@@ -67,23 +103,6 @@ func ProduceEgressObservation(opts EgressPipelineOpts, stderr io.Writer) (*sidec
 			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
-	}
-
-	// DNS/hostname correlation (issue #159). In fixture mode it reads the
-	// optional --dns-fixture; the live two-gadget path (trace_tcp + trace_dns
-	// concurrently) is wired in a follow-on. A nil correlation degrades
-	// gracefully: the sidecar is exactly the TCP-only v0.5.0 shape.
-	var corr *dnsCorrelation
-	if opts.Fixture != "" && opts.DNSFixture != "" {
-		dnsSrc, openErr := os.Open(opts.DNSFixture)
-		if openErr != nil {
-			return nil, fmt.Errorf("open dns fixture: %w", openErr)
-		}
-		defer dnsSrc.Close()
-		corr, err = aggregateDNS(dnsSrc, opts.AggregateOpts)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	s := egressToSidecar(eg, corr, opts.AggregateOpts)

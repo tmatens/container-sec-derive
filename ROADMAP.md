@@ -131,7 +131,7 @@ Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/
 
 ## v0.8 — Network egress allowlist
 
-> **Status: implemented (`--observe egress`), shipping in v0.5.0.** Design +
+> **Status: SHIPPED as v0.5.0 (2026-06-18) — `--observe egress`.** Design +
 > scope in **issue #136**. Runs the pinned ig `trace_tcp` gadget and derives the
 > minimum outbound allowlist from the destinations the container actually
 > contacted (outbound `connect()` only — `accept`/`close` filtered). Scoped

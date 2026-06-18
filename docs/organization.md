@@ -17,15 +17,15 @@ import that points the wrong way.
 > **Migration status (issue #149).** The move from the original flat
 > `package main` to this layout is staged. **Landed:** the foundation packages
 > `internal/exit`, `internal/sidecar`, `internal/ig`, `internal/attrib`; the
-> shared observer scaffolding `internal/observe`; and the `caps`, `fs`,
-> `devices`, and `egress` observers under `internal/observe/<name>` (egress
-> carrying its own enforcement formatter). **In progress:** extracting the
-> remaining `capadd` and `privileged` observers, the shared compose-security
-> formatters into `internal/format`, `csd verify` into `internal/verify`, the
-> CLI into `internal/cli`, and the entry point into `cmd/csd`. Until that
-> completes, the not-yet-moved code lives in the repo root `package main` and
-> imports the packages above. The target below is the standard new code is
-> written against.
+> shared observer scaffolding `internal/observe`; and **all six observers**
+> under `internal/observe/<name>` (`caps`, `fs`, `devices`, `privileged`,
+> `capadd`, `egress` — egress carrying its own enforcement formatter).
+> **In progress:** extracting the shared compose-security formatters into
+> `internal/format`, `csd verify` into `internal/verify`, the CLI into
+> `internal/cli`, and the entry point into `cmd/csd` (which also switches the
+> build path to `./cmd/csd`). Until that completes, the formatters, `verify`,
+> and the CLI live in the repo root `package main` and import the packages
+> above. The target below is the standard new code is written against.
 
 ## Package map
 

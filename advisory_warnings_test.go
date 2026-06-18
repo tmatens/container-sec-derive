@@ -100,8 +100,8 @@ func TestRun_PrivilegedPartialDecompositionWarnsToStderr(t *testing.T) {
 	// partial (caps + devices only, no AppArmor/seccomp). json's body carries
 	// no `#` caveat, so the stderr advisory is the only guardrail for it —
 	// assert it fires here.
-	caps := obstest.WriteTemp(t, "caps.ndjson", privCapsFixture)
-	dev := obstest.WriteTemp(t, "dev.ndjson", privDevFixture)
+	caps := obstest.WriteTemp(t, "caps.ndjson", obstest.PrivCapsFixture)
+	dev := obstest.WriteTemp(t, "dev.ndjson", obstest.PrivDevFixture)
 	var out, errBuf bytes.Buffer
 	err := run([]string{
 		"--observe", "privileged",

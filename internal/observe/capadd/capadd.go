@@ -1,4 +1,4 @@
-package main
+package capadd
 
 import (
 	"bufio"
@@ -27,14 +27,14 @@ import (
 // per-event `syscall` field is present at the pinned IG v0.51.0 (verified in
 // testdata/ig-versions/v0.51.0/sample.ndjson). Design + scope in issue #111.
 
-// dangerousCaps is the default validate-set: the high-risk capabilities whose
+// DangerousCaps is the default validate-set: the high-risk capabilities whose
 // presence in cap_add warrants scrutiny (container-escape / broad host impact
 // potential). It deliberately EXCLUDES the routine de-escalation caps a normal
 // entrypoint legitimately uses at startup (CHOWN, SETUID, SETGID, SETPCAP,
 // FOWNER, FSETID, KILL, NET_BIND_SERVICE, AUDIT_WRITE) so the default report is
 // signal, not noise. When the user passes --cap-add the explicit set overrides
 // this default. Names are normalized (no CAP_ prefix), matching NormalizeCap.
-var dangerousCaps = map[string]struct{}{
+var DangerousCaps = map[string]struct{}{
 	"SYS_ADMIN":          {},
 	"SYS_MODULE":         {},
 	"SYS_RAWIO":          {},
@@ -99,14 +99,14 @@ type capaddObservation struct {
 	Image string // first observed container image, mirroring the other aggregators
 }
 
-// aggregateCapadd reads trace_capabilities NDJSON from r, keeps held
+// AggregateCapadd reads trace_capabilities NDJSON from r, keeps held
 // (capable:true) events that match the target selector and whose normalized cap
 // is in activeSet, drops runc/init bring-up checks (IsInitComm — a dangerous cap
 // used only by runc:[*] during container setup is not the workload's need), and
 // records per-cap syscall usage. The >1-replica ambiguity guard mirrors
 // aggregate()/aggregateDevices exactly: --image matching multiple replicas
 // without --all-matching is refused rather than silently unioned.
-func aggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{}) (*capaddObservation, error) {
+func AggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{}) (*capaddObservation, error) {
 	used := map[string]*capUsage{}
 	denied := map[string]map[string]int{}
 	perReplica := map[string]map[string]struct{}{}
@@ -220,10 +220,10 @@ func aggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 	return obs, nil
 }
 
-// parseCapSet normalizes a comma-separated cap list (--cap-add) into a set of
+// ParseCapSet normalizes a comma-separated cap list (--cap-add) into a set of
 // CAP_-stripped, upper-cased names. Empty/blank entries are skipped. Returns nil
 // for an empty input so callers can distinguish "no explicit set" from "set".
-func parseCapSet(s string) map[string]struct{} {
+func ParseCapSet(s string) map[string]struct{} {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil

@@ -71,9 +71,12 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
-          # Cache the Go module/build cache so CodeQL's autobuild isn't fully
-          # cold each run — shaves the extraction/build phase.
-          cache: true
+          # cache: false — measured regression. CodeQL's autobuild compiles via
+          # its own extractor that does not reliably reuse the setup-go build
+          # cache, so cache:true paid the cache-SAVE cost with no restore benefit
+          # and made the Go analysis ~56% slower (~470s → ~740s). The real win is
+          # the security-extended query suite below; the cache change is dropped.
+          cache: false
       - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           languages: ${{ matrix.language }}

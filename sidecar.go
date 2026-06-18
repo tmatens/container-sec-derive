@@ -17,7 +17,7 @@ import "time"
 // 1.3, and a 1.3-aware consumer knows the document may carry the capadd block.
 const (
 	SchemaVersion = "1.3"
-	ToolVersion   = "0.4.0"
+	ToolVersion   = "0.4.1"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."

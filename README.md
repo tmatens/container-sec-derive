@@ -1,6 +1,6 @@
 # container-sec-derive
 
-[![release](https://img.shields.io/badge/release-v0.4.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.4.0)
+[![release](https://img.shields.io/badge/release-v0.4.1-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.4.1)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![signed: cosign](https://img.shields.io/badge/signed-cosign%20key--based-orange?logo=sigstore&logoColor=white)](#verifying-release-artifacts)
@@ -13,7 +13,7 @@
 
 Runtime observation tool that derives the minimum container security configuration an image actually needs by watching it run.
 
-> **Status: v0.4.0 released.** v0.1 delivered capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline (SPDX + CycloneDX SBOMs + OpenVEX) on signed static binaries plus a cosign-signed multi-arch GHCR image. **v0.2 added the read-only-filesystem + tmpfs observer** (`--observe fs`). **v0.3 adds privileged-mode decomposition**: a device observer (`--observe devices`) that derives the minimum `devices:` grant from observed opens of non-default `/dev` nodes, and the `--observe privileged` composition that runs the capability and device observers together to replace `privileged: true` with the minimum `cap_add` + `devices` — emitted in all seven formats, with a `privileged_decomposition` evidence block, a combined confidence rubric, and a hardware-free live integration-CI smoke. **v0.3.1** flags that decomposition as **partial** — the AppArmor/seccomp (`security_opt`) dimension of `privileged: true` is not observed (no denial gadget at the pinned IG), surfaced via a `# WARNING (partial decomposition)` header, `partial`/`security_opt` sidecar fields, and a stderr advisory. **v0.4.0 adds the dangerous-`cap_add` validator** (`--observe capadd`): the inverse of v0.1, it validates an already-granted dangerous capability against observed syscalls — reporting which syscalls invoked it, any finer-grained substitute (e.g. `SYS_ADMIN` used only via `perf_event_open` → `CAP_PERFMON`), and, with the granted set supplied via `--cap-add`, caps granted but never exercised plus a recommended minimized `cap_add`. (This is the ROADMAP §v0.5 observer, pulled ahead of the §v0.4 Docker-socket observer, which is deferred/signal-blocked.) See [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) §v0.5, and [the latest release](https://github.com/tmatens/container-sec-derive/releases).
+> **Status: v0.4.1 released.** v0.1 delivered capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline (SPDX + CycloneDX SBOMs + OpenVEX) on signed static binaries plus a cosign-signed multi-arch GHCR image. **v0.2 added the read-only-filesystem + tmpfs observer** (`--observe fs`). **v0.3 adds privileged-mode decomposition**: a device observer (`--observe devices`) that derives the minimum `devices:` grant from observed opens of non-default `/dev` nodes, and the `--observe privileged` composition that runs the capability and device observers together to replace `privileged: true` with the minimum `cap_add` + `devices` — emitted in all seven formats, with a `privileged_decomposition` evidence block, a combined confidence rubric, and a hardware-free live integration-CI smoke. **v0.3.1** flags that decomposition as **partial** — the AppArmor/seccomp (`security_opt`) dimension of `privileged: true` is not observed (no denial gadget at the pinned IG), surfaced via a `# WARNING (partial decomposition)` header, `partial`/`security_opt` sidecar fields, and a stderr advisory. **v0.4.0 adds the dangerous-`cap_add` validator** (`--observe capadd`): the inverse of v0.1, it validates an already-granted dangerous capability against observed syscalls — reporting which syscalls invoked it, any finer-grained substitute (e.g. `SYS_ADMIN` used only via `perf_event_open` → `CAP_PERFMON`), and, with the granted set supplied via `--cap-add`, caps granted but never exercised plus a recommended minimized `cap_add`. (This is the ROADMAP §v0.5 observer, pulled ahead of the §v0.4 Docker-socket observer, which is deferred/signal-blocked.) **v0.4.1** is a maintenance release hardening the deep-review findings (#120): a `0600` evidence sidecar, stricter `cap_add` validation (denied attempts no longer weaken a recommendation), faithful `compose-patch` line I/O (CRLF / large lines / anchored-block refusal), and tighter drop-rate + target-selection accounting — all strictly more conservative, no schema change. See [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) §v0.5, and [the latest release](https://github.com/tmatens/container-sec-derive/releases).
 
 ## What it does
 
@@ -43,13 +43,13 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
 Released images are published to the GitHub Container Registry:
 
 - **Package:** [`ghcr.io/tmatens/container-sec-derive`](https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive)
-- **Tags:** `0.4.0` and `0.4` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
+- **Tags:** `0.4.1` and `0.4` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
 
 ```sh
 # The package is private (see the COI note below) — authenticate to GHCR first.
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
 
-docker pull ghcr.io/tmatens/container-sec-derive:0.4.0
+docker pull ghcr.io/tmatens/container-sec-derive:0.4.1
 ```
 
 The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts). Running `csd` needs the privileges described under [the tool's own security posture](#a-note-on-the-tools-own-security-posture).

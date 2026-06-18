@@ -36,7 +36,7 @@ Every observer emits to your choice of format (Compose, `docker run`, Kubernetes
 
 ## Audience
 
-Anyone hardening container security on Docker / Podman / OCI-compatible runtimes. Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed.
+Anyone hardening container security on **Docker** (the tested runtime — the eBPF observation layer is runtime-agnostic, but image/mount inspection currently uses the Docker CLI, so Podman / containerd are untested; see PLAN.md "Runtime requirements"). Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed.
 
 ## Relationship to compose-lint
 
@@ -53,12 +53,12 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
 
 ## Requirements
 
-- **Host:** Linux kernel ≥ 5.8, cgroup v2, a container runtime (Docker / Podman / containerd).
+- **Host:** Linux kernel ≥ 5.8, cgroup v2, **Docker** ≥ 20.10 (the only tested runtime; Podman / containerd are untested — see PLAN.md "Runtime requirements").
 - **Privilege:** live observation runs root-equivalent — `CAP_BPF` + `CAP_PERFMON` + `--pid=host` + a runtime-socket mount (see [the tool's own security posture](#a-note-on-the-tools-own-security-posture)).
 - **`ig`:** [Inspektor Gadget](https://www.inspektor-gadget.io/) at the pinned release for live mode. The `--fixture` path (replaying captured NDJSON) needs none of the above — most development works without a kernel.
 - **Build:** Go 1.26+.
 
-Not supported: kernels < 5.8, cgroup v1-only hosts, rootless Podman. See PLAN.md "Runtime requirements".
+Not supported: kernels < 5.8, cgroup v1-only hosts, and non-Docker runtimes (Podman / containerd untested; rootless Podman explicitly out). See PLAN.md "Runtime requirements".
 
 ## Container image
 
@@ -286,7 +286,7 @@ Each is surfaced at runtime via non-strippable caveats and confidence levels. Se
 - **Static analysis of images or compose files.** That's compose-lint's job.
 - **Build-time / Dockerfile analysis.** Different problem class.
 - **Kubernetes-first UX.** K8s output formatters are in scope; K8s-specific deployment isn't. The `--format k8s` / `k8s-networkpolicy` formatters exist so derived profiles can be applied to k8s workloads, not because the tool is intended to live as a DaemonSet.
-- **Kernels < 5.8, cgroupv1-only hosts, rootless Podman.** See PLAN.md "Runtime requirements" for the full non-goal list.
+- **Kernels < 5.8, cgroupv1-only hosts, non-Docker runtimes (Podman / containerd untested; rootless Podman out).** See PLAN.md "Runtime requirements" for the full non-goal list.
 
 ## A note on the tool's own security posture
 

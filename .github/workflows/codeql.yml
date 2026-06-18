@@ -18,20 +18,20 @@
 name: CodeQL
 
 on:
-  # PR + weekly schedule only. push-to-main is dropped (#143): a squash-merge
-  # re-scans an identical tree, and CodeQL runs in artifact mode
-  # (upload: false — private repo / no GHAS) so there is no Security-tab
-  # baseline to maintain. docs/license/renovate changes are skipped.
-  pull_request:
-    branches: [main]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'renovate.json'
-      - 'LICENSE'
+  # TEMPORARY (cost-saving during active development): the per-PR CodeQL run is
+  # turned OFF and the analysis runs on a DAILY schedule instead, to conserve
+  # Actions minutes while the repo is changing rapidly. CodeQL is the slowest job
+  # (~8-12 min) and runs in artifact mode (upload: false — private repo / no
+  # GHAS), so there is no Security-tab baseline that needs per-PR freshness.
+  # RESTORE the `pull_request` trigger (branches: [main], the markdown/docs
+  # paths-ignore) when development slows; push-to-main stays dropped (#143: a
+  # squash-merge re-scans an identical tree). workflow_dispatch allows an
+  # on-demand run before a release or after a security-relevant change.
   schedule:
-    # Weekly run catches new CodeQL queries / advisories on unchanged code.
-    - cron: "27 4 * * 1"
+    # Daily run catches regressions + new CodeQL queries / advisories. Was weekly
+    # (cron "27 4 * * 1"); tightened to daily to compensate for dropping per-PR.
+    - cron: "27 4 * * *"
+  workflow_dispatch:
 
 concurrency:
   group: codeql-${{ github.ref }}

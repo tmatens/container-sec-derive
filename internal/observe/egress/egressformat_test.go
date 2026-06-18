@@ -8,6 +8,73 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
+func TestWriteEgress_DNSEnriched(t *testing.T) {
+	// A sidecar with a resolver and a hostname-annotated destination (#159):
+	// both formatters must emit the UDP resolver allow rule and label the IP
+	// rule with its hostname.
+	s := sidecar.NewSidecar()
+	s.Image = "svc:1"
+	s.EgressDestinations = []sidecar.EgressDestination{
+		{Addr: "1.1.1.1", Port: 443, Version: 4, Hostnames: []string{"api.example.com"}},
+	}
+	s.EgressRecommendation = &sidecar.EgressRecommendation{
+		Allowlist: []sidecar.EgressDest{{Addr: "1.1.1.1", Port: 443, Version: 4}},
+		Resolvers: []sidecar.EgressDest{{Addr: "10.0.0.2", Port: 53, Version: 4}},
+		Caveat:    EgressCaveat,
+	}
+
+	var nft bytes.Buffer
+	if err := WriteEgressNftables(&nft, s); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(nft.String(), "ip daddr 10.0.0.2 udp dport 53 accept # DNS resolver") {
+		t.Errorf("nftables missing UDP resolver rule:\n%s", nft.String())
+	}
+	if !strings.Contains(nft.String(), "ip daddr 1.1.1.1 tcp dport 443 accept # api.example.com") {
+		t.Errorf("nftables missing hostname-commented dest rule:\n%s", nft.String())
+	}
+	// The resolver UDP rule must precede the TCP dest rule (DNS first).
+	if i, j := strings.Index(nft.String(), "udp dport 53"), strings.Index(nft.String(), "tcp dport 443"); i < 0 || j < 0 || i > j {
+		t.Errorf("resolver rule should precede dest rule:\n%s", nft.String())
+	}
+
+	var k8s bytes.Buffer
+	if err := WriteEgressNetworkPolicy(&k8s, s); err != nil {
+		t.Fatal(err)
+	}
+	out := k8s.String()
+	if !strings.Contains(out, "protocol: UDP") || !strings.Contains(out, "port: 53") {
+		t.Errorf("NetworkPolicy missing UDP/53 resolver rule:\n%s", out)
+	}
+	if !strings.Contains(out, "cidr: 10.0.0.2/32") {
+		t.Errorf("NetworkPolicy missing resolver cidr:\n%s", out)
+	}
+	if !strings.Contains(out, "# api.example.com") {
+		t.Errorf("NetworkPolicy missing hostname annotation:\n%s", out)
+	}
+}
+
+func TestWriteEgress_ResolverOnlyNoTCPDests(t *testing.T) {
+	// DNS observed but no TCP connects: the policy must still allow the resolver
+	// (not collapse to deny-all), or the workload's only egress — DNS — breaks.
+	s := sidecar.NewSidecar()
+	s.EgressRecommendation = &sidecar.EgressRecommendation{
+		Allowlist: nil,
+		Resolvers: []sidecar.EgressDest{{Addr: "10.0.0.2", Port: 53, Version: 4}},
+		Caveat:    EgressCaveat,
+	}
+	var k8s bytes.Buffer
+	if err := WriteEgressNetworkPolicy(&k8s, s); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(k8s.String(), "egress: []") {
+		t.Errorf("resolver-only policy must not be deny-all:\n%s", k8s.String())
+	}
+	if !strings.Contains(k8s.String(), "protocol: UDP") {
+		t.Errorf("resolver-only policy missing UDP rule:\n%s", k8s.String())
+	}
+}
+
 func TestWriteEgress_EmptyAndIPv6(t *testing.T) {
 	// Empty allowlist → deny-all, with the warning comment in both formats.
 	empty := sidecar.NewSidecar()

@@ -11,6 +11,7 @@ import (
 )
 
 const egressFixture = "../../testdata/ig-versions/v0.51.0/trace_tcp_sample.ndjson"
+const dnsFixturePath = "../../testdata/ig-versions/v0.51.0/trace_dns_sample.ndjson"
 
 func runEgressFormat(t *testing.T, format string) string {
 	t.Helper()
@@ -55,6 +56,61 @@ func TestRunEgress_NetworkPolicy(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("networkpolicy output missing %q\n---\n%s", want, got)
 		}
+	}
+}
+
+func TestRunEgress_DNSFixtureEnriches(t *testing.T) {
+	// --dns-fixture alongside --fixture must annotate destinations with
+	// hostnames and surface the resolver in the recommendation, and the
+	// enforcement formats must emit the UDP resolver rule (#159).
+	var out, errBuf bytes.Buffer
+	err := Run([]string{
+		"--observe", "egress", "--container", "egress-target",
+		"--fixture", egressFixture, "--dns-fixture", dnsFixturePath, "--format", "json",
+	}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("egress --dns-fixture json: %v (stderr=%s)", err, errBuf.String())
+	}
+	var s sidecar.Sidecar
+	if jerr := json.Unmarshal(out.Bytes(), &s); jerr != nil {
+		t.Fatalf("stdout is not valid sidecar JSON: %v", jerr)
+	}
+	if s.EgressRecommendation == nil || len(s.EgressRecommendation.Resolvers) != 1 {
+		t.Fatalf("dns_resolvers = %+v, want one", s.EgressRecommendation)
+	}
+	named := false
+	for _, d := range s.EgressDestinations {
+		if d.Addr == "1.1.1.1" && len(d.Hostnames) == 1 && d.Hostnames[0] == "api.example.com" {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("1.1.1.1 not annotated with api.example.com: %+v", s.EgressDestinations)
+	}
+
+	// nftables must carry the UDP resolver rule.
+	var nft, nerr bytes.Buffer
+	if err := Run([]string{
+		"--observe", "egress", "--container", "egress-target",
+		"--fixture", egressFixture, "--dns-fixture", dnsFixturePath, "--format", "nftables",
+	}, &nft, &nerr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(nft.String(), "udp dport 53 accept # DNS resolver") {
+		t.Errorf("nftables missing UDP resolver rule:\n%s", nft.String())
+	}
+}
+
+func TestRunEgress_DNSFixtureGuardNonEgress(t *testing.T) {
+	// --dns-fixture is only meaningful with --observe egress.
+	var out, errBuf bytes.Buffer
+	err := Run([]string{
+		"--observe", "caps", "--container", "x",
+		"--fixture", "../../testdata/ig-versions/v0.51.0/sample.ndjson",
+		"--dns-fixture", dnsFixturePath,
+	}, &out, &errBuf)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("caps --dns-fixture: exit = %d, want exit.Usage (%d)", exit.CodeFor(err), exit.Usage)
 	}
 }
 

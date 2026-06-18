@@ -27,6 +27,7 @@ import (
 type EgressPipelineOpts struct {
 	AggregateOpts attrib.Opts
 	Fixture       string // trace_tcp NDJSON; empty → live ig
+	DNSFixture    string // trace_dns NDJSON for the DNS/hostname correlation (#159); empty → no DNS enrichment in fixture mode
 	IGBin         string
 	Duration      time.Duration
 	Workload      string // recorded on the sidecar + fed to egress confidence
@@ -68,7 +69,24 @@ func ProduceEgressObservation(opts EgressPipelineOpts, stderr io.Writer) (*sidec
 		return nil, err
 	}
 
-	s := egressToSidecar(eg, opts.AggregateOpts)
+	// DNS/hostname correlation (issue #159). In fixture mode it reads the
+	// optional --dns-fixture; the live two-gadget path (trace_tcp + trace_dns
+	// concurrently) is wired in a follow-on. A nil correlation degrades
+	// gracefully: the sidecar is exactly the TCP-only v0.5.0 shape.
+	var corr *dnsCorrelation
+	if opts.Fixture != "" && opts.DNSFixture != "" {
+		dnsSrc, openErr := os.Open(opts.DNSFixture)
+		if openErr != nil {
+			return nil, fmt.Errorf("open dns fixture: %w", openErr)
+		}
+		defer dnsSrc.Close()
+		corr, err = aggregateDNS(dnsSrc, opts.AggregateOpts)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	s := egressToSidecar(eg, corr, opts.AggregateOpts)
 	s.ObservedAt = observedAt
 	s.Workload = opts.Workload
 	if opts.Fixture == "" {
@@ -82,7 +100,7 @@ func ProduceEgressObservation(opts EgressPipelineOpts, stderr io.Writer) (*sidec
 // capability/fs/device scaffolding is left at NewSidecar's empty defaults; the
 // egress section (egress_destinations + egress_recommendation) carries the
 // observation. PLAN.md §Output schema: one observer per run populates its block.
-func egressToSidecar(eg *egressObservation, opts attrib.Opts) *sidecar.Sidecar {
+func egressToSidecar(eg *egressObservation, corr *dnsCorrelation, opts attrib.Opts) *sidecar.Sidecar {
 	s := sidecar.NewSidecar()
 	s.Target.Mode = opts.ModeLabel()
 	s.Target.Selector = opts.Selector()
@@ -96,7 +114,7 @@ func egressToSidecar(eg *egressObservation, opts attrib.Opts) *sidecar.Sidecar {
 		s.Image = eg.Image
 	}
 
-	applyEgressFields(s, eg)
+	applyEgressFields(s, eg, corr)
 
 	s.TraceHealth.EventsRecorded = eg.EventCount
 	s.TraceHealth.EventsDropped = eg.Dropped
@@ -107,13 +125,20 @@ func egressToSidecar(eg *egressObservation, opts attrib.Opts) *sidecar.Sidecar {
 // applyEgressFields populates the egress section of s (egress_recommendation,
 // egress_destinations, and replica_egress_disagreement) from the observation.
 // Mirrors applyDeviceFields.
-func applyEgressFields(s *sidecar.Sidecar, eg *egressObservation) {
+func applyEgressFields(s *sidecar.Sidecar, eg *egressObservation, corr *dnsCorrelation) {
 	rec := egressToRecommendation(eg.Dests)
+	// DNS resolvers (UDP/53) are the destinations trace_tcp cannot see; a
+	// default-DROP allowlist must permit them or name resolution breaks. Kept
+	// separate from the TCP allowlist (different protocol). nil-safe.
+	if corr != nil {
+		rec.Resolvers = corr.Resolvers
+	}
 	s.EgressRecommendation = &rec
 
 	ed := make([]sidecar.EgressDestination, 0, len(eg.Dests))
 	for _, d := range eg.Dests {
 		entry := sidecar.EgressDestination{Addr: d.Addr, Port: d.Port, Version: d.Version}
+		entry.Hostnames = corr.HostnamesFor(d.Addr) // nil-safe; annotates the IP with its names
 		if st := eg.Stats[d.String()]; st != nil {
 			entry.EventCount = st.eventCount
 			entry.CommSamples = observe.SortedKeys(st.commSamples)

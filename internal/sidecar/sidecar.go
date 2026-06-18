@@ -30,8 +30,14 @@ import (
 // v0.8 bumps 1.3 -> 1.4 for the additive, omitempty egress block (egress_destinations,
 // egress_recommendation, replica_egress_disagreement — the network-egress observer);
 // prior sidecars stay byte-identical under 1.4 save for the schema_version string.
+// The egress DNS/hostname follow-up (issue #159) bumps 1.4 -> 1.5 for two more
+// additive, omitempty egress fields: per-destination `hostnames` (the names that
+// resolved to each IP, from trace_dns) and `dns_resolvers` on the recommendation
+// (the UDP/53 resolver endpoints a default-DROP allowlist must permit). A
+// TCP-only egress sidecar (no --dns-fixture / no live trace_dns) is byte-identical
+// under 1.5 save for the schema_version string; all prior sidecars likewise.
 const (
-	SchemaVersion = "1.4"
+	SchemaVersion = "1.5"
 	ToolVersion   = "0.5.0"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
@@ -119,7 +125,7 @@ type Sidecar struct {
 
 	// v0.8 network-egress observer section (the --observe egress mode).
 	// omitempty + nil on every other observer's run, so prior sidecars
-	// serialize byte-identically under the 1.4 schema bump (PLAN.md §Output
+	// serialize byte-identically under the 1.5 schema bump (PLAN.md §Output
 	// schema). On an `--observe egress` run the other observers' scaffolding
 	// stays empty and these carry the observed outbound destinations + the
 	// minimum allowlist recommendation.
@@ -248,9 +254,15 @@ type DevicePath struct {
 // event count and comm samples for reviewer auditability. Addr is the resolved
 // IP connect() observed — not the hostname the app requested (issue #136).
 type EgressDestination struct {
-	Addr        string   `json:"addr"`
-	Port        int      `json:"port"`
-	Version     int      `json:"version,omitempty"` // 4 or 6
+	Addr    string `json:"addr"`
+	Port    int    `json:"port"`
+	Version int    `json:"version,omitempty"` // 4 or 6
+	// Hostnames are the names that resolved to Addr, from trace_dns response
+	// packets (issue #159). Empty when DNS was not observed (TCP-only egress) or
+	// the IP was contacted without a preceding observed lookup (a hardcoded IP,
+	// a connection reusing a cached resolution, or a lookup that predates the
+	// observation window). Sorted, distinct.
+	Hostnames   []string `json:"hostnames,omitempty"`
 	EventCount  int      `json:"event_count"`
 	CommSamples []string `json:"comm_samples,omitempty"`
 }
@@ -291,6 +303,13 @@ func (d EgressDest) String() string {
 // allowlist blocks destinations the workload never contacted.
 type EgressRecommendation struct {
 	Allowlist []EgressDest `json:"allowlist"`
+	// Resolvers are the DNS resolver endpoints (UDP, typically :53) the workload
+	// used, from trace_dns (issue #159). They are kept separate from Allowlist
+	// because they are a different protocol (UDP vs the TCP connects trace_tcp
+	// records) and because a default-DROP allowlist that omits them silently
+	// breaks all name resolution — the single most common egress foot-gun. Empty
+	// when DNS was not observed. Sorted, distinct.
+	Resolvers []EgressDest `json:"dns_resolvers,omitempty"`
 	Caveat    string       `json:"caveat"`
 }
 

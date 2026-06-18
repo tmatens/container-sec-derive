@@ -18,13 +18,24 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
+  # PR + weekly schedule only. push-to-main is dropped (#143): a squash-merge
+  # re-scans an identical tree, and CodeQL runs in artifact mode
+  # (upload: false — private repo / no GHAS) so there is no Security-tab
+  # baseline to maintain. docs/license/renovate changes are skipped.
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'renovate.json'
+      - 'LICENSE'
   schedule:
     # Weekly run catches new CodeQL queries / advisories on unchanged code.
     - cron: "27 4 * * 1"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

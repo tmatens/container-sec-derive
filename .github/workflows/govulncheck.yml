@@ -18,13 +18,23 @@
 name: govulncheck
 
 on:
-  push:
-    branches: [main]
+  # PR + weekly schedule only; push-to-main dropped as a duplicate of the PR
+  # scan on the identical squash-merged tree (#143). docs/license/renovate
+  # changes can't introduce a vulnerable dependency, so skip them.
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'renovate.json'
+      - 'LICENSE'
   schedule:
     # Weekly; offset from codeql.yml so the two don't contend for runners.
     - cron: "41 4 * * 1"
+
+concurrency:
+  group: govulncheck-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

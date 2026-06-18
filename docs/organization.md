@@ -16,12 +16,16 @@ import that points the wrong way.
 
 > **Migration status (issue #149).** The move from the original flat
 > `package main` to this layout is staged. **Landed:** the foundation packages
-> `internal/exit`, `internal/sidecar`, `internal/ig`, `internal/attrib`.
-> **In progress:** extracting the observers into `internal/observe/*`, the
-> formatters into `internal/format`, the CLI into `internal/cli`, and the entry
-> point into `cmd/csd`. Until that completes, the remaining observer / formatter
-> / CLI code lives in the repo root `package main` and imports the foundation
-> packages. The target below is the standard new code is written against.
+> `internal/exit`, `internal/sidecar`, `internal/ig`, `internal/attrib`; the
+> shared observer scaffolding `internal/observe`; and the `caps`, `fs`,
+> `devices`, and `egress` observers under `internal/observe/<name>` (egress
+> carrying its own enforcement formatter). **In progress:** extracting the
+> remaining `capadd` and `privileged` observers, the shared compose-security
+> formatters into `internal/format`, `csd verify` into `internal/verify`, the
+> CLI into `internal/cli`, and the entry point into `cmd/csd`. Until that
+> completes, the not-yet-moved code lives in the repo root `package main` and
+> imports the packages above. The target below is the standard new code is
+> written against.
 
 ## Package map
 
@@ -37,6 +41,9 @@ internal/
                            ambiguity guard — observer-agnostic, knows no event type
   exit, sidecar, ig, attrib are the FOUNDATION (leaves): stdlib-only deps plus,
   at most, each other in the one-way order exit/sidecar ← ig/attrib.
+  observe/                   shared observer scaffolding: SortedKeys, the WSL2 +
+                             advisory-warning notes, the cross-observer
+                             confidence helpers (worse-of-two for privileged)
   observe/
     caps/                  cap event + aggregate + decide + confidence (trace_capabilities)
     fs/                    fileevent, fsobserve, fsdecision, fsconfidence (trace_open write-intent)
@@ -49,6 +56,8 @@ internal/
                            (compose, docker-run, k8s, oci, json, compose-patch, compose-lint-profile)
   verify/                  `csd verify` (sidecar-vs-sidecar + run mode)
   cli/                     run(), flag definitions, --observe/--format dispatch, per-observer wiring
+  obstest/                 test-only helpers shared across observer test suites
+                           (imported only from *_test.go, never in the binary)
 gadgets/                   (reserved) csd-authored BPF gadgets: source + build/sign/distribute
 ```
 

@@ -12,6 +12,8 @@ import (
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/observe/devices"
+	"github.com/tmatens/container-sec-derive/internal/obstest"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -130,7 +132,7 @@ func TestComputeCapaddConfidence(t *testing.T) {
 		s.CapaddValidation.Findings = []sidecar.CapaddFinding{{Cap: "SYS_ADMIN", Used: true, FinerCaps: []string{"PERFMON"}}}
 		s.Workload = "/w.sh"
 	})
-	if !containsSubstr(s.Confidence.Factors, "substitution") {
+	if !obstest.ContainsSubstr(s.Confidence.Factors, "substitution") {
 		t.Errorf("substitution not priced in factors: %v", s.Confidence.Factors)
 	}
 
@@ -139,7 +141,7 @@ func TestComputeCapaddConfidence(t *testing.T) {
 	s = mk(func(s *sidecar.Sidecar) {
 		s.CapaddValidation.Findings = []sidecar.CapaddFinding{{Cap: "SYS_ADMIN", Used: true, FinerCaps: []string{"PERFMON"}}}
 	})
-	if !containsSubstr(s.Confidence.Factors, "substitution") {
+	if !obstest.ContainsSubstr(s.Confidence.Factors, "substitution") {
 		t.Errorf("no-workload substitution caveat missing: %v", s.Confidence.Factors)
 	}
 }
@@ -153,7 +155,7 @@ func TestObserveCapadd_FakeIG(t *testing.T) {
 		`{"syscall":"ptrace","cap":"CAP_SYS_PTRACE","capable":true,"proc":{"comm":"app"},"runtime":{"containerId":"c1","containerName":"web","containerImageName":"web:1"}}`,
 		`{"syscall":"chown","cap":"CAP_CHOWN","capable":true,"proc":{"comm":"app"},"runtime":{"containerId":"c1","containerName":"web","containerImageName":"web:1"}}`,
 	}, "\n")
-	ig := fakeIGRun(t, nd, "level=info msg=starting\nlost 4 samples\n")
+	ig := obstest.FakeIGRun(t, nd, "level=info msg=starting\nlost 4 samples\n")
 
 	obs, err := observeCapadd(context.Background(), ig, attrib.Opts{}, dangerousCaps, io.Discard)
 	if err != nil {
@@ -187,9 +189,9 @@ func TestObserveDevices_FakeIG(t *testing.T) {
 		`{"syscall":"openat","flags_raw":2,"fpath":"/dev/kvm","proc":{"comm":"q"},"runtime":{"containerId":"c1","containerName":"vm","containerImageName":"vm:1"}}`,
 		`{"syscall":"openat","flags_raw":2,"fpath":"/dev/null","proc":{"comm":"q"},"runtime":{"containerId":"c1","containerName":"vm","containerImageName":"vm:1"}}`,
 	}, "\n")
-	ig := fakeIGRun(t, nd, "lost 2 samples\n")
+	ig := obstest.FakeIGRun(t, nd, "lost 2 samples\n")
 
-	obs, err := observeDevices(context.Background(), ig, attrib.Opts{}, io.Discard)
+	obs, err := devices.ObserveDevices(context.Background(), ig, attrib.Opts{}, io.Discard)
 	if err != nil {
 		t.Fatalf("observeDevices: %v", err)
 	}
@@ -220,7 +222,7 @@ func TestCapaddMultiReplica(t *testing.T) {
 		t.Fatalf("aggregateCapadd: %v", err)
 	}
 	s := capaddToSidecar(obs, capaddPipelineOpts{AggregateOpts: opts, ActiveSet: dangerousCaps})
-	if !equalSlice(s.Target.ReplicaCapDisagreement, []string{"SYS_PTRACE"}) {
+	if !obstest.EqualSlice(s.Target.ReplicaCapDisagreement, []string{"SYS_PTRACE"}) {
 		t.Errorf("ReplicaCapDisagreement = %v, want [SYS_PTRACE]", s.Target.ReplicaCapDisagreement)
 	}
 
@@ -283,21 +285,21 @@ func TestCheckCapaddComposeLintContract(t *testing.T) {
 	// No granted set → the capadd-specific violation.
 	s := clean()
 	s.CapaddValidation.GrantedSetProvided = false
-	if v := checkCapaddComposeLintContract(s); !containsSubstr(v, "granted set not provided") {
+	if v := checkCapaddComposeLintContract(s); !obstest.ContainsSubstr(v, "granted set not provided") {
 		t.Errorf("missing granted-set violation: %v", v)
 	}
 
 	// Below-moderate confidence is a violation.
 	s = clean()
 	s.Confidence.Level = sidecar.ConfidenceLow
-	if v := checkCapaddComposeLintContract(s); !containsSubstr(v, "below moderate") {
+	if v := checkCapaddComposeLintContract(s); !obstest.ContainsSubstr(v, "below moderate") {
 		t.Errorf("missing confidence violation: %v", v)
 	}
 
 	// Missing image digest is a violation.
 	s = clean()
 	s.ImageDigest = ""
-	if v := checkCapaddComposeLintContract(s); !containsSubstr(v, "image_digest missing") {
+	if v := checkCapaddComposeLintContract(s); !obstest.ContainsSubstr(v, "image_digest missing") {
 		t.Errorf("missing image_digest violation: %v", v)
 	}
 }

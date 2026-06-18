@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -16,32 +17,18 @@ import (
 // never panic the process. `go test` runs the seed corpus on every run (cheap);
 // `go test -fuzz=Fuzz...` extends them on demand.
 
-func FuzzFileEventUnmarshal(f *testing.F) {
-	f.Add(`{"syscall":"openat","flags_raw":65,"fpath":"/x","fname":"x","proc":{"comm":"a","pid":1},"runtime":{"containerId":"c","containerName":"n","containerImageName":"i"}}`)
-	f.Add(`{"timestamp_raw":123456789,"flags":"O_WRONLY|O_CREAT","error_raw":13}`)
-	f.Add(`{}`)
-	f.Add(`{"flags_raw":-1,"timestamp":"not-a-number"}`)
-	f.Fuzz(func(t *testing.T, data string) {
-		var e fileEvent
-		_ = json.Unmarshal([]byte(data), &e) // errors are fine; a panic is not
-		// Exercise the accessor methods the pipeline calls on every event.
-		_ = e.IsWrite()
-		_ = e.Path()
-	})
-}
-
 func FuzzCapEventUnmarshal(f *testing.F) {
 	f.Add(`{"cap":"CHOWN","capable":true,"syscall":"chown","proc":{"comm":"a","pid":1},"runtime":{"containerId":"c"}}`)
 	f.Add(`{"timestamp_raw":123,"capable":false}`)
 	f.Add(`{}`)
 	f.Fuzz(func(t *testing.T, data string) {
-		var e capEvent
+		var e caps.CapEvent
 		_ = json.Unmarshal([]byte(data), &e)
 	})
 }
 
 // FuzzAggregateCapadd hardens the v0.4 capadd aggregation LOOP (not just the
-// capEvent unmarshal, which FuzzCapEventUnmarshal already covers): the line
+// CapEvent unmarshal, which FuzzCapEventUnmarshal already covers): the line
 // scanner, the held/init/denied filtering, the per-cap syscall maps, and the
 // multi-replica bookkeeping. A malformed ig stream must never panic, and the
 // recorded EventCount must always equal the sum of per-cap held events.
@@ -86,25 +73,5 @@ func FuzzCapaddComposePatch(f *testing.F) {
 	f.Fuzz(func(t *testing.T, compose, service string) {
 		var buf bytes.Buffer
 		_ = writeCapaddComposePatch(&buf, val, []byte(compose), "compose.yml", service)
-	})
-}
-
-func FuzzParseMountDestinations(f *testing.F) {
-	f.Add(`[{"Destination":"/a"},{"Destination":"/b","Source":"x"}]`)
-	f.Add(`null`)
-	f.Add(`[]`)
-	f.Add(`not json`)
-	f.Add(`[{"Destination":123}]`)
-	f.Fuzz(func(t *testing.T, data string) {
-		dests, err := parseMountDestinations([]byte(data))
-		// On success, every returned destination must be non-empty (the
-		// parser's documented contract) — a fuzz-found violation is a bug.
-		if err == nil {
-			for _, d := range dests {
-				if strings.TrimSpace(d) == "" {
-					t.Errorf("parseMountDestinations returned an empty destination for input %q", data)
-				}
-			}
-		}
 	})
 }

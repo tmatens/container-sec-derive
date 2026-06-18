@@ -359,6 +359,20 @@ type Confidence struct {
 	Factors []string `json:"factors"`
 }
 
+// Finalise computes DropRate once both sides of the ratio are known. The
+// observers fill EventsRecorded/EventsDropped while streaming and call this
+// before scoring confidence.
+func (th *TraceHealth) Finalise() {
+	if th.EventsRecorded > 0 {
+		th.DropRate = float64(th.EventsDropped) / float64(th.EventsRecorded)
+	} else if th.EventsDropped > 0 {
+		// All-dropped-no-recorded is a pathological case we can still
+		// report as "everything lost". Without this branch a 0-record
+		// run with losses would look clean.
+		th.DropRate = 1.0
+	}
+}
+
 // CapNames returns the capability names from s.Capabilities in the order
 // aggregate() stored them (sorted ascending). Formatters and the v0.1
 // stdout path both go through this helper so the one source of truth for

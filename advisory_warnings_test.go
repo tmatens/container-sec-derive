@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/obstest"
 )
 
 // TestRun_SubAbortDropRateWarnsToStderr exercises the rc bullet 9
@@ -98,8 +100,8 @@ func TestRun_PrivilegedPartialDecompositionWarnsToStderr(t *testing.T) {
 	// partial (caps + devices only, no AppArmor/seccomp). json's body carries
 	// no `#` caveat, so the stderr advisory is the only guardrail for it —
 	// assert it fires here.
-	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
-	dev := writeTemp(t, "dev.ndjson", privDevFixture)
+	caps := obstest.WriteTemp(t, "caps.ndjson", privCapsFixture)
+	dev := obstest.WriteTemp(t, "dev.ndjson", privDevFixture)
 	var out, errBuf bytes.Buffer
 	err := run([]string{
 		"--observe", "privileged",

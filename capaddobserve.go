@@ -16,6 +16,7 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -54,7 +55,7 @@ func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*sidec
 		defer src.Close()
 		obs, err = aggregateCapadd(src, opts.AggregateOpts, opts.ActiveSet)
 	} else {
-		noteWSL2IfDetected(stderr)
+		observe.NoteWSL2IfDetected(stderr)
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
@@ -134,7 +135,7 @@ func capaddToSidecar(obs *capaddObservation, opts capaddPipelineOpts) *sidecar.S
 
 	s.TraceHealth.EventsRecorded = obs.EventCount
 	s.TraceHealth.EventsDropped = obs.Dropped
-	finaliseTraceHealth(&s.TraceHealth)
+	s.TraceHealth.Finalise()
 	return s
 }
 

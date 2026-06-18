@@ -14,6 +14,9 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/observe"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
+	"github.com/tmatens/container-sec-derive/internal/observe/devices"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -57,7 +60,7 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 	observedAt := time.Now().UTC()
 	var (
 		capS *sidecar.Sidecar
-		dev  *deviceObservation
+		dev  *devices.DeviceObservation
 		err  error
 	)
 
@@ -70,7 +73,7 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 				return nil, fmt.Errorf("open fixture: %w", openErr)
 			}
 			defer src.Close()
-			if capS, err = aggregate(src, opts.AggregateOpts); err == nil && capS != nil && opts.FixtureStderr != "" {
+			if capS, err = caps.Aggregate(src, opts.AggregateOpts); err == nil && capS != nil && opts.FixtureStderr != "" {
 				errSrc, openErrErr := os.Open(opts.FixtureStderr)
 				if openErrErr != nil {
 					return nil, fmt.Errorf("open fixture-stderr: %w", openErrErr)
@@ -85,12 +88,12 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 				return nil, fmt.Errorf("open device-fixture: %w", openErr)
 			}
 			defer dsrc.Close()
-			dev, err = aggregateDevices(dsrc, opts.AggregateOpts)
+			dev, err = devices.AggregateDevices(dsrc, opts.AggregateOpts)
 		}
 	} else {
 		// Live mode: trace_capabilities + trace_open run concurrently for one
 		// window, each its own ig subprocess.
-		noteWSL2IfDetected(stderr)
+		observe.NoteWSL2IfDetected(stderr)
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
@@ -106,11 +109,11 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			capS, capErr = observe(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+			capS, capErr = caps.Observe(ctx, opts.IGBin, opts.AggregateOpts, stderr)
 		}()
 		go func() {
 			defer wg.Done()
-			dev, devErr = observeDevices(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+			dev, devErr = devices.ObserveDevices(ctx, opts.IGBin, opts.AggregateOpts, stderr)
 		}()
 		wg.Wait()
 		switch {
@@ -142,7 +145,7 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 	}
 
 	if dev != nil {
-		applyDeviceFields(s, dev)
+		devices.ApplyDeviceFields(s, dev)
 		// Combined ringbuf health across both gadget streams.
 		s.TraceHealth.EventsRecorded += dev.EventCount
 		s.TraceHealth.EventsDropped += dev.Dropped
@@ -150,23 +153,23 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 			s.Image = dev.Image
 		}
 	}
-	finaliseTraceHealth(&s.TraceHealth)
+	s.TraceHealth.Finalise()
 
-	devices := []string{}
+	devNodes := []string{}
 	if s.DeviceRecommendation != nil {
-		devices = s.DeviceRecommendation.Devices
+		devNodes = s.DeviceRecommendation.Devices
 	}
 	s.PrivilegedDecomposition = &sidecar.PrivilegedDecomposition{
 		DropPrivileged: true,
 		CapAdd:         s.CapNames(),
-		Devices:        devices,
+		Devices:        devNodes,
 		Partial:        true,
 		SecurityOpt:    sidecar.PrivilegedSecurityOptCaveat,
 	}
 
 	s.ObservedAt = observedAt
 	s.Workload = opts.Workload
-	applyEntrypointCrossCheck(s, opts.InspectFixture, opts.Fixture != "" || opts.DeviceFixture != "", stderr)
+	caps.ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.Fixture != "" || opts.DeviceFixture != "", stderr)
 	computePrivilegedConfidence(s)
 	return s, nil
 }
@@ -178,44 +181,14 @@ func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer)
 // as good as the device half, and vice versa. The two sub-rubrics each write
 // s.Confidence, so this snapshots around them.
 func computePrivilegedConfidence(s *sidecar.Sidecar) {
-	computeConfidence(s)
+	caps.ComputeConfidence(s)
 	capLevel := s.Confidence.Level
-	capFactors := prefixFactors("caps", s.Confidence.Factors)
+	capFactors := observe.PrefixFactors("caps", s.Confidence.Factors)
 
-	computeDeviceConfidence(s)
+	devices.ComputeDeviceConfidence(s)
 	devLevel := s.Confidence.Level
-	devFactors := prefixFactors("devices", s.Confidence.Factors)
+	devFactors := observe.PrefixFactors("devices", s.Confidence.Factors)
 
-	s.Confidence.Level = worseConfidence(capLevel, devLevel)
+	s.Confidence.Level = observe.WorseConfidence(capLevel, devLevel)
 	s.Confidence.Factors = append(capFactors, devFactors...)
-}
-
-// prefixFactors tags each factor with which observer produced it, so a merged
-// factor list stays traceable to its sub-rubric.
-func prefixFactors(observer string, factors []string) []string {
-	out := make([]string, len(factors))
-	for i, f := range factors {
-		out[i] = "[" + observer + "] " + f
-	}
-	return out
-}
-
-// confidenceRank orders the levels low < moderate < high for worseConfidence.
-func confidenceRank(level string) int {
-	switch level {
-	case sidecar.ConfidenceHigh:
-		return 2
-	case sidecar.ConfidenceModerate:
-		return 1
-	default:
-		return 0
-	}
-}
-
-// worseConfidence returns the lower-confidence of two grades.
-func worseConfidence(a, b string) string {
-	if confidenceRank(a) <= confidenceRank(b) {
-		return a
-	}
-	return b
 }

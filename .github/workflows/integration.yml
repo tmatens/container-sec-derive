@@ -215,6 +215,21 @@ jobs:
           cat smoke_capadd.txt
           exit $rc
 
+      # v0.8 network-egress observer (--observe egress). The new attach is
+      # trace_tcp; fixture replay can't prove the live tcpEvent parser handles a
+      # real trace_tcp stream. Hardware-free, no external network: a stock alpine
+      # container TCP-connects to its own docker gateway on a fixed port in a
+      # loop (connect() fires whether or not the port listens), so the egress
+      # observation must contain that <gateway>:<port> (scripts/smoke_egress.sh).
+      - name: Live-BPF egress smoke
+        env:
+          DURATION: ${{ github.event.inputs.duration || '30s' }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/smoke_egress.sh > smoke_egress.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_egress.txt
+          exit $rc
+
       # Closed-loop "meets intent" test (scripts/closed_loop.sh). The only gate
       # that validates csd's OUTPUT, not just its pipeline: derive a cap profile,
       # re-run the workload under exactly that profile (must succeed = sufficient),
@@ -258,6 +273,8 @@ jobs:
                        grep -hE '^(PASS|FAIL|INFO|smoke-device:)' smoke_device.txt 2>/dev/null || true; \
                        echo '-- capadd observer --'; \
                        grep -hE '^(PASS|FAIL|INFO|smoke-capadd:)' smoke_capadd.txt 2>/dev/null || true; \
+                       echo '-- egress observer --'; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-egress:)' smoke_egress.txt 2>/dev/null || true; \
                        echo '-- closed-loop (meets intent) --'; \
                        grep -hE '^(PASS|FAIL|INFO|closed-loop:)' closed_loop.txt 2>/dev/null || true; } )"
           [ -n "$report" ] || report="(no status lines captured — see the Actions run)"

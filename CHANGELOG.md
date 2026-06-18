@@ -31,7 +31,11 @@ the relevant entry.
   NetworkPolicy with an Egress ipBlock/port rule per destination); both lead
   with the non-strippable inverted-risk caveat, IPv4 uses `/32`/`ip daddr` and
   IPv6 `/128`/`ip6 daddr`. These formats are rejected (EX_USAGE) for the
-  compose-security observers. The live integration smoke is a follow-on.
+  compose-security observers. Validated live against real `ig` on a hosted
+  runner (`scripts/smoke_egress.sh` in `integration.yml` + the self-hosted
+  suite): a container TCP-connects to its docker gateway in a loop and the
+  egress observation must contain that `(gateway, port)` — proving the live
+  `trace_tcp` parse, not just fixture replay.
 
 ## [0.4.1] - 2026-06-17
 

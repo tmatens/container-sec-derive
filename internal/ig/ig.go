@@ -62,6 +62,16 @@ const (
 	// connect/accept/close with the L4 endpoints. Tagged to PinnedIGVersion
 	// in lockstep with the other gadgets.
 	TraceTcpGadget = "ghcr.io/inspektor-gadget/gadget/trace_tcp:" + PinnedIGVersion
+
+	// TraceDnsGadget is the OCI reference for the trace_dns gadget, the second
+	// signal source for the v0.8 egress observer's DNS/hostname follow-up
+	// (issue #159): it reports DNS queries and responses with the queried name,
+	// the resolved addresses, and the resolver endpoint. trace_tcp is TCP-only
+	// and IP-based; trace_dns supplies the IP→hostname correlation and the
+	// UDP/53 resolver destination trace_tcp cannot see. The signal survey
+	// (issue #159) confirmed the gadget and its field schema exist at the pin —
+	// no pin bump. Tagged to PinnedIGVersion in lockstep with the other gadgets.
+	TraceDnsGadget = "ghcr.io/inspektor-gadget/gadget/trace_dns:" + PinnedIGVersion
 )
 
 // igLostSamplesRE matches ig's ringbuf-loss stderr warnings. v0.51.0

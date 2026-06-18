@@ -15,8 +15,11 @@ import "time"
 // v0.5 bumps 1.2 -> 1.3 for the additive, omitempty capadd_validation block (the
 // dangerous-cap_add validator); caps/fs/device sidecars stay byte-identical under
 // 1.3, and a 1.3-aware consumer knows the document may carry the capadd block.
+// v0.8 bumps 1.3 -> 1.4 for the additive, omitempty egress block (egress_destinations,
+// egress_recommendation, replica_egress_disagreement — the network-egress observer);
+// prior sidecars stay byte-identical under 1.4 save for the schema_version string.
 const (
-	SchemaVersion = "1.3"
+	SchemaVersion = "1.4"
 	ToolVersion   = "0.4.1"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
@@ -97,6 +100,15 @@ type Sidecar struct {
 	// scaffolding stays empty and this block carries the per-cap validation.
 	CapaddValidation *capaddValidation `json:"capadd_validation,omitempty"`
 
+	// v0.8 network-egress observer section (the --observe egress mode).
+	// omitempty + nil on every other observer's run, so prior sidecars
+	// serialize byte-identically under the 1.4 schema bump (PLAN.md §Output
+	// schema). On an `--observe egress` run the other observers' scaffolding
+	// stays empty and these carry the observed outbound destinations + the
+	// minimum allowlist recommendation.
+	EgressDestinations   []EgressDestination   `json:"egress_destinations,omitempty"`
+	EgressRecommendation *egressRecommendation `json:"egress_recommendation,omitempty"`
+
 	TraceHealth TraceHealth `json:"trace_health"`
 	Confidence  Confidence  `json:"confidence"`
 	Caveat      string      `json:"caveat"`
@@ -154,6 +166,11 @@ type Target struct {
 	// multi-replica device correlation (PR5) and read by
 	// computeDeviceConfidence.
 	ReplicaDeviceDisagreement []string `json:"replica_device_disagreement,omitempty"`
+	// ReplicaEgressDisagreement is the v0.8 egress analog: outbound
+	// destinations observed on fewer than all replicas under --all-matching.
+	// omitempty + nil otherwise; populated by the multi-replica egress
+	// correlation and read by computeEgressConfidence.
+	ReplicaEgressDisagreement []string `json:"replica_egress_disagreement,omitempty"`
 }
 
 // Restart records a single exit-during-observation event. Attribution is
@@ -204,6 +221,19 @@ const (
 // recommendation) or not.
 type DevicePath struct {
 	Path        string   `json:"path"`
+	EventCount  int      `json:"event_count"`
+	CommSamples []string `json:"comm_samples,omitempty"`
+}
+
+// EgressDestination is one distinct outbound destination contacted by the v0.8
+// egress observer, the network analog of DevicePath. The aggregator collapses N
+// connect events to one (addr, port) destination into a single entry with an
+// event count and comm samples for reviewer auditability. Addr is the resolved
+// IP connect() observed — not the hostname the app requested (issue #136).
+type EgressDestination struct {
+	Addr        string   `json:"addr"`
+	Port        int      `json:"port"`
+	Version     int      `json:"version,omitempty"` // 4 or 6
 	EventCount  int      `json:"event_count"`
 	CommSamples []string `json:"comm_samples,omitempty"`
 }

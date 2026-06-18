@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.4",
+  "image": "myapp:1",
+  "observed_at": "2026-04-19T12:00:00Z",
+  "duration_seconds": 600,
+  "workload": "/tmp/load.sh",
+  "tool_version": "0.4.1",
+  "target": {
+    "mode": "container",
+    "selector": "egress-target",
+    "replicas_observed": 1,
+    "per_replica_event_counts": {
+      "aabbccddeeff0011": 3
+    },
+    "per_replica_caps": {},
+    "replica_cap_disagreement": [],
+    "restarts": [],
+    "follow_restart": false,
+    "target_exited_early": false,
+    "init_window_suppressed": 0,
+    "distinct_comms": 0
+  },
+  "capabilities": [],
+  "expected_caps_from_entrypoint": [],
+  "coverage_warnings": [],
+  "egress_destinations": [
+    {
+      "addr": "1.1.1.1",
+      "port": 443,
+      "version": 4,
+      "event_count": 2,
+      "comm_samples": [
+        "app"
+      ]
+    },
+    {
+      "addr": "10.0.0.5",
+      "port": 5432,
+      "version": 4,
+      "event_count": 1,
+      "comm_samples": [
+        "app"
+      ]
+    }
+  ],
+  "egress_recommendation": {
+    "allowlist": [
+      {
+        "addr": "1.1.1.1",
+        "port": 443,
+        "version": 4
+      },
+      {
+        "addr": "10.0.0.5",
+        "port": 5432,
+        "version": 4
+      }
+    ],
+    "caveat": "Egress allowlist reflects only destinations contacted during observation. A destination the workload did not exercise will be BLOCKED by these rules — verify completeness before enforcing default-deny."
+  },
+  "trace_health": {
+    "events_recorded": 3,
+    "events_dropped": 0,
+    "drop_rate": 0
+  },
+  "confidence": {
+    "level": "moderate",
+    "factors": [
+      "ok: 2 distinct destination(s) observed across 3 connect events",
+      "ok: workload script provided (/tmp/load.sh)",
+      "deferred: hostname (trace_dns) correlation not yet implemented — allowlist is raw IPs",
+      "deferred: steady-state detection not yet implemented"
+    ]
+  },
+  "caveat": "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."
+}

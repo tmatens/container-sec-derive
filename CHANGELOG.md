@@ -11,6 +11,23 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`--observe egress`: the v0.8 network-egress observer (ROADMAP §v0.8, issue
+  #136), initial JSON output.** Runs the pinned ig `trace_tcp` gadget and derives
+  the minimum outbound allowlist from the destinations the container actually
+  contacted (outbound `connect()` only — `accept`/`close` filtered), reusing the
+  existing attribution + multi-replica + drop-rate machinery. Emits an additive
+  `egress_destinations` (per-destination evidence) + `egress_recommendation`
+  (the `(addr, port)` allowlist) sidecar block, with a conservative confidence
+  rubric that treats workload absence as forced-low — the egress *inverted risk*:
+  unlike caps/devices, a too-tight allowlist BLOCKS the app, so an incomplete
+  allowlist is a hard failure, surfaced via a non-strippable caveat. **Sidecar
+  `schema_version` is now 1.4** (additive, omitempty egress fields → caps/fs/
+  device/capadd sidecars stay byte-identical save for the version string). Output
+  is `--format json` for now; the nftables + k8s-NetworkPolicy emitters and the
+  live integration smoke are follow-ons.
+
 ## [0.4.1] - 2026-06-17
 
 ### Security

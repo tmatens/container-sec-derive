@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress closed-loop missrate build test vet image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress closed-loop missrate build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from main.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -101,6 +101,13 @@ test:
 
 vet:
 	go vet ./...
+
+# bisect-selftest validates the capability minimizer (greedy + #32 stabilization
+# fixpoint, substitutability detection, verify_minimal) hermetically with
+# synthetic oracles — no Docker, so it runs in the regular CI gate, unlike the
+# real container-driven `make ground-truth-*`.
+bisect-selftest:
+	./scripts/bisect_caps_selftest.sh
 
 # verify-ig-pin re-runs cosign verification against the committed
 # ig-pin/ artifacts. This is a self-consistency check (the committed

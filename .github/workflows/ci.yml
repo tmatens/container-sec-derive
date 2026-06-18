@@ -55,3 +55,9 @@ jobs:
         run: go test -race ./...
       - name: go build
         run: go build -o csd .
+      # Hermetic validation of the capability minimizer (greedy + #32
+      # stabilization fixpoint, substitutability detection, verify_minimal) with
+      # synthetic oracles — no Docker, so it belongs in the fast gate rather than
+      # the dispatch-only ground-truth bisection.
+      - name: bisect-caps minimizer self-test
+        run: ./scripts/bisect_caps_selftest.sh

@@ -45,7 +45,7 @@ The architecture must accommodate future observers (read_only paths, devices, so
 ### Layers (bottom-up)
 
 1. **Observer** — eBPF program + userspace handler for one specific kernel signal. v1 ships exactly one: the `cap_capable` observer. Future observers (`writable_path`, `device_open`, `socket_connect`, etc.) plug into this same interface.
-2. **Container attribution** — shared layer that maps `(cgroup_id, pid)` → `(container_id, image, image_digest)`. Uses cgroup-ID-keyed metadata cache fed by the runtime's events stream. Docker first (`/var/run/docker.sock` + `/events`); Podman compatibility is a low-cost follow-up.
+2. **Container attribution** — shared layer that maps `(cgroup_id, pid)` → `(container_id, image, image_digest)`. Uses cgroup-ID-keyed metadata cache fed by the runtime's events stream. Docker first (`/var/run/docker.sock` + `/events`); Podman compatibility is a follow-up tracked in #164 (the observation layer is already runtime-agnostic — the work is the docker-CLI inspect/history/mounts calls behind a runtime interface).
 3. **Aggregator** — per-observer logic that collapses raw events into a policy artifact. For caps: the set of distinct capabilities observed per image, with per-cap event counts and timing.
 4. **Formatter** — emits the policy artifact in a target syntax. v1 ships seven:
    - `compose` — `cap_drop:` / `cap_add:` stanza (default)
@@ -305,7 +305,7 @@ csd observe ──► subprocess: ig run trace_capabilities --output json --cont
 
 **Supported:**
 - Linux kernel ≥ 5.8 with cgroupv2 unified hierarchy (or hybrid with cgroupv2 present)
-- Docker ≥ 20.10 or rootful Podman ≥ 4.0
+- Docker ≥ 20.10 — the only tested/supported container runtime (see the non-Docker non-goal below)
 - BTF available at `/sys/kernel/btf/vmlinux` (CO-RE path; all mainstream distros since ~2022)
 - `ig` binary vendored in the release artifact (see "IG version pinning" below)
 
@@ -318,7 +318,8 @@ Document `--privileged` as a fallback for distros where capability dropping brea
 **Explicit non-goals for v1:**
 - Kernels < 5.8 (RHEL 7, CentOS 7, Amazon Linux 1, Debian 10 stock). BCC-based approaches could cover these but are out of scope for a tool already dependent on IG. Not a "TODO" — a "won't."
 - Cgroupv1-only hosts. Unified or hybrid hierarchy required.
-- Rootless Podman. Cgroup path layout, user-namespace attribution, and non-root BPF privilege requirements differ enough that supporting it is separate work; tracked as a post-v1 item, not a v1 gap.
+- **Non-Docker runtimes (Podman, containerd, cri-o) — untested, not supported as of v0.6.** The eBPF observation layer *is* runtime-agnostic (csd passes no runtime flag; `ig` auto-detects), but image and mount inspection shells out to the `docker` CLI — `docker inspect`/`docker history` in the caps observer (`internal/observe/caps/entrypoint.go`) and `docker inspect .Mounts` in the fs observer (`internal/observe/fs/fsobserve.go`) — so on a non-Docker host those steps fail. The decision (2026-06-18) is to claim Docker-only as the *tested* surface rather than imply a Podman compatibility the code doesn't deliver. Extracting the inspect/history/mounts calls behind a runtime interface (+ a podman test lane) is the path to supporting it; tracked in **#164**.
+- Rootless Podman specifically. Even once rootful Podman is supported, cgroup path layout, user-namespace attribution, and non-root BPF privilege requirements differ enough that supporting it is separate work; a post-v1 item, not a v1 gap.
 - Kubernetes-in-cluster deployment as a DaemonSet. The `--format k8s` formatter is in scope; running `csd` itself inside k8s is not.
 
 **WSL2 / Docker Desktop:** nominally supported — kernel ≥ 5.8 and BTF are usually present on recent WSL2 kernel builds — but "usually" isn't a shippable claim. v1 ships a `make smoke-wsl2` target that runs the reference images inside WSL2 + Docker Desktop and reports pass/fail per image. If `/proc/version` matches `microsoft` / `WSL2`, `csd observe` surfaces a runtime note pointing at `docs/wsl2.md`, which lists known-good WSL2 kernel versions and where BTF has been observed absent.

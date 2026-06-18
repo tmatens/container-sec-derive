@@ -24,9 +24,14 @@ the relevant entry.
   unlike caps/devices, a too-tight allowlist BLOCKS the app, so an incomplete
   allowlist is a hard failure, surfaced via a non-strippable caveat. **Sidecar
   `schema_version` is now 1.4** (additive, omitempty egress fields → caps/fs/
-  device/capadd sidecars stay byte-identical save for the version string). Output
-  is `--format json` for now; the nftables + k8s-NetworkPolicy emitters and the
-  live integration smoke are follow-ons.
+  device/capadd sidecars stay byte-identical save for the version string).
+  Emits the allowlist as enforcement artifacts via two egress-only formats —
+  **`--format nftables`** (a default-DROP `inet csd_egress` output chain with an
+  accept rule per destination) and **`--format k8s-networkpolicy`** (a
+  NetworkPolicy with an Egress ipBlock/port rule per destination); both lead
+  with the non-strippable inverted-risk caveat, IPv4 uses `/32`/`ip daddr` and
+  IPv6 `/128`/`ip6 daddr`. These formats are rejected (EX_USAGE) for the
+  compose-security observers. The live integration smoke is a follow-on.
 
 ## [0.4.1] - 2026-06-17
 

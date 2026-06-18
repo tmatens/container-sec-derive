@@ -16,6 +16,8 @@ const (
 	FormatK8s              = "k8s"               // v0.1.0-rc
 	FormatJSON             = "json"              // v0.1.0-rc
 	FormatComposeLintEntry = "compose-lint-profile" // v0.1.0-rc
+	FormatNftables         = "nftables"             // v0.8 egress-only
+	FormatK8sNetworkPolicy = "k8s-networkpolicy"    // v0.8 egress-only
 )
 
 // writeCompose emits a docker-compose cap_drop/cap_add stanza derived from

@@ -307,7 +307,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		igBin            = fs.String("ig", "ig", "path to the ig binary")
 		initWindowMs     = fs.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 		outPath          = fs.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
-		format           = fs.String("format", FormatCompose, "output format for stdout (implemented: compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci)")
+		format           = fs.String("format", FormatCompose, "output format for stdout (compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci; egress-only: nftables, k8s-networkpolicy)")
 		allowExploratory = fs.Bool("allow-exploratory", false, "compose-lint-profile only: emit under exploratory: even when the acceptance contract is not met")
 		workload         = fs.String("workload", "", "path to the user-supplied workload script that exercised the container; recorded on the sidecar and required by the compose-lint-profile gate")
 		composeIn        = fs.String("compose-in", "", "compose-patch only: path to the user's compose file to diff against")
@@ -329,10 +329,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "one of --container or --image is required (or pass --fixture <file> to read pre-captured events)")
 	}
 	switch *format {
-	case FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI:
+	case FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI, FormatNftables, FormatK8sNetworkPolicy:
 		// implemented
 	default:
-		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
+		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI, FormatNftables, FormatK8sNetworkPolicy)
+	}
+	// nftables / k8s-networkpolicy are the v0.8 egress output family and are not
+	// meaningful for the compose-security observers; reject early rather than
+	// silently no-op in their formatter switches.
+	if (*format == FormatNftables || *format == FormatK8sNetworkPolicy) && *observe != ObserveEgress {
+		return codedErrorf(ExitUsage, "--format %s is only valid with --observe %s", *format, ObserveEgress)
 	}
 	switch *observe {
 	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd, ObserveEgress:
@@ -365,8 +371,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// sidecar (+ --out, --workload, confidence, drop abort); the nftables +
 	// k8s-networkpolicy emitters are the follow-on (#136).
 	if *observe == ObserveEgress {
-		if *format != FormatJSON {
-			return codedErrorf(ExitUsage, "--observe %s currently supports only --format %s (nftables / k8s-networkpolicy emitters are a follow-on)", ObserveEgress, FormatJSON)
+		// Egress supports json (the canonical sidecar) plus its two enforcement
+		// formatters; the compose-security formats don't map onto an allowlist.
+		switch *format {
+		case FormatJSON, FormatNftables, FormatK8sNetworkPolicy:
+			// implemented
+		default:
+			return codedErrorf(ExitUsage, "--observe %s supports --format %s, %s, or %s (not %s)", ObserveEgress, FormatJSON, FormatNftables, FormatK8sNetworkPolicy, *format)
 		}
 		s, err := produceEgressObservation(egressPipelineOpts{
 			AggregateOpts: aggregateOpts{
@@ -383,8 +394,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if err := writeJSON(stdout, s); err != nil {
-			return fmt.Errorf("write json: %w", err)
+		switch *format {
+		case FormatJSON:
+			if err := writeJSON(stdout, s); err != nil {
+				return fmt.Errorf("write json: %w", err)
+			}
+		case FormatNftables:
+			if err := writeEgressNftables(stdout, s); err != nil {
+				return fmt.Errorf("write nftables: %w", err)
+			}
+		case FormatK8sNetworkPolicy:
+			if err := writeEgressNetworkPolicy(stdout, s); err != nil {
+				return fmt.Errorf("write k8s-networkpolicy: %w", err)
+			}
 		}
 		if *outPath != "" {
 			if err := writeSidecar(s, *outPath); err != nil {

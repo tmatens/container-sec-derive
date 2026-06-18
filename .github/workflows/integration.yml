@@ -19,12 +19,16 @@
 # BTF") rather than a green pass — that failure is itself the signal to
 # move this job to a self-hosted runner (see PLAN.md / ROADMAP).
 #
-# Triggers: pull_request + workflow_dispatch only (NOT push-to-main).
-# Live observation burns ~5-8 hosted minutes/run; dropping the
-# redundant post-merge push run keeps the free-tier 2,000 min/month
-# budget for PRs and on-demand dispatch. The bisection job
-# (make ground-truth-*, ~5-8 min PER image) is workflow_dispatch-only
-# for the same reason — it must never run per-PR.
+# Triggers: pull_request + nightly schedule + workflow_dispatch (NOT
+# push-to-main). Live observation burns hosted minutes, so the per-PR run is
+# TRIMMED: synthetic-only hard gate at a short 10s window (the deterministic
+# exercisers fire within ~1-2s of attach; the 500ms init-window plus a few cycles
+# fit easily). The broader reference workloads (postgres/caddy/tailscale, which
+# are informational and often observe zero events post-attach) run at the full
+# 30s window on the NIGHTLY schedule and on dispatch — see the smoke job's env.
+# Dropping the redundant post-merge push run keeps the free-tier 2,000 min/month
+# budget for PRs. The bisection job (make ground-truth-*, ~5-8 min PER image) is
+# workflow_dispatch-only for the same reason — it must never run per-PR.
 #
 # All third-party actions SHA-pinned per CLAUDE.md §Dependency pinning;
 # SHAs are kept in lockstep with ci.yml / image-build.yml / release.yml.
@@ -42,6 +46,12 @@ on:
       - 'docs/**'
       - 'renovate.json'
       - 'LICENSE'
+  schedule:
+    # Nightly FULL run: the reference workloads (postgres/caddy/tailscale) at the
+    # full 30s window. Per-PR runs are trimmed for speed (synthetic-only, 10s —
+    # see the smoke job's env), so this nightly is where the broader reference
+    # coverage lives.
+    - cron: "41 5 * * *"
   workflow_dispatch:
     inputs:
       duration:
@@ -84,6 +94,16 @@ jobs:
     name: live-bpf smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    # Per-PR runs are trimmed for Actions cost; scheduled/dispatch runs go broad.
+    # A dispatch `duration` input overrides the window everywhere. The PR window
+    # (10s, closed-loop 15s) comfortably exceeds gadget attach + the 500ms
+    # init-window + several exercise cycles, so the deterministic gates still fire;
+    # SMOKE_ONLY restricts caps/fs to the synthetic hard gate (the reference
+    # workloads are informational and run nightly).
+    env:
+      SMOKE_DURATION: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '10s' || '30s') }}
+      SMOKE_DURATION_CL: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '15s' || '30s') }}
+      SMOKE_ONLY: ${{ github.event_name == 'pull_request' && 'synthetic' || 'postgres,caddy,tailscale,synthetic' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -159,11 +179,12 @@ jobs:
       # still fails the job (the gate), and always() lets the report run.
       - name: Live-BPF smoke matrix
         env:
-          DURATION: ${{ github.event.inputs.duration || '30s' }}
+          DURATION: ${{ env.SMOKE_DURATION }}
+          ONLY: ${{ env.SMOKE_ONLY }}
         run: |
           # Capture the real exit code: `cmd | tee` masks failure (the
           # pipeline exit becomes tee's 0), which would let a FAIL pass green.
-          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" "ONLY=${ONLY}" \
             scripts/smoke_wsl2.sh > smoke.txt 2>&1 && rc=0 || rc=$?
           cat smoke.txt
           exit $rc
@@ -178,9 +199,10 @@ jobs:
       # pre-attach, per docs/known-deltas.md).
       - name: Live-BPF fs smoke matrix
         env:
-          DURATION: ${{ github.event.inputs.duration || '30s' }}
+          DURATION: ${{ env.SMOKE_DURATION }}
+          ONLY: ${{ env.SMOKE_ONLY }}
         run: |
-          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" "ONLY=${ONLY}" \
             scripts/smoke_fs.sh > smoke_fs.txt 2>&1 && rc=0 || rc=$?
           cat smoke_fs.txt
           exit $rc
@@ -197,7 +219,7 @@ jobs:
       # GPU/tun/kvm is needed on the runner (scripts/smoke_device.sh).
       - name: Live-BPF device smoke matrix
         env:
-          DURATION: ${{ github.event.inputs.duration || '30s' }}
+          DURATION: ${{ env.SMOKE_DURATION }}
         run: |
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
             scripts/smoke_device.sh > smoke_device.txt 2>&1 && rc=0 || rc=$?
@@ -214,7 +236,7 @@ jobs:
       # (scripts/smoke_capadd.sh).
       - name: Live-BPF capadd smoke
         env:
-          DURATION: ${{ github.event.inputs.duration || '30s' }}
+          DURATION: ${{ env.SMOKE_DURATION }}
         run: |
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
             scripts/smoke_capadd.sh > smoke_capadd.txt 2>&1 && rc=0 || rc=$?
@@ -229,7 +251,7 @@ jobs:
       # observation must contain that <gateway>:<port> (scripts/smoke_egress.sh).
       - name: Live-BPF egress smoke
         env:
-          DURATION: ${{ github.event.inputs.duration || '30s' }}
+          DURATION: ${{ env.SMOKE_DURATION }}
         run: |
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
             scripts/smoke_egress.sh > smoke_egress.txt 2>&1 && rc=0 || rc=$?
@@ -243,7 +265,7 @@ jobs:
       # derive phase reuses trace_capabilities (attach already proven above).
       - name: Closed-loop meets-intent test
         env:
-          DURATION: ${{ github.event.inputs.duration || '30s' }}
+          DURATION: ${{ env.SMOKE_DURATION_CL }}
         run: |
           sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
             scripts/closed_loop.sh > closed_loop.txt 2>&1 && rc=0 || rc=$?

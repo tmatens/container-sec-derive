@@ -1,4 +1,4 @@
-package main
+package capadd
 
 import (
 	"context"
@@ -20,13 +20,13 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
-// capaddPipelineOpts bundles every input the v0.5 dangerous-cap_add validator
+// CapaddPipelineOpts bundles every input the v0.5 dangerous-cap_add validator
 // takes. Its signal source is trace_capabilities — the same gadget the v0.1 cap
 // observer drives — so there is no second fixture (cf. privileged's
 // DeviceFixture). ActiveSet is the validate-set (the explicit --cap-add set, or
-// the dangerousCaps default); Granted records whether it came from --cap-add, the
+// the DangerousCaps default); Granted records whether it came from --cap-add, the
 // switch that enables unused-cap detection and the recommended minimized cap_add.
-type capaddPipelineOpts struct {
+type CapaddPipelineOpts struct {
 	AggregateOpts attrib.Opts
 	ActiveSet     map[string]struct{}
 	Granted       bool
@@ -36,12 +36,12 @@ type capaddPipelineOpts struct {
 	Workload      string
 }
 
-// produceCapaddObservation runs the fixture-or-live capadd observe path
+// ProduceCapaddObservation runs the fixture-or-live capadd observe path
 // end-to-end and returns a fully populated *Sidecar with the capadd_validation
 // block, trace_health, and capadd confidence already scored. It is the v0.5
 // analog of produceDeviceObservation: same fixture-vs-live branch shape and
 // typed-exit translation, reusing the trace_capabilities stream.
-func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
+func ProduceCapaddObservation(opts CapaddPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
 		obs *capaddObservation
@@ -53,7 +53,7 @@ func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*sidec
 			return nil, fmt.Errorf("open fixture: %w", openErr)
 		}
 		defer src.Close()
-		obs, err = aggregateCapadd(src, opts.AggregateOpts, opts.ActiveSet)
+		obs, err = AggregateCapadd(src, opts.AggregateOpts, opts.ActiveSet)
 	} else {
 		observe.NoteWSL2IfDetected(stderr)
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
@@ -88,7 +88,7 @@ func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*sidec
 // capadd_validation block carries the per-cap verdicts. ReplicaCapDisagreement is
 // populated with the dangerous caps observed on fewer than all replicas (the
 // capadd analog of the cap observer's same field), feeding the confidence rubric.
-func capaddToSidecar(obs *capaddObservation, opts capaddPipelineOpts) *sidecar.Sidecar {
+func capaddToSidecar(obs *capaddObservation, opts CapaddPipelineOpts) *sidecar.Sidecar {
 	s := sidecar.NewSidecar()
 	s.Target.Mode = opts.AggregateOpts.ModeLabel()
 	s.Target.Selector = opts.AggregateOpts.Selector()
@@ -141,7 +141,7 @@ func capaddToSidecar(obs *capaddObservation, opts capaddPipelineOpts) *sidecar.S
 
 // observeCapadd spawns `ig run trace_capabilities --output json` and aggregates
 // dangerous-cap usage for the lifetime of ctx. It is observe() with
-// aggregateCapadd swapped in for aggregate() — the same gadget and the same
+// AggregateCapadd swapped in for aggregate() — the same gadget and the same
 // stderr-drain + ringbuf-loss accounting; only the aggregation differs (keyed on
 // syscall-per-cap rather than deduped to a cap set).
 func observeCapadd(ctx context.Context, igBin string, opts attrib.Opts, activeSet map[string]struct{}, stderrSink io.Writer) (*capaddObservation, error) {
@@ -171,7 +171,7 @@ func observeCapadd(ctx context.Context, igBin string, opts attrib.Opts, activeSe
 		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
 	}()
 
-	obs, aggErr := aggregateCapadd(stdout, opts, activeSet)
+	obs, aggErr := AggregateCapadd(stdout, opts, activeSet)
 	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
 	if earlyErr {
 		// Undrained stdout on early error → ig blocks and never exits; kill it

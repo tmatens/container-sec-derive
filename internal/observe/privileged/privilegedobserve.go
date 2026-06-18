@@ -1,4 +1,4 @@
-package main
+package privileged
 
 import (
 	"context"
@@ -20,7 +20,7 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
-// privilegedPipelineOpts bundles every input the v0.3 privileged-mode
+// PrivilegedPipelineOpts bundles every input the v0.3 privileged-mode
 // decomposition observe pipeline takes. Unlike the single-observer paths it has
 // TWO signal sources — trace_capabilities (the cap_add half) and trace_open
 // filtered to /dev (the devices half) — so it carries two fixture inputs:
@@ -28,7 +28,7 @@ import (
 // DeviceFixture (the trace_open NDJSON, the device half). Either may be empty in
 // fixture mode (an absent half contributes nothing). This mirrors how the fs
 // observer added --mounts-fixture as a second hermetic input.
-type privilegedPipelineOpts struct {
+type PrivilegedPipelineOpts struct {
 	AggregateOpts  attrib.Opts
 	Fixture        string // trace_capabilities NDJSON (caps half)
 	DeviceFixture  string // trace_open NDJSON (devices half)
@@ -39,7 +39,7 @@ type privilegedPipelineOpts struct {
 	Workload       string
 }
 
-// producePrivilegedObservation runs the capability and device observers
+// ProducePrivilegedObservation runs the capability and device observers
 // together and synthesizes the minimum non-privileged equivalent. Live, the two
 // gadgets run as concurrent ig subprocesses for one window; in fixture mode the
 // two NDJSON inputs are aggregated independently. The cap observation is the
@@ -56,7 +56,7 @@ type privilegedPipelineOpts struct {
 // stderr advisory in emitAdvisoryWarnings — so a user cannot read the headline
 // "drop privileged: true" without also seeing that the relaxed-MAC dimension is
 // unobserved and may still be load-bearing.
-func producePrivilegedObservation(opts privilegedPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
+func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
 		capS *sidecar.Sidecar

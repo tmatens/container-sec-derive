@@ -16,10 +16,12 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/observe"
+	"github.com/tmatens/container-sec-derive/internal/observe/capadd"
 	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/observe/devices"
 	"github.com/tmatens/container-sec-derive/internal/observe/egress"
 	"github.com/tmatens/container-sec-derive/internal/observe/fs"
+	"github.com/tmatens/container-sec-derive/internal/observe/privileged"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -415,7 +417,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if *allowExploratory && *format != FormatComposeLintEntry {
 			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
 		}
-		s, err := producePrivilegedObservation(privilegedPipelineOpts{
+		s, err := privileged.ProducePrivilegedObservation(privileged.PrivilegedPipelineOpts{
 			AggregateOpts: attrib.Opts{
 				Container:    *container,
 				Image:        *image,
@@ -506,13 +508,13 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// switch that enables unused-cap detection + a recommended minimized
 		// cap_add. Without it the validator scrutinizes the dangerousCaps default
 		// and reports only observed usage.
-		granted := parseCapSet(*capAddIn)
+		granted := capadd.ParseCapSet(*capAddIn)
 		activeSet := granted
 		hasGranted := granted != nil
 		if activeSet == nil {
-			activeSet = dangerousCaps
+			activeSet = capadd.DangerousCaps
 		}
-		s, err := produceCapaddObservation(capaddPipelineOpts{
+		s, err := capadd.ProduceCapaddObservation(capadd.CapaddPipelineOpts{
 			AggregateOpts: attrib.Opts{
 				Container:   *container,
 				Image:       *image,

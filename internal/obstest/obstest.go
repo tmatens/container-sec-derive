@@ -73,3 +73,15 @@ func ContainsSubstr(ss []string, sub string) bool {
 	}
 	return false
 }
+
+// PrivCapsFixture / PrivDevFixture are the trace_capabilities / trace_open
+// NDJSON the privileged-composition tests replay (a gpu workload holding
+// CAP_NET_ADMIN + CAP_SYS_NICE and opening /dev/dri/card0 + /dev/net/tun).
+const PrivCapsFixture = `{"timestamp":1700000005000,"syscall":"socket","cap":"CAP_NET_ADMIN","cap_raw":12,"capable":true,"proc":{"comm":"vpn","pid":5001},"runtime":{"runtimeName":"docker","containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
+{"timestamp":1700000007000,"syscall":"ioctl","cap":"CAP_SYS_NICE","cap_raw":23,"capable":true,"proc":{"comm":"renderer","pid":5002},"runtime":{"runtimeName":"docker","containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
+`
+
+const PrivDevFixture = `{"syscall":"openat","flags_raw":2,"fpath":"/dev/dri/card0","proc":{"comm":"renderer"},"runtime":{"containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
+{"syscall":"openat","flags_raw":1,"fpath":"/dev/null","proc":{"comm":"renderer"},"runtime":{"containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
+{"syscall":"openat","flags_raw":2,"fpath":"/dev/net/tun","proc":{"comm":"vpn"},"runtime":{"containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
+`

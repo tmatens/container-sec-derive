@@ -77,10 +77,27 @@ func computeEgressConfidence(s *sidecar.Sidecar) {
 		addLow("no workload script provided (startup + idle only) — an allowlist from idle traffic will almost certainly be incomplete")
 	}
 
-	factors = append(factors,
-		"deferred: hostname (trace_dns) correlation not yet implemented — allowlist is raw IPs",
-		"deferred: steady-state detection not yet implemented",
-	)
+	// Hostname (trace_dns) correlation: when DNS was observed the allowlist gains
+	// hostname annotations and the resolver endpoint (issue #159), lifting the
+	// raw-IP limitation and — via the resolver rule — removing the most common
+	// default-deny breakage. It does not raise the grade (incompleteness still
+	// dominates), but the factor must reflect reality rather than the old
+	// "not implemented" deferral.
+	if egressDNSObserved(s) {
+		annotated := 0
+		for _, d := range s.EgressDestinations {
+			if len(d.Hostnames) > 0 {
+				annotated++
+			}
+		}
+		factors = append(factors, fmt.Sprintf(
+			"ok: hostnames correlated via trace_dns (%d/%d destination(s) named); %d DNS resolver(s) included in the allowlist",
+			annotated, len(s.EgressDestinations), len(s.EgressRecommendation.Resolvers)))
+	} else {
+		factors = append(factors,
+			"deferred: no DNS observed (trace_dns) — allowlist is raw IPs and omits the resolver; ensure UDP/53 egress is permitted separately")
+	}
+	factors = append(factors, "deferred: steady-state detection not yet implemented")
 
 	s.Confidence.Factors = factors
 	switch {
@@ -89,4 +106,19 @@ func computeEgressConfidence(s *sidecar.Sidecar) {
 	default:
 		s.Confidence.Level = sidecar.ConfidenceModerate
 	}
+}
+
+// egressDNSObserved reports whether trace_dns correlation was applied: a
+// resolver was recorded or at least one destination carries hostnames. Either
+// implies the DNS signal was present for this run.
+func egressDNSObserved(s *sidecar.Sidecar) bool {
+	if s.EgressRecommendation != nil && len(s.EgressRecommendation.Resolvers) > 0 {
+		return true
+	}
+	for _, d := range s.EgressDestinations {
+		if len(d.Hostnames) > 0 {
+			return true
+		}
+	}
+	return false
 }

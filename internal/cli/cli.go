@@ -110,6 +110,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		capAddIn         = flags.String("cap-add", "", "capadd observer: comma-separated currently-granted caps to validate (e.g. SYS_ADMIN,NET_RAW); enables unused-cap detection and a recommended minimized cap_add. Default: report observed dangerous-cap usage")
 		mountsFixture    = flags.String("mounts-fixture", "", "fs observer only: read container mount destinations from this `docker inspect` .Mounts JSON instead of running docker inspect")
 		deviceFixture    = flags.String("device-fixture", "", "privileged observer only: read the trace_open NDJSON for the devices half from this file (the --fixture file supplies the trace_capabilities half)")
+		dnsFixture       = flags.String("dns-fixture", "", "egress observer only: read trace_dns NDJSON from this file to correlate IP->hostname and the DNS resolver into the allowlist (the --fixture file supplies the trace_tcp half)")
 		fixture          = flags.String("fixture", "", "read ig-format NDJSON from this file instead of spawning ig")
 		fixtureErr       = flags.String("fixture-stderr", "", "fixture-mode only: file of ig stderr lines; drops parsed as if piped from live ig")
 		inspectFixture   = flags.String("inspect-fixture", "", "read pre-captured image-inspection JSON from this file instead of running `docker inspect`")
@@ -162,6 +163,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if *observeMode != ObservePrivileged && *deviceFixture != "" {
 		return exit.CodedErrorf(exit.Usage, "--device-fixture is only meaningful with --observe %s", ObservePrivileged)
 	}
+	if *observeMode != ObserveEgress && *dnsFixture != "" {
+		return exit.CodedErrorf(exit.Usage, "--dns-fixture is only meaningful with --observe %s", ObserveEgress)
+	}
 	if *observeMode != ObserveCapadd && *capAddIn != "" {
 		return exit.CodedErrorf(exit.Usage, "--cap-add is only meaningful with --observe %s", ObserveCapadd)
 	}
@@ -196,10 +200,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				AllMatching:  *allMatching,
 				InitWindowMs: *initWindowMs,
 			},
-			Fixture:  *fixture,
-			IGBin:    *igBin,
-			Duration: *duration,
-			Workload: *workload,
+			Fixture:    *fixture,
+			DNSFixture: *dnsFixture,
+			IGBin:      *igBin,
+			Duration:   *duration,
+			Workload:   *workload,
 		}, stderr)
 		if err != nil {
 			return err

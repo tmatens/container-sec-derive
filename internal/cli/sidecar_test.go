@@ -10,8 +10,8 @@ import (
 
 func TestNewSidecar_Constants(t *testing.T) {
 	s := sidecar.NewSidecar()
-	if s.SchemaVersion != "1.4" {
-		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.4")
+	if s.SchemaVersion != "1.5" {
+		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.5")
 	}
 	if s.ToolVersion != "0.5.0" {
 		t.Errorf("ToolVersion = %q, want %q", s.ToolVersion, "0.5.0")

@@ -18,6 +18,7 @@ import (
 )
 
 const egressFixture = "../../../testdata/ig-versions/v0.51.0/trace_tcp_sample.ndjson"
+const dnsFixture = "../../../testdata/ig-versions/v0.51.0/trace_dns_sample.ndjson"
 
 func TestProduceEgressObservation_Fixture(t *testing.T) {
 	s, err := ProduceEgressObservation(EgressPipelineOpts{
@@ -28,8 +29,8 @@ func TestProduceEgressObservation_Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.SchemaVersion != "1.4" {
-		t.Errorf("schema = %q, want 1.4", s.SchemaVersion)
+	if s.SchemaVersion != "1.5" {
+		t.Errorf("schema = %q, want 1.5", s.SchemaVersion)
 	}
 	if s.EgressRecommendation == nil || len(s.EgressRecommendation.Allowlist) != 2 {
 		t.Fatalf("allowlist = %+v, want 2 destinations", s.EgressRecommendation)
@@ -60,7 +61,7 @@ func TestEgressSidecar_Golden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := egressToSidecar(eg, attrib.Opts{Container: "egress-target"})
+	s := egressToSidecar(eg, nil, attrib.Opts{Container: "egress-target"})
 	s.ObservedAt = time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
 	s.DurationSeconds = 600
 	s.Workload = "/tmp/load.sh"
@@ -86,6 +87,79 @@ func TestEgressSidecar_Golden(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("egress golden mismatch. Diff:\n--- want\n%s\n--- got\n%s", want, got)
+	}
+}
+
+// TestProduceEgressObservation_DNSEnriched runs the full fixture pipeline with
+// both the trace_tcp fixture and the trace_dns fixture (#159): the egress
+// destinations must gain the hostnames that resolved to them, and the
+// recommendation must carry the DNS resolver endpoint. The trace_dns sample is
+// consistent with the trace_tcp sample (1.1.1.1 <- api.example.com, 10.0.0.5 <-
+// db.internal, resolver 10.0.0.2:53).
+func TestProduceEgressObservation_DNSEnriched(t *testing.T) {
+	s, err := ProduceEgressObservation(EgressPipelineOpts{
+		AggregateOpts: attrib.Opts{Container: "egress-target"},
+		Fixture:       egressFixture,
+		DNSFixture:    dnsFixture,
+		Workload:      "/tmp/load.sh",
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hostnames annotate the IP destinations.
+	byAddr := map[string][]string{}
+	for _, d := range s.EgressDestinations {
+		byAddr[d.Addr] = d.Hostnames
+	}
+	if got := byAddr["1.1.1.1"]; len(got) != 1 || got[0] != "api.example.com" {
+		t.Errorf("1.1.1.1 hostnames = %v, want [api.example.com]", got)
+	}
+	if got := byAddr["10.0.0.5"]; len(got) != 1 || got[0] != "db.internal" {
+		t.Errorf("10.0.0.5 hostnames = %v, want [db.internal]", got)
+	}
+	// The resolver is in the recommendation, kept separate from the TCP allowlist.
+	if s.EgressRecommendation == nil || len(s.EgressRecommendation.Resolvers) != 1 {
+		t.Fatalf("dns_resolvers = %+v, want one", s.EgressRecommendation)
+	}
+	if r := s.EgressRecommendation.Resolvers[0]; r.Addr != "10.0.0.2" || r.Port != 53 {
+		t.Errorf("resolver = %+v, want 10.0.0.2:53", r)
+	}
+}
+
+// TestEgressDNSSidecar_Golden golden-checks the full DNS-enriched sidecar.
+func TestEgressDNSSidecar_Golden(t *testing.T) {
+	s, err := ProduceEgressObservation(EgressPipelineOpts{
+		AggregateOpts: attrib.Opts{Container: "egress-target"},
+		Fixture:       egressFixture,
+		DNSFixture:    dnsFixture,
+		Workload:      "/tmp/load.sh",
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ObservedAt = time.Date(2026, 4, 19, 12, 0, 0, 0, time.UTC)
+	s.DurationSeconds = 600
+
+	got, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = append(got, '\n')
+
+	goldenPath := filepath.Join("..", "..", "..", "testdata", "egress_dns_sidecar_golden.json")
+	if *updateGolden {
+		if err := os.WriteFile(goldenPath, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("wrote %s (%d bytes)", goldenPath, len(got))
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden: %v (run with -update-golden to create)", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("egress dns golden mismatch. Diff:\n--- want\n%s\n--- got\n%s", want, got)
 	}
 }
 

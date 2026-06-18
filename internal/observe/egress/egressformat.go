@@ -33,6 +33,33 @@ func egressCaveatText(s *sidecar.Sidecar) string {
 	return EgressCaveat
 }
 
+// egressResolvers returns the DNS resolver endpoints from the recommendation
+// (nil-safe). These are the UDP/53 destinations trace_tcp cannot see; emitting
+// them as allow rules is what keeps a default-DROP egress policy from breaking
+// name resolution (issue #159).
+func egressResolvers(s *sidecar.Sidecar) []sidecar.EgressDest {
+	if s == nil || s.EgressRecommendation == nil {
+		return nil
+	}
+	return s.EgressRecommendation.Resolvers
+}
+
+// hostnamesFor returns the hostnames recorded for an allowlist destination by
+// matching it against the egress_destinations evidence (which carries the
+// trace_dns annotation). Used to comment the IP rules with the names that
+// resolved to them. Returns nil when DNS was not observed.
+func hostnamesFor(s *sidecar.Sidecar, d sidecar.EgressDest) []string {
+	if s == nil {
+		return nil
+	}
+	for _, ed := range s.EgressDestinations {
+		if ed.Addr == d.Addr && ed.Port == d.Port {
+			return ed.Hostnames
+		}
+	}
+	return nil
+}
+
 // WriteEgressNftables emits an nftables ruleset: a default-DROP output chain
 // that accepts established/related traffic plus one accept rule per observed
 // (addr, port). IPv4 destinations use `ip daddr`, IPv6 `ip6 daddr`. An empty
@@ -46,6 +73,15 @@ func WriteEgressNftables(w io.Writer, s *sidecar.Sidecar) error {
 	fmt.Fprintln(&b, "\tchain output {")
 	fmt.Fprintln(&b, "\t\ttype filter hook output priority 0; policy drop;")
 	fmt.Fprintln(&b, "\t\tct state established,related accept")
+	// DNS resolver rules first (UDP): without these a default-DROP policy blocks
+	// name resolution and the workload fails before any TCP connect (#159).
+	for _, r := range egressResolvers(s) {
+		fam := "ip"
+		if r.Version == 6 {
+			fam = "ip6"
+		}
+		fmt.Fprintf(&b, "\t\t%s daddr %s udp dport %d accept # DNS resolver\n", fam, r.Addr, r.Port)
+	}
 	dests := egressAllowlist(s)
 	if len(dests) == 0 {
 		fmt.Fprintln(&b, "\t\t# no outbound connections observed — this chain denies ALL egress")
@@ -55,7 +91,11 @@ func WriteEgressNftables(w io.Writer, s *sidecar.Sidecar) error {
 		if d.Version == 6 {
 			fam = "ip6"
 		}
-		fmt.Fprintf(&b, "\t\t%s daddr %s tcp dport %d accept\n", fam, d.Addr, d.Port)
+		comment := ""
+		if names := hostnamesFor(s, d); len(names) > 0 {
+			comment = " # " + strings.Join(names, ", ")
+		}
+		fmt.Fprintf(&b, "\t\t%s daddr %s tcp dport %d accept%s\n", fam, d.Addr, d.Port, comment)
 	}
 	fmt.Fprintln(&b, "\t}")
 	fmt.Fprintln(&b, "}")
@@ -81,15 +121,34 @@ func WriteEgressNetworkPolicy(w io.Writer, s *sidecar.Sidecar) error {
 	fmt.Fprintln(&b, "  policyTypes:")
 	fmt.Fprintln(&b, "    - Egress")
 	dests := egressAllowlist(s)
-	if len(dests) == 0 {
+	resolvers := egressResolvers(s)
+	if len(dests) == 0 && len(resolvers) == 0 {
 		fmt.Fprintln(&b, "  # no outbound connections observed — an empty egress list denies ALL egress")
 		fmt.Fprintln(&b, "  egress: []")
 	} else {
 		fmt.Fprintln(&b, "  egress:")
+		// DNS resolver rules first (UDP): a NetworkPolicy that omits these blocks
+		// name resolution and the workload fails (#159).
+		for _, r := range resolvers {
+			cidr := r.Addr + "/32"
+			if r.Version == 6 {
+				cidr = r.Addr + "/128"
+			}
+			fmt.Fprintln(&b, "    # DNS resolver")
+			fmt.Fprintln(&b, "    - to:")
+			fmt.Fprintln(&b, "        - ipBlock:")
+			fmt.Fprintf(&b, "            cidr: %s\n", cidr)
+			fmt.Fprintln(&b, "      ports:")
+			fmt.Fprintln(&b, "        - protocol: UDP")
+			fmt.Fprintf(&b, "          port: %d\n", r.Port)
+		}
 		for _, d := range dests {
 			cidr := d.Addr + "/32"
 			if d.Version == 6 {
 				cidr = d.Addr + "/128"
+			}
+			if names := hostnamesFor(s, d); len(names) > 0 {
+				fmt.Fprintf(&b, "    # %s\n", strings.Join(names, ", "))
 			}
 			fmt.Fprintln(&b, "    - to:")
 			fmt.Fprintln(&b, "        - ipBlock:")

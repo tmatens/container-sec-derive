@@ -149,6 +149,18 @@ Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/
 > with `ipBlock`/port Egress rules) — alongside `--format json`. Live-validated
 > against real `ig` (`scripts/smoke_egress.sh` in `integration.yml`). **Not a
 > compose-lint rule** (per below).
+>
+> **DNS/hostname follow-up — in progress (issue #159).** Both deferred siblings
+> above are unblocked by the same signal: the survey confirmed `trace_dns` exists
+> at the pin with the needed fields (`name`, `addresses`, `qr`, `id`, resolver
+> endpoint) — **no pin bump**. Landing incrementally: the `trace_dns` event
+> parser and the IP→hostname + resolver aggregation are in, and the fixture path
+> (`--dns-fixture`) wires per-destination `hostnames` + a `dns_resolvers` block
+> into the sidecar (**schema 1.4 → 1.5**, additive) and the nftables /
+> NetworkPolicy formatters (UDP resolver rule first + hostname annotations). The
+> resolver-in-allowlist is the key correctness fix — a TCP-only default-DROP
+> allowlist silently breaks name resolution. The live two-gadget concurrent path
+> (trace_tcp + trace_dns) is the remaining step.
 
 For users running iptables/nftables egress filtering or Cilium-style network policies, observed outbound destinations form a minimum allowlist.
 

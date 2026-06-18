@@ -11,6 +11,26 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Added
+
+- **`--observe egress` DNS/hostname correlation (issue #159), fixture path.**
+  The v0.5.0 egress observer was TCP-only and IP-based; this adds the
+  `trace_dns` signal as a second source (the survey confirmed the gadget and
+  its fields exist at the pin — no pin bump). A new **`--dns-fixture`** flag
+  supplies a `trace_dns` NDJSON capture alongside the trace_tcp `--fixture`, and
+  the egress sidecar gains two additive, omitempty fields:
+  per-destination **`hostnames`** (the names that resolved to each IP, from
+  trace_dns response packets) and **`dns_resolvers`** on the recommendation (the
+  UDP resolver endpoints — the destinations trace_tcp cannot see, which a
+  default-DROP allowlist **must** permit or all name resolution breaks). The
+  `nftables` and `k8s-networkpolicy` formatters now emit the UDP resolver allow
+  rule (first, before the TCP rules) and annotate each IP rule with its
+  hostname(s); `json` carries the structured fields. The egress confidence
+  factor reflects whether DNS was observed. A TCP-only egress run (no
+  `--dns-fixture`) is byte-identical to before save the schema version.
+  **Sidecar `schema_version` is now 1.5** (additive). The live two-gadget
+  concurrent path (trace_tcp + trace_dns) is a follow-on.
+
 ## [0.5.0] - 2026-06-18
 
 ### Added

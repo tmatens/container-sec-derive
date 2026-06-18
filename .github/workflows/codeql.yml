@@ -81,11 +81,14 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          # security-extended keeps the thorough *security* query set but drops
-          # the maintainability/quality queries (which overlap with go vet +
-          # review) — the bulk of the per-run query-eval time. Faster scans on a
-          # root-equivalent tool without losing security coverage.
-          queries: security-extended
+          # Default query suite (no `queries:` override). security-extended was
+          # tried (#146) on the premise it would scan faster, but measurement
+          # shows it roughly DOUBLES the Go analyze step (~384s -> ~656s, run
+          # ~8min -> ~12.4min) on this tree — the extra query eval, not the build,
+          # and the setup-go cache does not offset it (autobuild doesn't reuse it;
+          # #156 ran 12.4min with a confirmed cache hit). The default suite keeps
+          # the standard security queries at ~8min; revisit security-extended only
+          # with a parallelism/scoping change that pays for its query-eval cost.
       - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           category: "/language:${{ matrix.language }}"

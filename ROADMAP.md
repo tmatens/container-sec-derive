@@ -131,6 +131,25 @@ Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/
 
 ## v0.8 — Network egress allowlist
 
+> **Status: implemented (`--observe egress`), shipping in v0.5.0.** Design +
+> scope in **issue #136**. Runs the pinned ig `trace_tcp` gadget and derives the
+> minimum outbound allowlist from the destinations the container actually
+> contacted (outbound `connect()` only — `accept`/`close` filtered). Scoped
+> **TCP-first** (`trace_tcp` is TCP-only; a UDP/DNS allowlist via `trace_dns` is
+> a deferred sibling) and **IP-based** (the resolved IP `connect()` observed, not
+> the hostname the app requested — a `trace_dns` hostname correlation is a
+> deferred enhancement). Reuses the existing attribution + multi-replica +
+> drop-rate machinery; additive `egress_destinations` + `egress_recommendation`
+> sidecar block (schema bumped 1.3 → **1.4**); a conservative confidence rubric
+> where workload-absence is forced **low** — the egress *inverted risk*: unlike
+> caps/devices a too-tight allowlist BLOCKS the app, so an incomplete allowlist
+> is a hard failure, surfaced via a non-strippable caveat. Two egress-only
+> enforcement formatters — **`--format nftables`** (a default-DROP `inet
+> csd_egress` output chain) and **`--format k8s-networkpolicy`** (a NetworkPolicy
+> with `ipBlock`/port Egress rules) — alongside `--format json`. Live-validated
+> against real `ig` (`scripts/smoke_egress.sh` in `integration.yml`). **Not a
+> compose-lint rule** (per below).
+
 For users running iptables/nftables egress filtering or Cilium-style network policies, observed outbound destinations form a minimum allowlist.
 
 - **Signal:** eBPF on `connect()` for outbound TCP/UDP; aggregate per `(image, destination_host, port)`.

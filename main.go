@@ -79,6 +79,12 @@ const (
 	// syscalls per dangerous cap and emits a validation (which caps are used,
 	// by which syscalls, finer-grained alternatives, and removal candidates).
 	ObserveCapadd = "capadd"
+	// ObserveEgress is the v0.8 network-egress observer (ROADMAP §v0.8, issue
+	// #136): it runs trace_tcp and derives the minimum outbound allowlist from
+	// the destinations the workload actually contacted. A distinct output
+	// family (firewall / NetworkPolicy rules), not the compose-security
+	// formatters.
+	ObserveEgress = "egress"
 )
 
 // capEvent is the subset of ig trace_capabilities fields we consume at
@@ -290,7 +296,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		container        = fs.String("container", "", "target container id or name (mutually exclusive with --image)")
 		image            = fs.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
 		allMatching      = fs.Bool("all-matching", false, "aggregate across all replicas matching --image")
-		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), devices (device decomposition), privileged (drop privileged: true → cap_add + devices), or capadd (validate dangerous cap_add against observed syscalls)")
+		observe          = fs.String("observe", ObserveCaps, "observer to run: caps (Linux capabilities), fs (read-only filesystem + tmpfs), devices (device decomposition), privileged (drop privileged: true → cap_add + devices), capadd (validate dangerous cap_add against observed syscalls), or egress (minimum outbound allowlist from observed connects)")
 		capAddIn         = fs.String("cap-add", "", "capadd observer: comma-separated currently-granted caps to validate (e.g. SYS_ADMIN,NET_RAW); enables unused-cap detection and a recommended minimized cap_add. Default: report observed dangerous-cap usage")
 		mountsFixture    = fs.String("mounts-fixture", "", "fs observer only: read container mount destinations from this `docker inspect` .Mounts JSON instead of running docker inspect")
 		deviceFixture    = fs.String("device-fixture", "", "privileged observer only: read the trace_open NDJSON for the devices half from this file (the --fixture file supplies the trace_capabilities half)")
@@ -329,10 +335,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return codedErrorf(ExitUsage, "--format %q not recognized; supported: %s, %s, %s, %s, %s, %s, %s", *format, FormatCompose, FormatComposePatch, FormatComposeLintEntry, FormatDockerRun, FormatJSON, FormatK8s, FormatOCI)
 	}
 	switch *observe {
-	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd:
+	case ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd, ObserveEgress:
 		// recognized
 	default:
-		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd)
+		return codedErrorf(ExitUsage, "--observe %q not recognized; supported: %s, %s, %s, %s, %s, %s", *observe, ObserveCaps, ObserveFS, ObserveDevices, ObservePrivileged, ObserveCapadd, ObserveEgress)
 	}
 	if *observe != ObserveFS && *mountsFixture != "" {
 		return codedErrorf(ExitUsage, "--mounts-fixture is only meaningful with --observe %s", ObserveFS)
@@ -351,6 +357,48 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if _, err := os.Stat(*workload); err != nil {
 			return wrapCoded(ExitUsage, fmt.Errorf("--workload %q: %w", *workload, err))
 		}
+	}
+	// The v0.8 egress observer (trace_tcp) derives an outbound allowlist into a
+	// distinct output family (firewall / NetworkPolicy rules), not the
+	// compose-security formatters — so it takes its own produce→format path and
+	// returns before the capability formatter switch. This change wires the JSON
+	// sidecar (+ --out, --workload, confidence, drop abort); the nftables +
+	// k8s-networkpolicy emitters are the follow-on (#136).
+	if *observe == ObserveEgress {
+		if *format != FormatJSON {
+			return codedErrorf(ExitUsage, "--observe %s currently supports only --format %s (nftables / k8s-networkpolicy emitters are a follow-on)", ObserveEgress, FormatJSON)
+		}
+		s, err := produceEgressObservation(egressPipelineOpts{
+			AggregateOpts: aggregateOpts{
+				Container:    *container,
+				Image:        *image,
+				AllMatching:  *allMatching,
+				InitWindowMs: *initWindowMs,
+			},
+			Fixture:  *fixture,
+			IGBin:    *igBin,
+			Duration: *duration,
+			Workload: *workload,
+		}, stderr)
+		if err != nil {
+			return err
+		}
+		if err := writeJSON(stdout, s); err != nil {
+			return fmt.Errorf("write json: %w", err)
+		}
+		if *outPath != "" {
+			if err := writeSidecar(s, *outPath); err != nil {
+				return fmt.Errorf("write sidecar: %w", err)
+			}
+		}
+		if s.TraceHealth.DropRate >= DropRateAbort {
+			return codedErrorf(ExitDropRateExcessive,
+				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
+				s.TraceHealth.DropRate, DropRateAbort,
+				s.TraceHealth.EventsRecorded, s.TraceHealth.EventsDropped,
+			)
+		}
+		return nil
 	}
 	// The v0.2 fs observer is a distinct signal source (trace_open) producing a
 	// read_only/tmpfs recommendation in the Sidecar's fs section, so it takes

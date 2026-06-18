@@ -1,11 +1,12 @@
 package main
 
 import (
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/observe"
+	"github.com/tmatens/container-sec-derive/internal/obstest"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -18,18 +19,9 @@ const privDevFixture = `{"syscall":"openat","flags_raw":2,"fpath":"/dev/dri/card
 {"syscall":"openat","flags_raw":2,"fpath":"/dev/net/tun","proc":{"comm":"vpn"},"runtime":{"containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
 `
 
-func writeTemp(t *testing.T, name, content string) string {
-	t.Helper()
-	p := t.TempDir() + "/" + name
-	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
 func TestProducePrivilegedBothHalves(t *testing.T) {
-	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
-	dev := writeTemp(t, "dev.ndjson", privDevFixture)
+	caps := obstest.WriteTemp(t, "caps.ndjson", privCapsFixture)
+	dev := obstest.WriteTemp(t, "dev.ndjson", privDevFixture)
 	s, err := producePrivilegedObservation(privilegedPipelineOpts{
 		AggregateOpts: attrib.Opts{Container: "gpu-1", InitWindowMs: 0},
 		Fixture:       caps,
@@ -73,7 +65,7 @@ func TestProducePrivilegedBothHalves(t *testing.T) {
 }
 
 func TestProducePrivilegedCapsOnly(t *testing.T) {
-	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
+	caps := obstest.WriteTemp(t, "caps.ndjson", privCapsFixture)
 	s, err := producePrivilegedObservation(privilegedPipelineOpts{
 		AggregateOpts: attrib.Opts{Container: "gpu-1", InitWindowMs: 0},
 		Fixture:       caps,
@@ -97,7 +89,7 @@ func TestWorseConfidence(t *testing.T) {
 		{sidecar.ConfidenceLow, sidecar.ConfidenceModerate, sidecar.ConfidenceLow},
 	}
 	for _, c := range cases {
-		if got := worseConfidence(c.a, c.b); got != c.want {
+		if got := observe.WorseConfidence(c.a, c.b); got != c.want {
 			t.Errorf("worseConfidence(%s,%s) = %s, want %s", c.a, c.b, got, c.want)
 		}
 	}

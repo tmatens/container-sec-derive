@@ -10,6 +10,7 @@ import (
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/observe/fs"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -110,7 +111,7 @@ func TestWriteFSComposeLintProfile_Clean(t *testing.T) {
 func TestWriteFSComposeLintProfile_ContractGate(t *testing.T) {
 	// A sparse fixture-derived sidecar (no digest, low confidence) fails the
 	// gate: rejected without --allow-exploratory, emitted with it.
-	s, err := produceFSObservation(fsPipelineOpts{
+	s, err := fs.ProduceFSObservation(fs.FSPipelineOpts{
 		AggregateOpts: attrib.Opts{Container: "postgres-1"},
 		Fixture:       "testdata/ig-versions/v0.51.0/trace_open_sample.ndjson",
 		MountsFixture: "testdata/postgres/mounts.json",

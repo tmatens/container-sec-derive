@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/obstest"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -26,8 +27,8 @@ func privSidecar() *sidecar.Sidecar {
 // marked partial and carries the security_opt caveat — the safety signal that
 // keeps a JSON consumer from reading "drop privileged: true" as complete.
 func TestPrivilegedDecompositionFlagsPartial(t *testing.T) {
-	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
-	dev := writeTemp(t, "dev.ndjson", privDevFixture)
+	caps := obstest.WriteTemp(t, "caps.ndjson", privCapsFixture)
+	dev := obstest.WriteTemp(t, "dev.ndjson", privDevFixture)
 	s, err := producePrivilegedObservation(privilegedPipelineOpts{
 		AggregateOpts: attrib.Opts{Container: "gpu-1", InitWindowMs: 0},
 		Fixture:       caps,

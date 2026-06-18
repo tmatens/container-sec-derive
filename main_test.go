@@ -12,6 +12,8 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
+	"github.com/tmatens/container-sec-derive/internal/obstest"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -51,12 +53,12 @@ func TestAggregate_DistinctCapsSorted(t *testing.T) {
 		ev("cap", "CAP_SETUID", "containerId", "abc123def456", "containerName", "pg") +
 		ev("cap", "CAP_CHOWN", "containerId", "abc123def456", "containerName", "pg") +
 		ev("cap", "CAP_DAC_OVERRIDE", "containerId", "abc123def456", "containerName", "pg")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "pg"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "pg"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
 	want := []string{"CHOWN", "DAC_OVERRIDE", "SETUID"}
-	if !equalSlice(s.CapNames(), want) {
+	if !obstest.EqualSlice(s.CapNames(), want) {
 		t.Errorf("caps = %v, want %v", s.CapNames(), want)
 	}
 }
@@ -73,7 +75,7 @@ func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
 		ev("cap", "CAP_NET_RAW", "containerId", "aabbcc222222", "containerName", "app-2")
 
 	// Prefix matches two replicas -> ambiguous.
-	_, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "aabbcc"})
+	_, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "aabbcc"})
 	if err == nil {
 		t.Fatal("expected ambiguity error for a prefix matching two containers")
 	}
@@ -92,11 +94,11 @@ func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
 	}
 
 	// An exact id resolves to exactly one replica -> no error.
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "aabbcc111111"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "aabbcc111111"})
 	if err != nil {
 		t.Fatalf("exact id should not be ambiguous: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN"}) {
 		t.Errorf("exact id caps = %v, want [CHOWN]", s.CapNames())
 	}
 }
@@ -104,22 +106,22 @@ func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
 func TestAggregate_FiltersByContainer(t *testing.T) {
 	input := ev("cap", "CAP_CHOWN", "containerId", "aaa", "containerName", "pg") +
 		ev("cap", "CAP_NET_RAW", "containerId", "bbb", "containerName", "other")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "pg"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "pg"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN"}) {
 		t.Errorf("expected only CHOWN for pg, got %v", s.CapNames())
 	}
 }
 
 func TestAggregate_ContainerIDPrefix(t *testing.T) {
 	input := ev("cap", "CAP_SETGID", "containerId", "abcdef1234567890")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "abcdef"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "abcdef"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"SETGID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"SETGID"}) {
 		t.Errorf("prefix match failed, got %v", s.CapNames())
 	}
 }
@@ -127,11 +129,11 @@ func TestAggregate_ContainerIDPrefix(t *testing.T) {
 func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
 	input := ev("cap", "CAP_CHOWN", "containerId", "a") +
 		ev("cap", "CAP_SETUID", "containerId", "b")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("got %v", s.CapNames())
 	}
 }
@@ -145,11 +147,11 @@ func TestAggregate_FiltersCapableFalse(t *testing.T) {
 		ev("timestamp", "1001", "cap", "CAP_NET_RAW", "containerId", "a", "capable", "false") +
 		ev("timestamp", "1002", "cap", "CAP_SYS_ADMIN", "containerId", "a", "capable", "false") +
 		ev("timestamp", "1003", "cap", "CAP_SETUID", "containerId", "a", "capable", "true")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("denied caps leaked into derived set: got %v, want only held caps", s.CapNames())
 	}
 	// Denials still count toward events_recorded so drop_rate's
@@ -165,11 +167,11 @@ func TestAggregate_LegacyFixtureWithoutCapableFieldKeptForCompat(t *testing.T) {
 	// to zero caps; pinned ig v0.51.0 always emits the field, so the
 	// live path still gets exact verdict semantics.
 	input := `{"timestamp":1000,"cap":"CAP_CHOWN","proc":{"comm":"x","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":"x"}}` + "\n"
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN"}) {
 		t.Errorf("legacy fixture got filtered (absent capable should default to true): %v", s.CapNames())
 	}
 }
@@ -182,18 +184,18 @@ func TestAggregate_HardFailsOnMalformedLine(t *testing.T) {
 	input := "not json at all\n" +
 		ev("cap", "CAP_CHOWN", "containerId", "a") +
 		ev("cap", "CAP_SETUID", "containerId", "a")
-	if _, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"}); err == nil {
+	if _, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a"}); err == nil {
 		t.Fatal("expected a parse error on a malformed line, got nil")
 	}
 
 	// Blank lines are still skipped, not treated as malformed.
 	clean := ev("cap", "CAP_CHOWN", "containerId", "a") + "\n" +
 		ev("cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(clean), attrib.Opts{Container: "a"})
+	s, err := caps.Aggregate(strings.NewReader(clean), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate (blank line): %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("got %v", s.CapNames())
 	}
 }
@@ -205,11 +207,11 @@ func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
 		ev("timestamp", "1100", "cap", "CAP_DAC_READ_SEARCH", "containerId", "a") +
 		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "a") +
 		ev("timestamp", "1700", "cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("expected init-phase caps suppressed, got %v", s.CapNames())
 	}
 	if s.Target.InitWindowSuppressed != 2 {
@@ -220,11 +222,11 @@ func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
 func TestAggregate_InitWindowDisabled(t *testing.T) {
 	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
 		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SYS_ADMIN"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SYS_ADMIN"}) {
 		t.Errorf("window=0 should keep all events, got %v", s.CapNames())
 	}
 	if s.Target.InitWindowSuppressed != 0 {
@@ -241,11 +243,11 @@ func TestAggregate_InitCommFilterDropsRuncEvents(t *testing.T) {
 		ev("timestamp", "1600", "cap", "CAP_NET_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") + // past time window, still runc
 		ev("timestamp", "1700", "cap", "CAP_CHOWN", "comm", "postgres", "containerId", "a") +
 		ev("timestamp", "1800", "cap", "CAP_SETUID", "comm", "postgres", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("expected runc events suppressed by comm, got %v", s.CapNames())
 	}
 	if s.Target.InitWindowSuppressed != 2 {
@@ -258,11 +260,11 @@ func TestAggregate_InitCommFilterFiresWithoutTimeWindow(t *testing.T) {
 	// window disabled, runc:[*] events must still be dropped.
 	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") +
 		ev("timestamp", "1100", "cap", "CAP_CHOWN", "comm", "postgres", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN"}) {
 		t.Errorf("comm filter should fire even with time window disabled, got %v", s.CapNames())
 	}
 	if s.Target.InitWindowSuppressed != 1 {
@@ -276,11 +278,11 @@ func TestAggregate_InitCommFilterDoesNotFilterUnrelatedComms(t *testing.T) {
 	// accidentally filtering user processes named e.g. "runcounter").
 	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "comm", "runcounter", "containerId", "a") +
 		ev("timestamp", "1100", "cap", "CAP_SETUID", "comm", "runc-helper", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "SETUID"}) {
 		t.Errorf("non-runc-init comms should not be filtered, got %v", s.CapNames())
 	}
 }
@@ -291,11 +293,11 @@ func TestAggregate_InitWindowIgnoresUnmatchedEvents(t *testing.T) {
 	input := ev("timestamp", "1000", "cap", "CAP_NET_RAW", "containerId", "other") +
 		ev("timestamp", "5000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
 		ev("timestamp", "5600", "cap", "CAP_CHOWN", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN"}) {
 		t.Errorf("expected only CHOWN (SYS_ADMIN anchors+drops), got %v", s.CapNames())
 	}
 	if s.Target.InitWindowSuppressed != 1 {
@@ -361,7 +363,7 @@ func TestAggregate_EventsRecordedCountsParsedEvents(t *testing.T) {
 	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "a") +
 		ev("timestamp", "1100", "cap", "CAP_CHOWN", "containerId", "a") +
 		ev("timestamp", "1600", "cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -388,7 +390,7 @@ time="2026-04-20T12:00:05Z" level=info msg="ready"
 
 func TestFinaliseTraceHealth_RateIsDroppedOverRecorded(t *testing.T) {
 	th := sidecar.TraceHealth{EventsRecorded: 100, EventsDropped: 2}
-	finaliseTraceHealth(&th)
+	th.Finalise()
 	if th.DropRate != 0.02 {
 		t.Errorf("DropRate = %v, want 0.02", th.DropRate)
 	}
@@ -403,23 +405,23 @@ func TestAggregate_MultiReplicaUnionAndDisagreement(t *testing.T) {
 		ev("timestamp", "1020", "cap", "CAP_FOWNER", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
 		ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "r2", "containerName", "web-2", "image", "app:1") +
 		ev("timestamp", "1010", "cap", "CAP_SETUID", "containerId", "r2", "containerName", "web-2", "image", "app:1")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1", AllMatching: true})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1", AllMatching: true})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
 	if s.Target.ReplicasObserved != 2 {
 		t.Errorf("ReplicasObserved = %d, want 2", s.Target.ReplicasObserved)
 	}
-	if !equalSlice(s.CapNames(), []string{"CHOWN", "FOWNER", "SETUID"}) {
+	if !obstest.EqualSlice(s.CapNames(), []string{"CHOWN", "FOWNER", "SETUID"}) {
 		t.Errorf("union = %v, want [CHOWN FOWNER SETUID]", s.CapNames())
 	}
-	if !equalSlice(s.Target.ReplicaCapDisagreement, []string{"FOWNER"}) {
+	if !obstest.EqualSlice(s.Target.ReplicaCapDisagreement, []string{"FOWNER"}) {
 		t.Errorf("disagreement = %v, want [FOWNER]", s.Target.ReplicaCapDisagreement)
 	}
-	if !equalSlice(s.Target.PerReplicaCaps["r1"], []string{"CHOWN", "FOWNER", "SETUID"}) {
+	if !obstest.EqualSlice(s.Target.PerReplicaCaps["r1"], []string{"CHOWN", "FOWNER", "SETUID"}) {
 		t.Errorf("r1 caps = %v", s.Target.PerReplicaCaps["r1"])
 	}
-	if !equalSlice(s.Target.PerReplicaCaps["r2"], []string{"CHOWN", "SETUID"}) {
+	if !obstest.EqualSlice(s.Target.PerReplicaCaps["r2"], []string{"CHOWN", "SETUID"}) {
 		t.Errorf("r2 caps = %v", s.Target.PerReplicaCaps["r2"])
 	}
 	if s.Target.PerReplicaEventCounts["r1"] != 3 || s.Target.PerReplicaEventCounts["r2"] != 2 {
@@ -435,7 +437,7 @@ func TestAggregate_MultiReplicaAmbiguityWithoutAllMatching(t *testing.T) {
 	// tool refuses to silently union replicas (PLAN.md §Target selection).
 	input := ev("cap", "CAP_CHOWN", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
 		ev("cap", "CAP_CHOWN", "containerId", "r2", "containerName", "web-2", "image", "app:1")
-	_, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1"})
+	_, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1"})
 	if err == nil {
 		t.Fatal("expected ambiguity error, got nil")
 	}
@@ -447,7 +449,7 @@ func TestAggregate_MultiReplicaAmbiguityWithoutAllMatching(t *testing.T) {
 
 func TestAggregate_SingleReplicaHasEmptyDisagreement(t *testing.T) {
 	input := ev("cap", "CAP_CHOWN", "containerId", "r1", "image", "app:1")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1"})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -470,13 +472,13 @@ func TestAggregate_MultiReplicaInitWindowPerReplica(t *testing.T) {
 		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "r1", "image", "app:1") +
 		ev("timestamp", "5000", "cap", "CAP_SYS_ADMIN", "containerId", "r2", "image", "app:1") +
 		ev("timestamp", "5600", "cap", "CAP_CHOWN", "containerId", "r2", "image", "app:1")
-	s, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1", AllMatching: true, InitWindowMs: 500})
+	s, err := caps.Aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1", AllMatching: true, InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
 	// Both replicas should have filtered out their own SYS_ADMIN.
-	if !equalSlice(s.Target.PerReplicaCaps["r1"], []string{"CHOWN"}) ||
-		!equalSlice(s.Target.PerReplicaCaps["r2"], []string{"CHOWN"}) {
+	if !obstest.EqualSlice(s.Target.PerReplicaCaps["r1"], []string{"CHOWN"}) ||
+		!obstest.EqualSlice(s.Target.PerReplicaCaps["r2"], []string{"CHOWN"}) {
 		t.Errorf("per-replica init filter failed: %+v", s.Target.PerReplicaCaps)
 	}
 	if s.Target.InitWindowSuppressed != 2 {
@@ -581,41 +583,4 @@ func TestMain_FixtureExists(t *testing.T) {
 	if _, err := os.Stat("testdata/ig-versions/v0.51.0/sample.ndjson"); err != nil {
 		t.Fatalf("testdata/ig-versions/v0.51.0/sample.ndjson missing: %v", err)
 	}
-}
-
-func TestLooksLikeWSL2(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want bool
-	}{
-		{"native linux 6.x", "Linux version 6.17.0-20-generic (buildd@lcy02-amd64-001) (gcc ...) #20-Ubuntu SMP", false},
-		{"empty", "", false},
-		// WSL2 5.10 / 5.15 build banner.
-		{"microsoft-standard-WSL2", "Linux version 5.15.146.1-microsoft-standard-WSL2 (root@build) (gcc ...) #1 SMP", true},
-		// Older WSL2 5.10 banner that omits the explicit WSL2 token.
-		{"microsoft-standard only", "Linux version 5.10.16.3-microsoft-standard (oe-user@oe-host) (gcc ...) #1 SMP", true},
-		// Mixed-case sanity (banners have been lower-case to date but we
-		// fold for safety).
-		{"uppercase token", "Linux version 5.15.0-MICROSOFT-STANDARD-WSL2", true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := looksLikeWSL2(tc.in); got != tc.want {
-				t.Errorf("looksLikeWSL2(%q) = %v, want %v", tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-func equalSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/obstest"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -87,7 +88,7 @@ func TestClassifyVerify_Insufficient(t *testing.T) {
 	if len(vr.NewDenials) != 1 || vr.NewDenials[0].Cap != "SYS_PTRACE" {
 		t.Errorf("new_denials = %+v, want [SYS_PTRACE]", vr.NewDenials)
 	}
-	if !equalSlice(vr.NewDenials[0].CommSamples, []string{"SYS_PTRACE-sample"}) {
+	if !obstest.EqualSlice(vr.NewDenials[0].CommSamples, []string{"SYS_PTRACE-sample"}) {
 		t.Errorf("comm_samples not propagated: %v", vr.NewDenials[0].CommSamples)
 	}
 }
@@ -102,7 +103,7 @@ func TestClassifyVerify_OverPermissioned(t *testing.T) {
 	if code != exit.VerifyOverPermissioned {
 		t.Errorf("code = %d, want %d", code, exit.VerifyOverPermissioned)
 	}
-	if !equalSlice(vr.UnusedCaps, []string{"FOWNER"}) {
+	if !obstest.EqualSlice(vr.UnusedCaps, []string{"FOWNER"}) {
 		t.Errorf("unused_caps = %v, want [FOWNER]", vr.UnusedCaps)
 	}
 }
@@ -121,7 +122,7 @@ func TestClassifyVerify_InsufficientWinsOverOverPermissioned(t *testing.T) {
 	}
 	// Unused caps still recorded so the user sees the trim opportunity
 	// after they fix the insufficiency.
-	if !equalSlice(vr.UnusedCaps, []string{"FOWNER"}) {
+	if !obstest.EqualSlice(vr.UnusedCaps, []string{"FOWNER"}) {
 		t.Errorf("unused_caps still recorded: got %v", vr.UnusedCaps)
 	}
 }
@@ -273,7 +274,7 @@ func TestRunVerify_RunMode_FixtureInsufficientWhenBaselineTooSmall(t *testing.T)
 		denialNames = append(denialNames, d.Cap)
 	}
 	want := []string{"DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}
-	if !equalSlice(denialNames, want) {
+	if !obstest.EqualSlice(denialNames, want) {
 		t.Errorf("new_denials = %v, want %v", denialNames, want)
 	}
 }
@@ -299,7 +300,7 @@ func TestRunVerify_RunMode_FixtureOverPermissionedWhenBaselineTooLarge(t *testin
 	if err := json.Unmarshal(stdout.Bytes(), &vr); err != nil {
 		t.Fatalf("unmarshal stdout: %v\n%s", err, stdout.String())
 	}
-	if !equalSlice(vr.UnusedCaps, []string{"SYS_PTRACE"}) {
+	if !obstest.EqualSlice(vr.UnusedCaps, []string{"SYS_PTRACE"}) {
 		t.Errorf("unused_caps = %v, want [SYS_PTRACE]", vr.UnusedCaps)
 	}
 }

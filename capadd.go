@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/observe"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 )
 
 // The v0.5 dangerous-cap_add validator (ROADMAP §v0.5, CL-0011) is the inverse
@@ -18,7 +20,7 @@ import (
 // behavior — which syscalls actually invoked it, whether a finer-grained
 // capability would suffice, and whether it was granted but never exercised.
 //
-// It reuses the v0.1 trace_capabilities signal and the capEvent attribution
+// It reuses the v0.1 trace_capabilities signal and the CapEvent attribution
 // (a dangerous-cap use is just a held cap_capable check whose `cap` is in the
 // validate-set). No new gadget: the cap→syscall correlation is a re-aggregation
 // of the same stream, keyed on syscall instead of deduped to a cap set. The
@@ -31,7 +33,7 @@ import (
 // entrypoint legitimately uses at startup (CHOWN, SETUID, SETGID, SETPCAP,
 // FOWNER, FSETID, KILL, NET_BIND_SERVICE, AUDIT_WRITE) so the default report is
 // signal, not noise. When the user passes --cap-add the explicit set overrides
-// this default. Names are normalized (no CAP_ prefix), matching normalizeCap.
+// this default. Names are normalized (no CAP_ prefix), matching NormalizeCap.
 var dangerousCaps = map[string]struct{}{
 	"SYS_ADMIN":          {},
 	"SYS_MODULE":         {},
@@ -99,7 +101,7 @@ type capaddObservation struct {
 
 // aggregateCapadd reads trace_capabilities NDJSON from r, keeps held
 // (capable:true) events that match the target selector and whose normalized cap
-// is in activeSet, drops runc/init bring-up checks (isInitComm — a dangerous cap
+// is in activeSet, drops runc/init bring-up checks (IsInitComm — a dangerous cap
 // used only by runc:[*] during container setup is not the workload's need), and
 // records per-cap syscall usage. The >1-replica ambiguity guard mirrors
 // aggregate()/aggregateDevices exactly: --image matching multiple replicas
@@ -119,7 +121,7 @@ func aggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
-		var ev capEvent
+		var ev caps.CapEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil, fmt.Errorf("parse trace_capabilities event: %w", err)
 		}
@@ -127,15 +129,15 @@ func aggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 		// alike: an off-target, runc/init, or out-of-set check is noise either
 		// way. (This filtering used to short-circuit on !Capable before matching;
 		// it now matches first so a denied in-scope attempt can be retained — L10.)
-		if !optsMatch(opts, ev) {
+		if !caps.Match(opts, ev) {
 			continue
 		}
-		if isInitComm(ev.Proc.Comm) {
+		if caps.IsInitComm(ev.Proc.Comm) {
 			// runc/init bring-up noise: a dangerous cap used only during
 			// container setup is not the workload's requirement.
 			continue
 		}
-		cap := normalizeCap(ev.CapName)
+		cap := caps.NormalizeCap(ev.CapName)
 		if _, ok := activeSet[cap]; !ok {
 			continue
 		}
@@ -213,7 +215,7 @@ func aggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 		Image:           image,
 	}
 	for rid, set := range perReplica {
-		obs.PerReplica[rid] = sortedKeys(set)
+		obs.PerReplica[rid] = observe.SortedKeys(set)
 	}
 	return obs, nil
 }
@@ -228,7 +230,7 @@ func parseCapSet(s string) map[string]struct{} {
 	}
 	out := map[string]struct{}{}
 	for _, part := range strings.Split(s, ",") {
-		if c := normalizeCap(part); c != "" {
+		if c := caps.NormalizeCap(part); c != "" {
 			out[c] = struct{}{}
 		}
 	}

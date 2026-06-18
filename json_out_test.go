@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -44,11 +45,11 @@ func TestWriteJSON_MatchesWriteSidecarByteForByte(t *testing.T) {
 		t.Fatalf("open fixture: %v", err)
 	}
 	defer f.Close()
-	s, err := aggregate(f, attrib.Opts{Container: "postgres-1", InitWindowMs: 500})
+	s, err := caps.Aggregate(f, attrib.Opts{Container: "postgres-1", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
-	computeConfidence(s)
+	caps.ComputeConfidence(s)
 
 	var stdoutBuf bytes.Buffer
 	if err := writeJSON(&stdoutBuf, s); err != nil {

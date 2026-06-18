@@ -10,6 +10,7 @@ import (
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -101,7 +102,7 @@ func runVerify(args []string, stdout, stderr io.Writer) error {
 		// user-supplied target. The target carries the proposed config
 		// (the user restarted it before invoking verify); we just
 		// observe it under the same workload.
-		obsSidecar, err = produceObservation(observePipelineOpts{
+		obsSidecar, err = caps.ProduceObservation(caps.PipelineOpts{
 			AggregateOpts: attrib.Opts{
 				Container:    *container,
 				Image:        *image,

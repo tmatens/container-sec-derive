@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -108,7 +109,7 @@ func capAdvice(capName string, syscalls, deniedSyscalls []string) (advice string
 			}
 		}
 		if allMapped {
-			finerCaps = sortedKeys(finer)
+			finerCaps = observe.SortedKeys(finer)
 			// Not a flat "is sufficient": the substitution is workload-bounded
 			// and a finer cap may carry its own gate (deep-review M4/L9).
 			advice = fmt.Sprintf("observed only via %s; %s likely suffices (Linux >= 5.8) — verify before dropping %s.",
@@ -158,15 +159,15 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 
 	var capsToReport []string
 	if granted {
-		capsToReport = sortedKeys(activeSet)
+		capsToReport = observe.SortedKeys(activeSet)
 	} else {
-		capsToReport = sortedKeys(obs.Used)
+		capsToReport = observe.SortedKeys(obs.Used)
 	}
 
 	recommend := map[string]struct{}{}
 	for _, c := range capsToReport {
 		u := obs.Used[c]
-		deniedNames := sortedKeys(obs.Denied[c])
+		deniedNames := observe.SortedKeys(obs.Denied[c])
 		if u == nil {
 			// No held check fired. Normally a granted-but-unused cap is a removal
 			// candidate — UNLESS the workload attempted it and the check was
@@ -217,7 +218,7 @@ func capaddToValidation(obs *capaddObservation, activeSet map[string]struct{}, g
 		}
 	}
 	if granted {
-		v.RecommendedCapAdd = sortedKeys(recommend)
+		v.RecommendedCapAdd = observe.SortedKeys(recommend)
 	}
 	return v
 }

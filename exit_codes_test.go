@@ -100,7 +100,7 @@ func TestRun_ExitCode_IGMissing(t *testing.T) {
 // fakeIGBinary writes a tiny shell script that prints version on `version`
 // and returns it as a path suitable for --ig. It does not implement
 // `run`; the version-pin test never reaches that subcommand because
-// produceObservation() short-circuits on the SchemaMismatch error.
+// ProduceObservation() short-circuits on the SchemaMismatch error.
 func fakeIGBinary(t *testing.T, version string) string {
 	t.Helper()
 	dir := t.TempDir()

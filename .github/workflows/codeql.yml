@@ -19,18 +19,19 @@ name: CodeQL
 
 on:
   # TEMPORARY (cost-saving during active development): the per-PR CodeQL run is
-  # turned OFF and the analysis runs on a DAILY schedule instead, to conserve
-  # Actions minutes while the repo is changing rapidly. CodeQL is the slowest job
-  # (~8-12 min) and runs in artifact mode (upload: false — private repo / no
-  # GHAS), so there is no Security-tab baseline that needs per-PR freshness.
-  # RESTORE the `pull_request` trigger (branches: [main], the markdown/docs
-  # paths-ignore) when development slows; push-to-main stays dropped (#143: a
-  # squash-merge re-scans an identical tree). workflow_dispatch allows an
+  # turned OFF and the analysis runs on an EVERY-3-DAYS schedule instead, to
+  # conserve Actions minutes while the repo is changing rapidly. CodeQL is the
+  # slowest job (~8-12 min) and runs in artifact mode (upload: false — private
+  # repo / no GHAS), so there is no Security-tab baseline that needs per-PR
+  # freshness. RESTORE the `pull_request` trigger (branches: [main], the
+  # markdown/docs paths-ignore) when development slows; push-to-main stays dropped
+  # (#143: a squash-merge re-scans an identical tree). workflow_dispatch allows an
   # on-demand run before a release or after a security-relevant change.
   schedule:
-    # Daily run catches regressions + new CodeQL queries / advisories. Was weekly
-    # (cron "27 4 * * 1"); tightened to daily to compensate for dropping per-PR.
-    - cron: "27 4 * * *"
+    # Every-3-days run catches regressions + new CodeQL queries / advisories. Was
+    # weekly (cron "27 4 * * 1"); the per-PR trigger is dropped, so this runs on
+    # days 1,4,7,…,28,31 (cron day-of-month step; resets at month boundaries).
+    - cron: "27 4 */3 * *"
   workflow_dispatch:
 
 concurrency:

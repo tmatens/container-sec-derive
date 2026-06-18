@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 // Open-flag constants (asm-generic ABI — amd64 and arm64, csd's two release
@@ -180,7 +182,7 @@ type writeStats struct {
 // Replica identity mirrors the cap aggregator: container id, falling back to
 // name when id is empty (hand-rolled fixtures). A malformed line is a hard
 // error, as in aggregate().
-func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error) {
+func aggregateWrites(r io.Reader, opts attrib.Opts) (*writeObservation, error) {
 	union := map[string]struct{}{}
 	perReplica := map[string]map[string]struct{}{}
 	perReplicaCount := map[string]int{}
@@ -199,7 +201,7 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil, fmt.Errorf("parse trace_open event: %w", err)
 		}
-		if !opts.matchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
+		if !opts.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
 			continue
 		}
 		if !ev.IsWrite() {
@@ -248,7 +250,7 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 	// matched >1 replica without --all-matching. Mirrors aggregate() (the cap
 	// path) — the tool refuses to silently union the write paths of replicas the
 	// user didn't opt into aggregating.
-	if opts.ambiguous(len(perReplica)) {
+	if opts.Ambiguous(len(perReplica)) {
 		labels := make([]string, 0, len(perReplica))
 		for rid := range perReplica {
 			if name := perReplicaName[rid]; name != "" {
@@ -258,7 +260,7 @@ func aggregateWrites(r io.Reader, opts aggregateOpts) (*writeObservation, error)
 			}
 		}
 		sort.Strings(labels)
-		return nil, opts.newAmbiguousSelectionError(labels)
+		return nil, opts.NewAmbiguousSelectionError(labels)
 	}
 
 	obs := &writeObservation{

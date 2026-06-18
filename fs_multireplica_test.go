@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // Two replicas of web:1. Both write /var/log/app.log; only web-1 writes
@@ -19,24 +23,24 @@ const twoReplicaWrites = `
 
 // --image matching >1 replica without --all-matching is ambiguous (caps parity).
 func TestAggregateWrites_AmbiguousImage(t *testing.T) {
-	_, err := aggregateWrites(strings.NewReader(twoReplicaWrites), aggregateOpts{Image: "web:1"})
-	var amb *ambiguousSelectionError
+	_, err := aggregateWrites(strings.NewReader(twoReplicaWrites), attrib.Opts{Image: "web:1"})
+	var amb *exit.AmbiguousSelectionError
 	if !errors.As(err, &amb) {
-		t.Fatalf("err = %v, want ambiguousSelectionError", err)
+		t.Fatalf("err = %v, want exit.AmbiguousSelectionError", err)
 	}
-	if len(amb.replicas) != 2 {
-		t.Errorf("ambiguity listed %d replicas, want 2", len(amb.replicas))
+	if len(amb.Replicas()) != 2 {
+		t.Errorf("ambiguity listed %d replicas, want 2", len(amb.Replicas()))
 	}
 }
 
 // --all-matching unions the write paths and records the cross-replica
 // disagreement, which then pulls confidence down.
 func TestProduceFSObservation_AllMatchingDisagreement(t *testing.T) {
-	writes, err := aggregateWrites(strings.NewReader(twoReplicaWrites), aggregateOpts{Image: "web:1", AllMatching: true})
+	writes, err := aggregateWrites(strings.NewReader(twoReplicaWrites), attrib.Opts{Image: "web:1", AllMatching: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := fsToSidecar(writes, nil, aggregateOpts{Image: "web:1", AllMatching: true})
+	s := fsToSidecar(writes, nil, attrib.Opts{Image: "web:1", AllMatching: true})
 	if s.Target.ReplicasObserved != 2 {
 		t.Errorf("replicas = %d, want 2", s.Target.ReplicasObserved)
 	}
@@ -51,7 +55,7 @@ func TestProduceFSObservation_AllMatchingDisagreement(t *testing.T) {
 	computeFSConfidence(s)
 	// disagreement spans 1 path → moderate hit; no workload → moderate hit;
 	// two moderates force low.
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("confidence = %q, want low (disagreement + no workload)", s.Confidence.Level)
 	}
 	found := false
@@ -65,7 +69,7 @@ func TestProduceFSObservation_AllMatchingDisagreement(t *testing.T) {
 	}
 }
 
-// run() surfaces the ambiguity as ExitTargetAmbiguous (40).
+// run() surfaces the ambiguity as exit.TargetAmbiguous (40).
 func TestRun_ObserveFSAmbiguousImage(t *testing.T) {
 	dir := t.TempDir()
 	fix := filepath.Join(dir, "two.ndjson")
@@ -74,8 +78,8 @@ func TestRun_ObserveFSAmbiguousImage(t *testing.T) {
 	}
 	var out, errBuf bytes.Buffer
 	err := run([]string{"--observe", "fs", "--fixture", fix, "--image", "web:1"}, &out, &errBuf)
-	if exitCodeFor(err) != ExitTargetAmbiguous {
-		t.Errorf("exit code = %d, want %d (ambiguous)", exitCodeFor(err), ExitTargetAmbiguous)
+	if exit.CodeFor(err) != exit.TargetAmbiguous {
+		t.Errorf("exit code = %d, want %d (ambiguous)", exit.CodeFor(err), exit.TargetAmbiguous)
 	}
 
 	// With --all-matching the same fixture succeeds.

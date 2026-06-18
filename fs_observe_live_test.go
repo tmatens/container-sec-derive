@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
 )
 
 // fakeIGRun writes a fake `ig` whose `run` subcommand cats prepared stdout
@@ -29,7 +33,7 @@ func fakeIGRun(t *testing.T, stdoutNDJSON, stderrText string) string {
 	path := filepath.Join(dir, "ig-fake")
 	script := "#!/bin/sh\n" +
 		"case \"$1\" in\n" +
-		"  version) echo " + PinnedIGVersion + "; exit 0;;\n" +
+		"  version) echo " + ig.PinnedIGVersion + "; exit 0;;\n" +
 		"  run) cat " + outFile + "; cat " + errFile + " >&2; exit 0;;\n" +
 		"esac\n" +
 		"exit 1\n"
@@ -50,7 +54,7 @@ func TestObserveWrites_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := fakeIGRun(t, nd, "level=info msg=starting\nlost 3 samples\n")
 
-	obs, err := observeWrites(context.Background(), ig, aggregateOpts{}, io.Discard)
+	obs, err := observeWrites(context.Background(), ig, attrib.Opts{}, io.Discard)
 	if err != nil {
 		t.Fatalf("observeWrites: %v", err)
 	}
@@ -65,14 +69,14 @@ func TestObserveWrites_FakeIG(t *testing.T) {
 	}
 }
 
-// TestObserveWrites_IGMissing: a missing ig binary maps to ExitIGMissing,
+// TestObserveWrites_IGMissing: a missing ig binary maps to exit.IGMissing,
 // matching the capability observe() contract.
 func TestObserveWrites_IGMissing(t *testing.T) {
-	_, err := observeWrites(context.Background(), "/nonexistent/csd-ig-fs-test", aggregateOpts{}, io.Discard)
+	_, err := observeWrites(context.Background(), "/nonexistent/csd-ig-fs-test", attrib.Opts{}, io.Discard)
 	if err == nil {
 		t.Fatal("expected missing-binary error")
 	}
-	if exitCodeFor(err) != ExitIGMissing {
-		t.Errorf("exit = %d, want ExitIGMissing (%d); err=%v", exitCodeFor(err), ExitIGMissing, err)
+	if exit.CodeFor(err) != exit.IGMissing {
+		t.Errorf("exit = %d, want exit.IGMissing (%d); err=%v", exit.CodeFor(err), exit.IGMissing, err)
 	}
 }

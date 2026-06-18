@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeDockerRun emits a `docker run` flag string that realizes the derived
@@ -15,7 +17,7 @@ import (
 //
 // `--cap-add` is omitted entirely when the observed set is empty -- the
 // "drop everything, add nothing" shape mirrors writeCompose's elision.
-func writeDockerRun(w io.Writer, s *Sidecar) error {
+func writeDockerRun(w io.Writer, s *sidecar.Sidecar) error {
 	parts := []string{"--cap-drop=ALL"}
 	for _, c := range s.CapNames() {
 		parts = append(parts, "--cap-add="+c)

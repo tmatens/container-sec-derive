@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 func TestIsRootfsWrite(t *testing.T) {
@@ -37,7 +39,7 @@ func TestAggregateWrites_FiltersPseudoPaths(t *testing.T) {
 {"syscall":"openat","flags_raw":1,"fpath":"/dev/shm/x","proc":{"comm":"app"},"runtime":{"containerId":"aaa111aaa111","containerName":"web-1","containerImageName":"web:1"}}
 {"syscall":"openat","flags_raw":1,"fpath":"base/5","proc":{"comm":"app"},"runtime":{"containerId":"aaa111aaa111","containerName":"web-1","containerImageName":"web:1"}}
 `
-	obs, err := aggregateWrites(strings.NewReader(nd), aggregateOpts{})
+	obs, err := aggregateWrites(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
 		t.Fatal(err)
 	}

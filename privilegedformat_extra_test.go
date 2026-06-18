@@ -7,12 +7,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
-func privSidecar() *Sidecar {
-	s := NewSidecar()
-	s.Capabilities = []Capability{{Name: "SYS_NICE"}}
-	s.DeviceRecommendation = &deviceRecommendation{
+func privSidecar() *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{{Name: "SYS_NICE"}}
+	s.DeviceRecommendation = &sidecar.DeviceRecommendation{
 		Devices:     []string{"/dev/dri/card0", "/dev/net/tun"},
 		DerivedCaps: []string{"CAP_NET_ADMIN"},
 	}
@@ -26,7 +29,7 @@ func TestPrivilegedDecompositionFlagsPartial(t *testing.T) {
 	caps := writeTemp(t, "caps.ndjson", privCapsFixture)
 	dev := writeTemp(t, "dev.ndjson", privDevFixture)
 	s, err := producePrivilegedObservation(privilegedPipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "gpu-1", InitWindowMs: 0},
+		AggregateOpts: attrib.Opts{Container: "gpu-1", InitWindowMs: 0},
 		Fixture:       caps,
 		DeviceFixture: dev,
 	}, nil)
@@ -37,7 +40,7 @@ func TestPrivilegedDecompositionFlagsPartial(t *testing.T) {
 	if !pd.Partial {
 		t.Error("decomposition must be marked partial at v0.3")
 	}
-	if pd.SecurityOpt != PrivilegedSecurityOptCaveat {
+	if pd.SecurityOpt != sidecar.PrivilegedSecurityOptCaveat {
 		t.Errorf("security_opt = %q, want the caveat constant", pd.SecurityOpt)
 	}
 }
@@ -46,7 +49,7 @@ func TestPrivilegedDecompositionFlagsPartial(t *testing.T) {
 // formatter surfaces the partial-decomposition / security_opt caveat.
 func TestPrivilegedTextFormattersWarn(t *testing.T) {
 	const sentinel = "security_opt"
-	formatters := map[string]func(io.Writer, *Sidecar) error{
+	formatters := map[string]func(io.Writer, *sidecar.Sidecar) error{
 		"compose":    writePrivilegedCompose,
 		"docker-run": writePrivilegedDockerRun,
 		"k8s":        writePrivilegedK8s,
@@ -148,7 +151,7 @@ func TestWritePrivilegedComposeLintProfileContract(t *testing.T) {
 	s.DurationSeconds = 600
 	s.Workload = wl
 	s.ObservedAt = time.Date(2026, 4, 22, 0, 0, 0, 0, time.UTC)
-	s.Confidence.Level = ConfidenceModerate
+	s.Confidence.Level = sidecar.ConfidenceModerate
 
 	var b strings.Builder
 	if err := writePrivilegedComposeLintProfile(&b, s, false); err != nil {

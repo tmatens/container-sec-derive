@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeCapaddComposeLintProfile emits a YAML entry for contributing a v0.5
@@ -20,7 +22,7 @@ import (
 // drop_rate < 1%, replica_cap_disagreement empty) PLUS granted_set_provided —
 // without the granted set there is no minimized cap_add to contribute, so an
 // unscoped capadd run cannot clear the CL-0011 contribution bar.
-func writeCapaddComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) error {
+func writeCapaddComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := checkCapaddComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
 		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
@@ -45,7 +47,7 @@ func writeCapaddComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory boo
 
 	val := s.CapaddValidation
 	if val == nil {
-		val = &capaddValidation{Findings: []CapaddFinding{}, RecommendedCapAdd: []string{}}
+		val = &sidecar.CapaddValidation{Findings: []sidecar.CapaddFinding{}, RecommendedCapAdd: []string{}}
 	}
 	if _, err := fmt.Fprintf(w, "%srecommended_cap_add: [%s]\n", bodyIndent, strings.Join(val.RecommendedCapAdd, ", ")); err != nil {
 		return err
@@ -89,7 +91,7 @@ func writeCapaddComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory boo
 // checkCapaddComposeLintContract returns the capadd acceptance-contract
 // violations in a fixed order (the same deterministic-diagnostic requirement as
 // the cap/fs/device contracts). Empty slice means the sidecar clears the gate.
-func checkCapaddComposeLintContract(s *Sidecar) []string {
+func checkCapaddComposeLintContract(s *sidecar.Sidecar) []string {
 	var v []string
 	switch {
 	case s.SchemaVersion == "":
@@ -112,7 +114,7 @@ func checkCapaddComposeLintContract(s *Sidecar) []string {
 		v = append(v, fmt.Sprintf("duration_seconds %d < %d", s.DurationSeconds, ComposeLintMinDurationSeconds))
 	}
 	switch s.Confidence.Level {
-	case ConfidenceHigh, ConfidenceModerate:
+	case sidecar.ConfidenceHigh, sidecar.ConfidenceModerate:
 		// ok
 	case "":
 		v = append(v, "confidence.level not set")

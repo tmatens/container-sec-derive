@@ -5,6 +5,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeComposePatch emits a unified diff that updates services.<service>'s
@@ -24,7 +26,7 @@ import (
 // missing, the new pair is inserted at the top of the service body. When
 // only one is missing, it lands adjacent to the existing partner so the
 // two stay together for readability.
-func writeComposePatch(w io.Writer, s *Sidecar, original []byte, inPath, service string) error {
+func writeComposePatch(w io.Writer, s *sidecar.Sidecar, original []byte, inPath, service string) error {
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}
@@ -151,11 +153,12 @@ func equalLines(a, b []string) bool {
 }
 
 // composeServiceLoc locates a service body within a compose file.
-//   nameLine    — index of the "<service>:" line
-//   bodyStart   — index of the first body line (== nameLine+1 typically)
-//   bodyEnd     — index one past the last body line (the next sibling key
-//                 or EOF)
-//   bodyIndent  — column count of body-line indentation
+//
+//	nameLine    — index of the "<service>:" line
+//	bodyStart   — index of the first body line (== nameLine+1 typically)
+//	bodyEnd     — index one past the last body line (the next sibling key
+//	              or EOF)
+//	bodyIndent  — column count of body-line indentation
 type composeServiceLoc struct {
 	nameLine   int
 	bodyStart  int

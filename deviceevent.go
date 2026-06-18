@@ -8,6 +8,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 // The v0.3 device-decomposition observer reuses the v0.2 trace_open signal and
@@ -104,7 +106,7 @@ type deviceStats struct {
 // Unlike aggregateWrites it does NOT filter on write intent — a read-only open
 // of /dev/dri/card0 still needs the device granted. Replica identity and the
 // >1-replica ambiguity guard mirror aggregateWrites exactly.
-func aggregateDevices(r io.Reader, opts aggregateOpts) (*deviceObservation, error) {
+func aggregateDevices(r io.Reader, opts attrib.Opts) (*deviceObservation, error) {
 	union := map[string]struct{}{}
 	perReplica := map[string]map[string]struct{}{}
 	perReplicaCount := map[string]int{}
@@ -123,7 +125,7 @@ func aggregateDevices(r io.Reader, opts aggregateOpts) (*deviceObservation, erro
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil, fmt.Errorf("parse trace_open event: %w", err)
 		}
-		if !opts.matchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
+		if !opts.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
 			continue
 		}
 		p := ev.Path()
@@ -165,7 +167,7 @@ func aggregateDevices(r io.Reader, opts aggregateOpts) (*deviceObservation, erro
 	// matched >1 replica without --all-matching. Mirrors aggregate()/
 	// aggregateWrites — the tool refuses to silently union the device sets of
 	// replicas the user didn't opt into aggregating.
-	if opts.ambiguous(len(perReplica)) {
+	if opts.Ambiguous(len(perReplica)) {
 		labels := make([]string, 0, len(perReplica))
 		for rid := range perReplica {
 			if name := perReplicaName[rid]; name != "" {
@@ -175,7 +177,7 @@ func aggregateDevices(r io.Reader, opts aggregateOpts) (*deviceObservation, erro
 			}
 		}
 		sort.Strings(labels)
-		return nil, opts.newAmbiguousSelectionError(labels)
+		return nil, opts.NewAmbiguousSelectionError(labels)
 	}
 
 	obs := &deviceObservation{

@@ -94,16 +94,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Single source of truth for the ig version: main.go's
+      # Single source of truth for the ig version: internal/ig/ig.go's
       # PinnedIGVersion, same extraction as image-build.yml. csd also
       # enforces this pin at runtime (ExitSchemaMismatch on mismatch),
       # so installing the wrong version here surfaces as a smoke FAIL.
       - name: Resolve pinned ig version
         id: vars
         run: |
-          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
           if [ -z "${ig_version}" ]; then
-            echo "::error::could not extract PinnedIGVersion from main.go"
+            echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go"
             exit 1
           fi
           echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
@@ -332,9 +332,9 @@ jobs:
       - name: Resolve pinned ig version
         id: vars
         run: |
-          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
           if [ -z "${ig_version}" ]; then
-            echo "::error::could not extract PinnedIGVersion from main.go"
+            echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go"
             exit 1
           fi
           echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"

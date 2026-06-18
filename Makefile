@@ -9,11 +9,11 @@
 
 .PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress closed-loop missrate build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
 
-# IG_VERSION is extracted from main.go's PinnedIGVersion so the image
+# IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
 # stay aligned. CSD_VERSION is git-describe with a -dev suffix when
 # the working tree is dirty; the release pipeline overrides it.
-IG_VERSION  := $(shell awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $$2; exit}' main.go)
+IG_VERSION  := $(shell awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $$2; exit}' internal/ig/ig.go)
 CSD_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 HOST_ARCH   := $(shell go env GOARCH)
 IMAGE_REPO  := tmatens/container-sec-derive

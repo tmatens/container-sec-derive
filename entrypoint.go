@@ -28,6 +28,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // crossCheckStatusOK is the sentinel crossCheckStatus value used by
@@ -240,7 +242,7 @@ func setcapCapsFromHistory(lines []string) []string {
 // Phase A (PLAN.md §Workload coverage item 2 deferred): divergence is
 // recorded but does NOT force confidence to low; computeConfidence reads
 // the populated fields and emits an informational factor.
-func applyEntrypointCrossCheck(s *Sidecar, inspectFixture string, fixtureMode bool, stderrSink io.Writer) {
+func applyEntrypointCrossCheck(s *sidecar.Sidecar, inspectFixture string, fixtureMode bool, stderrSink io.Writer) {
 	var (
 		insp entrypointInspection
 		err  error
@@ -249,7 +251,7 @@ func applyEntrypointCrossCheck(s *Sidecar, inspectFixture string, fixtureMode bo
 	case inspectFixture != "":
 		insp, err = loadInspectionFixture(inspectFixture)
 		if err != nil {
-			s.crossCheckStatus = fmt.Sprintf("inspect fixture unreadable: %v", err)
+			s.CrossCheckStatus = fmt.Sprintf("inspect fixture unreadable: %v", err)
 			return
 		}
 	case fixtureMode:
@@ -258,7 +260,7 @@ func applyEntrypointCrossCheck(s *Sidecar, inspectFixture string, fixtureMode bo
 		// continue producing stable sidecars under no rubric pressure.
 		return
 	case s.Image == "":
-		s.crossCheckStatus = "no image reference available for cross-check"
+		s.CrossCheckStatus = "no image reference available for cross-check"
 		return
 	default:
 		ctx, cancel := context.WithTimeout(context.Background(), inspectDefaultTimeout)
@@ -268,7 +270,7 @@ func applyEntrypointCrossCheck(s *Sidecar, inspectFixture string, fixtureMode bo
 			if stderrSink != nil {
 				fmt.Fprintf(stderrSink, "csd: entrypoint cross-check unavailable: %v\n", err)
 			}
-			s.crossCheckStatus = truncateReason(err.Error())
+			s.CrossCheckStatus = truncateReason(err.Error())
 			return
 		}
 	}
@@ -283,7 +285,7 @@ func applyEntrypointCrossCheck(s *Sidecar, inspectFixture string, fixtureMode bo
 	if s.ImageDigest == "" {
 		s.ImageDigest = pickRepoDigest(s.Image, insp.RepoDigests)
 	}
-	s.crossCheckStatus = crossCheckStatusOK
+	s.CrossCheckStatus = sidecar.CrossCheckStatusOK
 	if stderrSink != nil {
 		for _, w := range s.CoverageWarnings {
 			fmt.Fprintf(stderrSink, "csd: coverage_warning: %s\n", w)

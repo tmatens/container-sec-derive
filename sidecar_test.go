@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestNewSidecar_Constants(t *testing.T) {
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	if s.SchemaVersion != "1.4" {
 		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.4")
 	}
@@ -23,7 +25,7 @@ func TestNewSidecar_Constants(t *testing.T) {
 // (including the compose-lint contribution flow) treat null arrays as
 // schema drift, so the constructor must pre-initialize every slice/map.
 func TestNewSidecar_NoNullCollections(t *testing.T) {
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	b, err := json.Marshal(s)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -53,7 +55,7 @@ func TestNewSidecar_NoNullCollections(t *testing.T) {
 // Top-level JSON keys are part of the schema contract. If any rename or
 // disappear, downstream consumers break — this test pins the shape.
 func TestNewSidecar_TopLevelKeys(t *testing.T) {
-	b, err := json.Marshal(NewSidecar())
+	b, err := json.Marshal(sidecar.NewSidecar())
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

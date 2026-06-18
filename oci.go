@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"io"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeOCI emits an OCI runtime spec snippet ({"process":{"capabilities":
@@ -19,7 +21,7 @@ import (
 // a template, and omitting those keys here would leave them in place.
 // Emitting [] overwrites to empty, which is the "no caps leak to child
 // processes" posture minimum-privilege derivation is expressing.
-func writeOCI(w io.Writer, s *Sidecar) error {
+func writeOCI(w io.Writer, s *sidecar.Sidecar) error {
 	caps := s.CapNames()
 	prefixed := make([]string, len(caps))
 	for i, c := range caps {

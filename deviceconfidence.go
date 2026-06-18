@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // computeDeviceConfidence is the v0.3 device observer's analog of
 // computeFSConfidence. The risk the grade prices is the same shape as fs —
@@ -17,7 +21,7 @@ import "fmt"
 // proxy here. Drop rate, duration floor, and replica disagreement transfer
 // unchanged. Like the other rubrics the grade is reproducible from Factors and
 // capped at moderate while the deferred preconditions stand.
-func computeDeviceConfidence(s *Sidecar) {
+func computeDeviceConfidence(s *sidecar.Sidecar) {
 	var factors []string
 	moderateHits := 0
 	forceLow := false
@@ -82,8 +86,8 @@ func computeDeviceConfidence(s *Sidecar) {
 	s.Confidence.Factors = factors
 	switch {
 	case forceLow, moderateHits >= 2:
-		s.Confidence.Level = ConfidenceLow
+		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
-		s.Confidence.Level = ConfidenceModerate
+		s.Confidence.Level = sidecar.ConfidenceModerate
 	}
 }

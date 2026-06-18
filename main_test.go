@@ -8,6 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // ev builds an ig v0.51.0 trace_capabilities line. Tests use this
@@ -46,7 +51,7 @@ func TestAggregate_DistinctCapsSorted(t *testing.T) {
 		ev("cap", "CAP_SETUID", "containerId", "abc123def456", "containerName", "pg") +
 		ev("cap", "CAP_CHOWN", "containerId", "abc123def456", "containerName", "pg") +
 		ev("cap", "CAP_DAC_OVERRIDE", "containerId", "abc123def456", "containerName", "pg")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "pg"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "pg"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -68,18 +73,18 @@ func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
 		ev("cap", "CAP_NET_RAW", "containerId", "aabbcc222222", "containerName", "app-2")
 
 	// Prefix matches two replicas -> ambiguous.
-	_, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "aabbcc"})
+	_, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "aabbcc"})
 	if err == nil {
 		t.Fatal("expected ambiguity error for a prefix matching two containers")
 	}
-	var amb *ambiguousSelectionError
+	var amb *exit.AmbiguousSelectionError
 	if !errors.As(err, &amb) {
-		t.Fatalf("err = %v, want *ambiguousSelectionError", err)
+		t.Fatalf("err = %v, want *exit.AmbiguousSelectionError", err)
 	}
-	if amb.flag != "--container" {
-		t.Errorf("error flag = %q, want --container", amb.flag)
+	if amb.Flag() != "--container" {
+		t.Errorf("error flag = %q, want --container", amb.Flag())
 	}
-	if amb.allMatchingHint {
+	if amb.AllMatchingHint() {
 		t.Error("--all-matching must not be offered as a remedy for an ambiguous --container prefix")
 	}
 	if msg := amb.Error(); !strings.Contains(msg, "--container") || strings.Contains(msg, "--all-matching") {
@@ -87,7 +92,7 @@ func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
 	}
 
 	// An exact id resolves to exactly one replica -> no error.
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "aabbcc111111"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "aabbcc111111"})
 	if err != nil {
 		t.Fatalf("exact id should not be ambiguous: %v", err)
 	}
@@ -99,7 +104,7 @@ func TestAggregate_ContainerPrefixAmbiguous(t *testing.T) {
 func TestAggregate_FiltersByContainer(t *testing.T) {
 	input := ev("cap", "CAP_CHOWN", "containerId", "aaa", "containerName", "pg") +
 		ev("cap", "CAP_NET_RAW", "containerId", "bbb", "containerName", "other")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "pg"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "pg"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -110,7 +115,7 @@ func TestAggregate_FiltersByContainer(t *testing.T) {
 
 func TestAggregate_ContainerIDPrefix(t *testing.T) {
 	input := ev("cap", "CAP_SETGID", "containerId", "abcdef1234567890")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "abcdef"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "abcdef"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -122,7 +127,7 @@ func TestAggregate_ContainerIDPrefix(t *testing.T) {
 func TestAggregate_EmptyTargetMatchesAll(t *testing.T) {
 	input := ev("cap", "CAP_CHOWN", "containerId", "a") +
 		ev("cap", "CAP_SETUID", "containerId", "b")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -140,7 +145,7 @@ func TestAggregate_FiltersCapableFalse(t *testing.T) {
 		ev("timestamp", "1001", "cap", "CAP_NET_RAW", "containerId", "a", "capable", "false") +
 		ev("timestamp", "1002", "cap", "CAP_SYS_ADMIN", "containerId", "a", "capable", "false") +
 		ev("timestamp", "1003", "cap", "CAP_SETUID", "containerId", "a", "capable", "true")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -160,7 +165,7 @@ func TestAggregate_LegacyFixtureWithoutCapableFieldKeptForCompat(t *testing.T) {
 	// to zero caps; pinned ig v0.51.0 always emits the field, so the
 	// live path still gets exact verdict semantics.
 	input := `{"timestamp":1000,"cap":"CAP_CHOWN","proc":{"comm":"x","pid":1},"runtime":{"runtimeName":"docker","containerId":"a","containerName":"a","containerImageName":"x"}}` + "\n"
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -177,14 +182,14 @@ func TestAggregate_HardFailsOnMalformedLine(t *testing.T) {
 	input := "not json at all\n" +
 		ev("cap", "CAP_CHOWN", "containerId", "a") +
 		ev("cap", "CAP_SETUID", "containerId", "a")
-	if _, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"}); err == nil {
+	if _, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"}); err == nil {
 		t.Fatal("expected a parse error on a malformed line, got nil")
 	}
 
 	// Blank lines are still skipped, not treated as malformed.
 	clean := ev("cap", "CAP_CHOWN", "containerId", "a") + "\n" +
 		ev("cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(clean), aggregateOpts{Container: "a"})
+	s, err := aggregate(strings.NewReader(clean), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate (blank line): %v", err)
 	}
@@ -200,7 +205,7 @@ func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
 		ev("timestamp", "1100", "cap", "CAP_DAC_READ_SEARCH", "containerId", "a") +
 		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "a") +
 		ev("timestamp", "1700", "cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -215,7 +220,7 @@ func TestAggregate_InitWindowFiltersEarlyEvents(t *testing.T) {
 func TestAggregate_InitWindowDisabled(t *testing.T) {
 	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
 		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -236,7 +241,7 @@ func TestAggregate_InitCommFilterDropsRuncEvents(t *testing.T) {
 		ev("timestamp", "1600", "cap", "CAP_NET_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") + // past time window, still runc
 		ev("timestamp", "1700", "cap", "CAP_CHOWN", "comm", "postgres", "containerId", "a") +
 		ev("timestamp", "1800", "cap", "CAP_SETUID", "comm", "postgres", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -253,7 +258,7 @@ func TestAggregate_InitCommFilterFiresWithoutTimeWindow(t *testing.T) {
 	// window disabled, runc:[*] events must still be dropped.
 	input := ev("timestamp", "1000", "cap", "CAP_SYS_ADMIN", "comm", "runc:[2:INIT]", "containerId", "a") +
 		ev("timestamp", "1100", "cap", "CAP_CHOWN", "comm", "postgres", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -271,7 +276,7 @@ func TestAggregate_InitCommFilterDoesNotFilterUnrelatedComms(t *testing.T) {
 	// accidentally filtering user processes named e.g. "runcounter").
 	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "comm", "runcounter", "containerId", "a") +
 		ev("timestamp", "1100", "cap", "CAP_SETUID", "comm", "runc-helper", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -286,7 +291,7 @@ func TestAggregate_InitWindowIgnoresUnmatchedEvents(t *testing.T) {
 	input := ev("timestamp", "1000", "cap", "CAP_NET_RAW", "containerId", "other") +
 		ev("timestamp", "5000", "cap", "CAP_SYS_ADMIN", "containerId", "a") +
 		ev("timestamp", "5600", "cap", "CAP_CHOWN", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -356,7 +361,7 @@ func TestAggregate_EventsRecordedCountsParsedEvents(t *testing.T) {
 	input := ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "a") +
 		ev("timestamp", "1100", "cap", "CAP_CHOWN", "containerId", "a") +
 		ev("timestamp", "1600", "cap", "CAP_SETUID", "containerId", "a")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Container: "a", InitWindowMs: 500})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Container: "a", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -375,14 +380,14 @@ func TestParseIGStderr_SumsLostSamples(t *testing.T) {
 time="2026-04-20T12:00:03Z" level=warning msg="reading event: lost 64 samples"
 time="2026-04-20T12:00:05Z" level=info msg="ready"
 `
-	got := parseIGStderr(strings.NewReader(stderr), nil)
+	got := ig.ParseIGStderr(strings.NewReader(stderr), nil)
 	if got != 128+64 {
 		t.Errorf("parseIGStderr = %d, want %d", got, 128+64)
 	}
 }
 
 func TestFinaliseTraceHealth_RateIsDroppedOverRecorded(t *testing.T) {
-	th := TraceHealth{EventsRecorded: 100, EventsDropped: 2}
+	th := sidecar.TraceHealth{EventsRecorded: 100, EventsDropped: 2}
 	finaliseTraceHealth(&th)
 	if th.DropRate != 0.02 {
 		t.Errorf("DropRate = %v, want 0.02", th.DropRate)
@@ -398,7 +403,7 @@ func TestAggregate_MultiReplicaUnionAndDisagreement(t *testing.T) {
 		ev("timestamp", "1020", "cap", "CAP_FOWNER", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
 		ev("timestamp", "1000", "cap", "CAP_CHOWN", "containerId", "r2", "containerName", "web-2", "image", "app:1") +
 		ev("timestamp", "1010", "cap", "CAP_SETUID", "containerId", "r2", "containerName", "web-2", "image", "app:1")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1", AllMatching: true})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1", AllMatching: true})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -420,8 +425,8 @@ func TestAggregate_MultiReplicaUnionAndDisagreement(t *testing.T) {
 	if s.Target.PerReplicaEventCounts["r1"] != 3 || s.Target.PerReplicaEventCounts["r2"] != 2 {
 		t.Errorf("event counts wrong: %v", s.Target.PerReplicaEventCounts)
 	}
-	if s.Target.Mode != TargetModeAllMatching {
-		t.Errorf("mode = %q, want %q", s.Target.Mode, TargetModeAllMatching)
+	if s.Target.Mode != sidecar.TargetModeAllMatching {
+		t.Errorf("mode = %q, want %q", s.Target.Mode, sidecar.TargetModeAllMatching)
 	}
 }
 
@@ -430,7 +435,7 @@ func TestAggregate_MultiReplicaAmbiguityWithoutAllMatching(t *testing.T) {
 	// tool refuses to silently union replicas (PLAN.md §Target selection).
 	input := ev("cap", "CAP_CHOWN", "containerId", "r1", "containerName", "web-1", "image", "app:1") +
 		ev("cap", "CAP_CHOWN", "containerId", "r2", "containerName", "web-2", "image", "app:1")
-	_, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1"})
+	_, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1"})
 	if err == nil {
 		t.Fatal("expected ambiguity error, got nil")
 	}
@@ -442,7 +447,7 @@ func TestAggregate_MultiReplicaAmbiguityWithoutAllMatching(t *testing.T) {
 
 func TestAggregate_SingleReplicaHasEmptyDisagreement(t *testing.T) {
 	input := ev("cap", "CAP_CHOWN", "containerId", "r1", "image", "app:1")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1"})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1"})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -452,8 +457,8 @@ func TestAggregate_SingleReplicaHasEmptyDisagreement(t *testing.T) {
 	if len(s.Target.ReplicaCapDisagreement) != 0 {
 		t.Errorf("single replica should have empty disagreement, got %v", s.Target.ReplicaCapDisagreement)
 	}
-	if s.Target.Mode != TargetModeImage {
-		t.Errorf("mode = %q, want %q", s.Target.Mode, TargetModeImage)
+	if s.Target.Mode != sidecar.TargetModeImage {
+		t.Errorf("mode = %q, want %q", s.Target.Mode, sidecar.TargetModeImage)
 	}
 }
 
@@ -465,7 +470,7 @@ func TestAggregate_MultiReplicaInitWindowPerReplica(t *testing.T) {
 		ev("timestamp", "1600", "cap", "CAP_CHOWN", "containerId", "r1", "image", "app:1") +
 		ev("timestamp", "5000", "cap", "CAP_SYS_ADMIN", "containerId", "r2", "image", "app:1") +
 		ev("timestamp", "5600", "cap", "CAP_CHOWN", "containerId", "r2", "image", "app:1")
-	s, err := aggregate(strings.NewReader(input), aggregateOpts{Image: "app:1", AllMatching: true, InitWindowMs: 500})
+	s, err := aggregate(strings.NewReader(input), attrib.Opts{Image: "app:1", AllMatching: true, InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -544,7 +549,7 @@ func TestRun_WorkloadPopulatesSidecar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -563,8 +568,8 @@ func TestRun_WorkloadMissingFileFailsEXUsage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing workload file, got nil")
 	}
-	if exitCodeFor(err) != ExitUsage {
-		t.Errorf("exit code = %d, want %d (EX_USAGE)", exitCodeFor(err), ExitUsage)
+	if exit.CodeFor(err) != exit.Usage {
+		t.Errorf("exit code = %d, want %d (EX_USAGE)", exit.CodeFor(err), exit.Usage)
 	}
 	if !strings.Contains(err.Error(), "--workload") {
 		t.Errorf("error should name the flag: %v", err)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # refresh-ig-pin.sh — refresh ig-pin/ artifacts to match the version
-# currently named in main.go (PinnedIGVersion).
+# currently named in internal/ig/ig.go (PinnedIGVersion).
 #
 # Run this when bumping PinnedIGVersion. The script fetches IG's
 # public key, SHA256SUMS, and SHA256SUMS.bundle for the new version,
@@ -18,9 +18,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' main.go)"
+VERSION="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
 if [[ -z "${VERSION}" ]]; then
-    echo "::error::could not extract PinnedIGVersion from main.go" >&2
+    echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go" >&2
     exit 1
 fi
 echo "Refreshing ig-pin/ for ${VERSION}"

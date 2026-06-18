@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteJSON_RoundTripsSidecar(t *testing.T) {
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
-	s.Capabilities = []Capability{
+	s.Capabilities = []sidecar.Capability{
 		{Name: "CHOWN", EventCount: 3},
 		{Name: "SETUID", EventCount: 1},
 	}
@@ -20,7 +23,7 @@ func TestWriteJSON_RoundTripsSidecar(t *testing.T) {
 	if err := writeJSON(&buf, s); err != nil {
 		t.Fatalf("writeJSON: %v", err)
 	}
-	var round Sidecar
+	var round sidecar.Sidecar
 	if err := json.Unmarshal(buf.Bytes(), &round); err != nil {
 		t.Fatalf("round-trip decode: %v\n%s", err, buf.String())
 	}
@@ -41,7 +44,7 @@ func TestWriteJSON_MatchesWriteSidecarByteForByte(t *testing.T) {
 		t.Fatalf("open fixture: %v", err)
 	}
 	defer f.Close()
-	s, err := aggregate(f, aggregateOpts{Container: "postgres-1", InitWindowMs: 500})
+	s, err := aggregate(f, attrib.Opts{Container: "postgres-1", InitWindowMs: 500})
 	if err != nil {
 		t.Fatalf("aggregate: %v", err)
 	}
@@ -76,12 +79,12 @@ func TestRun_FormatJSONEmitsSidecarToStdout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v (stderr: %s)", err, stderr.String())
 	}
-	var s Sidecar
+	var s sidecar.Sidecar
 	if err := json.Unmarshal(stdout.Bytes(), &s); err != nil {
 		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout.String())
 	}
-	if s.SchemaVersion != SchemaVersion {
-		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, SchemaVersion)
+	if s.SchemaVersion != sidecar.SchemaVersion {
+		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, sidecar.SchemaVersion)
 	}
 	if len(s.Capabilities) != 5 {
 		t.Errorf("got %d capabilities, want 5", len(s.Capabilities))

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeCapaddComposePatch emits a unified diff that rewrites
@@ -19,7 +21,7 @@ import (
 // recommendation is the empty set (every validated cap was unused) the block is
 // rewritten to `cap_add: []` — an explicit, reviewable minimization rather than a
 // silent deletion.
-func writeCapaddComposePatch(w io.Writer, val *capaddValidation, original []byte, inPath, service string) error {
+func writeCapaddComposePatch(w io.Writer, val *sidecar.CapaddValidation, original []byte, inPath, service string) error {
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}

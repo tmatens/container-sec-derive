@@ -4,6 +4,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // TestProduceDeviceObservationFixture exercises the fixture path end-to-end:
@@ -21,7 +24,7 @@ func TestProduceDeviceObservationFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := produceDeviceObservation(devicePipelineOpts{
-		AggregateOpts: aggregateOpts{Container: "gpu-1"},
+		AggregateOpts: attrib.Opts{Container: "gpu-1"},
 		Fixture:       fix,
 	}, nil)
 	if err != nil {
@@ -55,30 +58,30 @@ func TestProduceDeviceObservationFixture(t *testing.T) {
 
 func TestComputeDeviceConfidence(t *testing.T) {
 	// No workload + nothing else wrong → exactly one moderate hit → moderate.
-	s := NewSidecar()
-	s.DevicePaths = []DevicePath{{Path: "/dev/kvm", EventCount: 1}}
+	s := sidecar.NewSidecar()
+	s.DevicePaths = []sidecar.DevicePath{{Path: "/dev/kvm", EventCount: 1}}
 	s.TraceHealth.EventsRecorded = 1
 	computeDeviceConfidence(s)
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("sparse-but-clean device run = %q, want moderate (no event-count floor)", s.Confidence.Level)
 	}
 
 	// A drop rate >= 1% forces low regardless of how many devices were seen.
-	s2 := NewSidecar()
+	s2 := sidecar.NewSidecar()
 	s2.Workload = "/w.sh"
-	s2.DevicePaths = []DevicePath{{Path: "/dev/kvm"}}
+	s2.DevicePaths = []sidecar.DevicePath{{Path: "/dev/kvm"}}
 	s2.TraceHealth.DropRate = 0.02
 	computeDeviceConfidence(s2)
-	if s2.Confidence.Level != ConfidenceLow {
+	if s2.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("drop-rate 2%% device run = %q, want low", s2.Confidence.Level)
 	}
 
 	// Empty observation (no non-default devices) is a clean, valid result, not
 	// a low-confidence one: with a workload it stays moderate.
-	s3 := NewSidecar()
+	s3 := sidecar.NewSidecar()
 	s3.Workload = "/w.sh"
 	computeDeviceConfidence(s3)
-	if s3.Confidence.Level != ConfidenceModerate {
+	if s3.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("empty device observation = %q, want moderate", s3.Confidence.Level)
 	}
 	if !containsSubstr(s3.Confidence.Factors, "no non-default device opens observed") {

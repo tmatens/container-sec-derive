@@ -6,27 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"sort"
-	"strconv"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
-
-// egressDest is one distinct outbound destination the workload contacted: a
-// resolved IP address + port (the allowlist key). The IP is what connect()
-// observed — not the hostname the app asked for (see the brittleness caveat in
-// issue #136); a trace_dns correlation for hostnames is a deferred enhancement.
-type egressDest struct {
-	Addr    string `json:"addr"`
-	Port    int    `json:"port"`
-	Version int    `json:"version,omitempty"` // 4 or 6
-}
-
-// String renders the destination as a canonical host:port key, IPv6-bracketed
-// (net.JoinHostPort), used both as the aggregation key and for stable sorting.
-func (d egressDest) String() string {
-	return net.JoinHostPort(d.Addr, strconv.Itoa(d.Port))
-}
 
 // egressObservation is the egress observer's aggregate: the distinct outbound
 // destinations contacted (unioned and per-replica) plus the count of connect
@@ -34,13 +19,13 @@ func (d egressDest) String() string {
 // sidecar/confidence/multi-replica machinery carries over; the decision layer
 // (the allowlist recommendation) sits on top in a later change.
 type egressObservation struct {
-	Dests           []egressDest            // sorted union of distinct destinations
-	PerReplica      map[string][]egressDest // replica id (or name) -> sorted dests
-	EventCount      int                     // connect events counted post-filter
-	PerReplicaCount map[string]int          // connect-event count per replica
-	Stats           map[string]*egressStats // dest.String() -> per-dest detail
-	Dropped         int                     // ig ringbuf-lost samples (live; 0 in fixture)
-	Image           string                  // first observed container image
+	Dests           []sidecar.EgressDest            // sorted union of distinct destinations
+	PerReplica      map[string][]sidecar.EgressDest // replica id (or name) -> sorted dests
+	EventCount      int                             // connect events counted post-filter
+	PerReplicaCount map[string]int                  // connect-event count per replica
+	Stats           map[string]*egressStats         // dest.String() -> per-dest detail
+	Dropped         int                             // ig ringbuf-lost samples (live; 0 in fixture)
+	Image           string                          // first observed container image
 }
 
 // egressStats collapses N connect events to one destination into the numbers
@@ -52,8 +37,8 @@ type egressStats struct {
 
 // sortedDests returns the destinations in a stable order (by address, then
 // port) so the union and per-replica lists are deterministic.
-func sortedDests(m map[string]egressDest) []egressDest {
-	out := make([]egressDest, 0, len(m))
+func sortedDests(m map[string]sidecar.EgressDest) []sidecar.EgressDest {
+	out := make([]sidecar.EgressDest, 0, len(m))
 	for _, d := range m {
 		out = append(out, d)
 	}
@@ -73,9 +58,9 @@ func sortedDests(m map[string]egressDest) []egressDest {
 // ambiguity guard mirror aggregateDevices/aggregateWrites exactly. A malformed
 // line is a hard error (the deep-review L3 contract — the pinned ig emits clean
 // one-event-per-line NDJSON, so a parse failure means corrupt input).
-func aggregateEgress(r io.Reader, opts aggregateOpts) (*egressObservation, error) {
-	union := map[string]egressDest{}
-	perReplica := map[string]map[string]egressDest{}
+func aggregateEgress(r io.Reader, opts attrib.Opts) (*egressObservation, error) {
+	union := map[string]sidecar.EgressDest{}
+	perReplica := map[string]map[string]sidecar.EgressDest{}
 	perReplicaCount := map[string]int{}
 	perReplicaName := map[string]string{}
 	stats := map[string]*egressStats{}
@@ -92,7 +77,7 @@ func aggregateEgress(r io.Reader, opts aggregateOpts) (*egressObservation, error
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return nil, fmt.Errorf("parse trace_tcp event: %w", err)
 		}
-		if !opts.matchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
+		if !opts.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
 			continue
 		}
 		if !ev.IsConnect() {
@@ -102,7 +87,7 @@ func aggregateEgress(r io.Reader, opts aggregateOpts) (*egressObservation, error
 			// Incomplete endpoint — nothing actionable for an allowlist.
 			continue
 		}
-		dest := egressDest{Addr: ev.Dst.Addr, Port: ev.Dst.Port, Version: ev.Dst.Version}
+		dest := sidecar.EgressDest{Addr: ev.Dst.Addr, Port: ev.Dst.Port, Version: ev.Dst.Version}
 		key := dest.String()
 		count++
 		if image == "" {
@@ -114,7 +99,7 @@ func aggregateEgress(r io.Reader, opts aggregateOpts) (*egressObservation, error
 			rid = ev.Runtime.ContainerName
 		}
 		if perReplica[rid] == nil {
-			perReplica[rid] = map[string]egressDest{}
+			perReplica[rid] = map[string]sidecar.EgressDest{}
 		}
 		perReplica[rid][key] = dest
 		perReplicaCount[rid]++
@@ -139,7 +124,7 @@ func aggregateEgress(r io.Reader, opts aggregateOpts) (*egressObservation, error
 	// matched >1 replica without --all-matching. Mirrors the cap/fs/device
 	// aggregators — the tool refuses to silently union the egress destinations
 	// of replicas the user didn't opt into aggregating.
-	if opts.ambiguous(len(perReplica)) {
+	if opts.Ambiguous(len(perReplica)) {
 		labels := make([]string, 0, len(perReplica))
 		for rid := range perReplica {
 			if name := perReplicaName[rid]; name != "" {
@@ -149,12 +134,12 @@ func aggregateEgress(r io.Reader, opts aggregateOpts) (*egressObservation, error
 			}
 		}
 		sort.Strings(labels)
-		return nil, opts.newAmbiguousSelectionError(labels)
+		return nil, opts.NewAmbiguousSelectionError(labels)
 	}
 
 	obs := &egressObservation{
 		Dests:           sortedDests(union),
-		PerReplica:      map[string][]egressDest{},
+		PerReplica:      map[string][]sidecar.EgressDest{},
 		EventCount:      count,
 		PerReplicaCount: perReplicaCount,
 		Stats:           stats,

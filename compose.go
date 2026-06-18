@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // Format identifiers. v0.1.0-beta ships only `compose`; the remaining six
@@ -10,11 +12,11 @@ import (
 // centralized so the "supported formats" list has one source of truth.
 const (
 	FormatCompose          = "compose"
-	FormatComposePatch     = "compose-patch"     // v0.1.0-rc
-	FormatDockerRun        = "docker-run"        // v0.1.0-rc
-	FormatOCI              = "oci"               // v0.1.0-rc
-	FormatK8s              = "k8s"               // v0.1.0-rc
-	FormatJSON             = "json"              // v0.1.0-rc
+	FormatComposePatch     = "compose-patch"        // v0.1.0-rc
+	FormatDockerRun        = "docker-run"           // v0.1.0-rc
+	FormatOCI              = "oci"                  // v0.1.0-rc
+	FormatK8s              = "k8s"                  // v0.1.0-rc
+	FormatJSON             = "json"                 // v0.1.0-rc
 	FormatComposeLintEntry = "compose-lint-profile" // v0.1.0-rc
 	FormatNftables         = "nftables"             // v0.8 egress-only
 	FormatK8sNetworkPolicy = "k8s-networkpolicy"    // v0.8 egress-only
@@ -28,7 +30,7 @@ const (
 // cap_drop: [ALL] is always emitted. cap_add is omitted entirely when the
 // observed set is empty, which is the valid compose shape for "drop
 // everything, add nothing."
-func writeCompose(w io.Writer, s *Sidecar) error {
+func writeCompose(w io.Writer, s *sidecar.Sidecar) error {
 	if _, err := fmt.Fprintln(w, "cap_drop:"); err != nil {
 		return err
 	}

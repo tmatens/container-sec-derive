@@ -6,6 +6,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The v0.3 privileged formatters compose the existing capability and device
@@ -25,7 +27,7 @@ import (
 // would not be a valid hunk); that path relies on the JSON block + stderr
 // advisory instead.
 func privilegedCaveatComment(w io.Writer) error {
-	_, err := fmt.Fprintf(w, "# WARNING (partial decomposition): %s\n", PrivilegedSecurityOptCaveat)
+	_, err := fmt.Fprintf(w, "# WARNING (partial decomposition): %s\n", sidecar.PrivilegedSecurityOptCaveat)
 	return err
 }
 
@@ -33,7 +35,7 @@ func privilegedCaveatComment(w io.Writer) error {
 // a drop-privileged header, then the capability stanza (cap_drop: [ALL] +
 // cap_add), then the device stanza (devices:). The result pastes under a
 // service in place of `privileged: true`.
-func writePrivilegedCompose(w io.Writer, s *Sidecar) error {
+func writePrivilegedCompose(w io.Writer, s *sidecar.Sidecar) error {
 	if _, err := fmt.Fprintln(w, "# privileged: true is not required; drop it and apply the minimum below:"); err != nil {
 		return err
 	}
@@ -54,7 +56,7 @@ func writePrivilegedCompose(w io.Writer, s *Sidecar) error {
 // writePrivilegedDockerRun composes the cap and device docker-run formatters
 // under a drop-privileged header. Cap flags and device flags concatenate
 // cleanly (both are flag strings), so this reuses both single-observer writers.
-func writePrivilegedDockerRun(w io.Writer, s *Sidecar) error {
+func writePrivilegedDockerRun(w io.Writer, s *sidecar.Sidecar) error {
 	if _, err := fmt.Fprintln(w, "# privileged: true is not required; drop it and apply the minimum below:"); err != nil {
 		return err
 	}
@@ -79,7 +81,7 @@ func writePrivilegedDockerRun(w io.Writer, s *Sidecar) error {
 // surfaced as a `#`-commented node list pointing at the device-plugin
 // framework, exactly as writeDeviceK8s does (k8s has no per-device
 // SecurityContext grant).
-func writePrivilegedK8s(w io.Writer, s *Sidecar) error {
+func writePrivilegedK8s(w io.Writer, s *sidecar.Sidecar) error {
 	if _, err := fmt.Fprintln(w, "# privileged: true is not required; the minimum non-privileged equivalent is below."); err != nil {
 		return err
 	}
@@ -138,7 +140,7 @@ func writePrivilegedK8s(w io.Writer, s *Sidecar) error {
 // this is a bespoke merge into one object. major/minor for linux.devices is
 // unavailable from trace_open, so devices stay in annotations with the same
 // host-resolution note.
-func writePrivilegedOCI(w io.Writer, s *Sidecar) error {
+func writePrivilegedOCI(w io.Writer, s *sidecar.Sidecar) error {
 	caps := s.CapNames()
 	prefixed := make([]string, len(caps))
 	for i, c := range caps {
@@ -151,7 +153,7 @@ func writePrivilegedOCI(w io.Writer, s *Sidecar) error {
 	}
 	annotations := map[string]string{
 		"org.containersecderive.privileged":   "not-required; minimum equivalent is process.capabilities + the devices below",
-		"org.containersecderive.security-opt": PrivilegedSecurityOptCaveat,
+		"org.containersecderive.security-opt": sidecar.PrivilegedSecurityOptCaveat,
 	}
 	if len(devices) > 0 {
 		annotations["org.containersecderive.observed-devices"] = strings.Join(devices, ",")
@@ -192,7 +194,7 @@ func writePrivilegedOCI(w io.Writer, s *Sidecar) error {
 // device observation leaves an existing devices: block untouched (the #92
 // under-coverage foot-gun); cap_add follows the cap patch's convention (an
 // empty observed set removes an existing cap_add).
-func writePrivilegedComposePatch(w io.Writer, s *Sidecar, original []byte, inPath, service string) error {
+func writePrivilegedComposePatch(w io.Writer, s *sidecar.Sidecar, original []byte, inPath, service string) error {
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}
@@ -269,7 +271,7 @@ func writePrivilegedComposePatch(w io.Writer, s *Sidecar, original []byte, inPat
 // privileged decomposition (observer: privileged; body = cap_add + devices)
 // behind the strictest acceptance contract: the cap, device, AND both
 // replica-disagreement gates must all pass (checkPrivilegedComposeLintContract).
-func writePrivilegedComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) error {
+func writePrivilegedComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := checkPrivilegedComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
 		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
@@ -302,7 +304,7 @@ func writePrivilegedComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory
 	fmt.Fprintf(w, "%sderivation:\n", bodyIndent)
 	fmt.Fprintf(w, "%s  tool: container-sec-derive\n", bodyIndent)
 	fmt.Fprintf(w, "%s  observer: privileged\n", bodyIndent)
-	fmt.Fprintf(w, "%s  partial_decomposition: true # %s\n", bodyIndent, PrivilegedSecurityOptCaveat)
+	fmt.Fprintf(w, "%s  partial_decomposition: true # %s\n", bodyIndent, sidecar.PrivilegedSecurityOptCaveat)
 	fmt.Fprintf(w, "%s  tool_version: %s\n", bodyIndent, s.ToolVersion)
 	fmt.Fprintf(w, "%s  schema_version: %q\n", bodyIndent, s.SchemaVersion)
 	fmt.Fprintf(w, "%s  duration_seconds: %d\n", bodyIndent, s.DurationSeconds)
@@ -331,7 +333,7 @@ func writePrivilegedComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory
 // clear their gates. The shared checks (schema/digest/workload/duration/
 // confidence/drop_rate) are evaluated once; the two replica-disagreement gates
 // are both enforced.
-func checkPrivilegedComposeLintContract(s *Sidecar) []string {
+func checkPrivilegedComposeLintContract(s *sidecar.Sidecar) []string {
 	v := checkComposeLintContract(s) // shared gates + cap-replica disagreement
 	if len(s.Target.ReplicaDeviceDisagreement) > 0 {
 		v = append(v, fmt.Sprintf("replica_device_disagreement non-empty (%d nodes disagree across replicas)", len(s.Target.ReplicaDeviceDisagreement)))

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteFSDockerRun(t *testing.T) {
 	var b bytes.Buffer
-	rec := fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
+	rec := sidecar.FSRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
 	if err := writeFSDockerRun(&b, rec); err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +21,7 @@ func TestWriteFSDockerRun(t *testing.T) {
 	}
 
 	b.Reset()
-	if err := writeFSDockerRun(&b, fsRecommendation{ReadOnly: true}); err != nil {
+	if err := writeFSDockerRun(&b, sidecar.FSRecommendation{ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	if b.String() != "--read-only\n" {
@@ -43,7 +45,7 @@ func TestK8sVolumeName(t *testing.T) {
 
 func TestWriteFSK8s(t *testing.T) {
 	var b bytes.Buffer
-	rec := fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
+	rec := sidecar.FSRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
 	if err := writeFSK8s(&b, rec); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +70,7 @@ func TestWriteFSK8s(t *testing.T) {
 
 	// No tmpfs candidates → securityContext only.
 	b.Reset()
-	if err := writeFSK8s(&b, fsRecommendation{ReadOnly: true}); err != nil {
+	if err := writeFSK8s(&b, sidecar.FSRecommendation{ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	if b.String() != "securityContext:\n  readOnlyRootFilesystem: true\n" {
@@ -78,7 +80,7 @@ func TestWriteFSK8s(t *testing.T) {
 
 func TestWriteFSOCI(t *testing.T) {
 	var b bytes.Buffer
-	rec := fsRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
+	rec := sidecar.FSRecommendation{ReadOnly: true, TmpfsPaths: []string{"/var/log/postgresql", "/var/run/postgresql"}}
 	if err := writeFSOCI(&b, rec); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +110,7 @@ func TestWriteFSOCI(t *testing.T) {
 
 	// No tmpfs candidates → mounts is an explicit empty array, not null.
 	b.Reset()
-	if err := writeFSOCI(&b, fsRecommendation{ReadOnly: true}); err != nil {
+	if err := writeFSOCI(&b, sidecar.FSRecommendation{ReadOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(b.String(), `"mounts": []`) {

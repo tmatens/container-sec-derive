@@ -12,19 +12,19 @@ import (
 	"sync"
 	"syscall"
 	"time"
-)
 
-// TraceTcpGadget is the pinned ig trace_tcp gadget image — the v0.8 egress
-// observer's signal source. Like the other gadgets it is tagged to
-// PinnedIGVersion so the schema is fixed per release.
-const TraceTcpGadget = "ghcr.io/inspektor-gadget/gadget/trace_tcp:" + PinnedIGVersion
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // egressPipelineOpts bundles every input the v0.8 egress observe pipeline
 // takes, mirroring devicePipelineOpts. The single signal source is trace_tcp
 // (filtered to outbound connects); like devices it needs no mount/volume
 // config.
 type egressPipelineOpts struct {
-	AggregateOpts aggregateOpts
+	AggregateOpts attrib.Opts
 	Fixture       string // trace_tcp NDJSON; empty → live ig
 	IGBin         string
 	Duration      time.Duration
@@ -35,7 +35,7 @@ type egressPipelineOpts struct {
 // end-to-end and returns a fully populated *Sidecar with the egress allowlist
 // recommendation, egress_destinations evidence, trace_health, and egress
 // confidence scored. It is the egress analog of produceDeviceObservation.
-func produceEgressObservation(opts egressPipelineOpts, stderr io.Writer) (*Sidecar, error) {
+func produceEgressObservation(opts egressPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
 		eg  *egressObservation
@@ -50,7 +50,7 @@ func produceEgressObservation(opts egressPipelineOpts, stderr io.Writer) (*Sidec
 		eg, err = aggregateEgress(src, opts.AggregateOpts)
 	} else {
 		noteWSL2IfDetected(stderr)
-		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -60,9 +60,9 @@ func produceEgressObservation(opts egressPipelineOpts, stderr io.Writer) (*Sidec
 		eg, err = observeEgress(ctx, opts.IGBin, opts.AggregateOpts, stderr)
 	}
 	if err != nil {
-		var amb *ambiguousSelectionError
+		var amb *exit.AmbiguousSelectionError
 		if errors.As(err, &amb) {
-			return nil, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
 	}
@@ -81,10 +81,10 @@ func produceEgressObservation(opts egressPipelineOpts, stderr io.Writer) (*Sidec
 // capability/fs/device scaffolding is left at NewSidecar's empty defaults; the
 // egress section (egress_destinations + egress_recommendation) carries the
 // observation. PLAN.md §Output schema: one observer per run populates its block.
-func egressToSidecar(eg *egressObservation, opts aggregateOpts) *Sidecar {
-	s := NewSidecar()
-	s.Target.Mode = opts.modeLabel()
-	s.Target.Selector = opts.selector()
+func egressToSidecar(eg *egressObservation, opts attrib.Opts) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Target.Mode = opts.ModeLabel()
+	s.Target.Selector = opts.Selector()
 	s.Target.ReplicasObserved = len(eg.PerReplica)
 	for rid, c := range eg.PerReplicaCount {
 		s.Target.PerReplicaEventCounts[rid] = c
@@ -106,13 +106,13 @@ func egressToSidecar(eg *egressObservation, opts aggregateOpts) *Sidecar {
 // applyEgressFields populates the egress section of s (egress_recommendation,
 // egress_destinations, and replica_egress_disagreement) from the observation.
 // Mirrors applyDeviceFields.
-func applyEgressFields(s *Sidecar, eg *egressObservation) {
+func applyEgressFields(s *sidecar.Sidecar, eg *egressObservation) {
 	rec := egressToRecommendation(eg.Dests)
 	s.EgressRecommendation = &rec
 
-	ed := make([]EgressDestination, 0, len(eg.Dests))
+	ed := make([]sidecar.EgressDestination, 0, len(eg.Dests))
 	for _, d := range eg.Dests {
-		entry := EgressDestination{Addr: d.Addr, Port: d.Port, Version: d.Version}
+		entry := sidecar.EgressDestination{Addr: d.Addr, Port: d.Port, Version: d.Version}
 		if st := eg.Stats[d.String()]; st != nil {
 			entry.EventCount = st.eventCount
 			entry.CommSamples = sortedKeys(st.commSamples)
@@ -153,8 +153,8 @@ func applyEgressFields(s *Sidecar, eg *egressObservation) {
 // connects for the lifetime of ctx. It is observeDevices with aggregateEgress
 // swapped in and the trace_tcp gadget — the same stderr-drain + ringbuf-loss
 // accounting and early-error kill; only the gadget and classifier differ.
-func observeEgress(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*egressObservation, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", TraceTcpGadget, "--output", "json")
+func observeEgress(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*egressObservation, error) {
+	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceTcpGadget, "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -164,8 +164,8 @@ func observeEgress(ctx context.Context, igBin string, opts aggregateOpts, stderr
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		if isIGMissing(err) {
-			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		if exit.IsIGMissing(err) {
+			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
 		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
@@ -177,7 +177,7 @@ func observeEgress(ctx context.Context, igBin string, opts aggregateOpts, stderr
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lost = parseIGStderr(stderrPipe, stderrSink)
+		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	obs, aggErr := aggregateEgress(stdout, opts)

@@ -5,19 +5,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // fullyValidDeviceSidecar returns a device sidecar that clears the
 // compose-lint acceptance contract, given a readable workload path.
-func fullyValidDeviceSidecar(workload string) *Sidecar {
-	s := NewSidecar()
+func fullyValidDeviceSidecar(workload string) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
 	s.Image = "gpu"
 	s.ImageDigest = "sha256:deadbeef"
 	s.DurationSeconds = 600
 	s.Workload = workload
 	s.ObservedAt = time.Date(2026, 4, 22, 0, 0, 0, 0, time.UTC)
-	s.Confidence.Level = ConfidenceModerate
-	s.DeviceRecommendation = &deviceRecommendation{
+	s.Confidence.Level = sidecar.ConfidenceModerate
+	s.DeviceRecommendation = &sidecar.DeviceRecommendation{
 		Devices:     []string{"/dev/dri/card0", "/dev/net/tun"},
 		DerivedCaps: []string{"CAP_NET_ADMIN"},
 	}
@@ -57,10 +59,10 @@ func TestWriteDeviceComposeLintProfileAccepted(t *testing.T) {
 func TestWriteDeviceComposeLintProfileContractGate(t *testing.T) {
 	// A sidecar missing digest/workload/duration fails the contract without
 	// --allow-exploratory, and the violations are reported.
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "gpu"
-	s.Confidence.Level = ConfidenceModerate
-	s.DeviceRecommendation = &deviceRecommendation{Devices: []string{"/dev/kvm"}}
+	s.Confidence.Level = sidecar.ConfidenceModerate
+	s.DeviceRecommendation = &sidecar.DeviceRecommendation{Devices: []string{"/dev/kvm"}}
 	if err := writeDeviceComposeLintProfile(&strings.Builder{}, s, false); err == nil {
 		t.Fatal("expected contract failure without --allow-exploratory")
 	}

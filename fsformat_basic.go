@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The v0.2 fs formatters below mirror the cap formatters (docker_run.go /
@@ -20,7 +22,7 @@ import (
 // writeFSDockerRun emits a `docker run` flag string realizing the fs
 // recommendation: `--read-only` plus one `--tmpfs <path>` per tmpfs candidate,
 // space-separated on a single line for pasting into an existing `docker run`.
-func writeFSDockerRun(w io.Writer, rec fsRecommendation) error {
+func writeFSDockerRun(w io.Writer, rec sidecar.FSRecommendation) error {
 	parts := []string{"--read-only"}
 	for _, p := range rec.TmpfsPaths {
 		parts = append(parts, "--tmpfs "+p)
@@ -36,7 +38,7 @@ func writeFSDockerRun(w io.Writer, rec fsRecommendation) error {
 // root filesystem still needs writable scratch for incidental paths. Output is
 // two-space block style for pasting under a container spec. When there are no
 // tmpfs candidates, only the securityContext stanza is emitted.
-func writeFSK8s(w io.Writer, rec fsRecommendation) error {
+func writeFSK8s(w io.Writer, rec sidecar.FSRecommendation) error {
 	if _, err := fmt.Fprintln(w, "securityContext:"); err != nil {
 		return err
 	}
@@ -101,7 +103,7 @@ func k8sVolumeName(p string) string {
 // `mounts` is always present (an explicit empty array when there are no tmpfs
 // candidates) so a merge tool overwrites any templated mounts to the
 // minimum-privilege shape, mirroring writeOCI's explicit-empty arrays.
-func writeFSOCI(w io.Writer, rec fsRecommendation) error {
+func writeFSOCI(w io.Writer, rec sidecar.FSRecommendation) error {
 	type ociMount struct {
 		Destination string   `json:"destination"`
 		Type        string   `json:"type"`

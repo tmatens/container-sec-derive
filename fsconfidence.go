@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
 
 // computeFSConfidence is the v0.2 fs observer's analog of computeConfidence.
 // The cap rubric's factors are mostly cap-specific (comm diversity, entrypoint
@@ -20,7 +24,7 @@ import "fmt"
 // target-exited-early) stand. Multi-replica write-path disagreement is wired in
 // PR-C; this function already reads s.Target.ReplicaWritePathDisagreement so the
 // factor lights up automatically once that field is populated.
-func computeFSConfidence(s *Sidecar) {
+func computeFSConfidence(s *sidecar.Sidecar) {
 	var factors []string
 	moderateHits := 0
 	forceLow := false
@@ -85,8 +89,8 @@ func computeFSConfidence(s *Sidecar) {
 	s.Confidence.Factors = factors
 	switch {
 	case forceLow, moderateHits >= 2:
-		s.Confidence.Level = ConfidenceLow
+		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
-		s.Confidence.Level = ConfidenceModerate
+		s.Confidence.Level = sidecar.ConfidenceModerate
 	}
 }

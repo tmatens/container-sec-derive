@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 func TestWriteOCI_StandardCapSet(t *testing.T) {
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "CHOWN"},
 		{Name: "DAC_OVERRIDE"},
 		{Name: "SETUID"},
@@ -53,7 +55,7 @@ func TestWriteOCI_EmptyCapSetKeepsEmptyArrays(t *testing.T) {
 	// nothing" analog for OCI is three empty arrays, not omission --
 	// downstream merge tools (jq, umoci) rely on explicit [] to clear
 	// any pre-existing caps in the target config.json.
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	var buf bytes.Buffer
 	if err := writeOCI(&buf, s); err != nil {
 		t.Fatalf("writeOCI: %v", err)
@@ -80,8 +82,8 @@ func TestWriteOCI_PreservesAggregatorOrder(t *testing.T) {
 	// them. A non-sorted input here would still round-trip through JSON
 	// encoding in insertion order because the encoder writes slices in
 	// index order, but the sorted-input case is what production hits.
-	s := NewSidecar()
-	s.Capabilities = []Capability{
+	s := sidecar.NewSidecar()
+	s.Capabilities = []sidecar.Capability{
 		{Name: "A"}, {Name: "B"}, {Name: "C"},
 	}
 	var buf bytes.Buffer

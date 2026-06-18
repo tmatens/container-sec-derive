@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeFSComposeLintProfile emits a YAML entry for contributing a v0.2
@@ -20,7 +22,7 @@ import (
 // replica_write_path_disagreement empty (the fs analog of the cap
 // disagreement gate). coverage_warnings is not checked — it is the cap
 // entrypoint-cross-check signal and is always empty on an fs run.
-func writeFSComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) error {
+func writeFSComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := checkFSComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
 		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
@@ -45,7 +47,7 @@ func writeFSComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) e
 
 	rec := s.FSRecommendation
 	if rec == nil {
-		rec = &fsRecommendation{ReadOnly: true}
+		rec = &sidecar.FSRecommendation{ReadOnly: true}
 	}
 	if _, err := fmt.Fprintf(w, "%sread_only: %t\n", bodyIndent, rec.ReadOnly); err != nil {
 		return err
@@ -85,7 +87,7 @@ func writeFSComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) e
 // checkFSComposeLintContract returns the fs acceptance-contract violations in
 // a fixed order (the same deterministic-diagnostic requirement as the cap
 // contract). Empty slice means the sidecar clears the gate.
-func checkFSComposeLintContract(s *Sidecar) []string {
+func checkFSComposeLintContract(s *sidecar.Sidecar) []string {
 	var v []string
 	switch {
 	case s.SchemaVersion == "":
@@ -108,7 +110,7 @@ func checkFSComposeLintContract(s *Sidecar) []string {
 		v = append(v, fmt.Sprintf("duration_seconds %d < %d", s.DurationSeconds, ComposeLintMinDurationSeconds))
 	}
 	switch s.Confidence.Level {
-	case ConfidenceHigh, ConfidenceModerate:
+	case sidecar.ConfidenceHigh, sidecar.ConfidenceModerate:
 		// ok
 	case "":
 		v = append(v, "confidence.level not set")

@@ -12,6 +12,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // capaddPipelineOpts bundles every input the v0.5 dangerous-cap_add validator
@@ -21,7 +26,7 @@ import (
 // the dangerousCaps default); Granted records whether it came from --cap-add, the
 // switch that enables unused-cap detection and the recommended minimized cap_add.
 type capaddPipelineOpts struct {
-	AggregateOpts aggregateOpts
+	AggregateOpts attrib.Opts
 	ActiveSet     map[string]struct{}
 	Granted       bool
 	Fixture       string // trace_capabilities NDJSON; empty -> live ig
@@ -35,7 +40,7 @@ type capaddPipelineOpts struct {
 // block, trace_health, and capadd confidence already scored. It is the v0.5
 // analog of produceDeviceObservation: same fixture-vs-live branch shape and
 // typed-exit translation, reusing the trace_capabilities stream.
-func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*Sidecar, error) {
+func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
 		obs *capaddObservation
@@ -50,7 +55,7 @@ func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*Sidec
 		obs, err = aggregateCapadd(src, opts.AggregateOpts, opts.ActiveSet)
 	} else {
 		noteWSL2IfDetected(stderr)
-		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -60,9 +65,9 @@ func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*Sidec
 		obs, err = observeCapadd(ctx, opts.IGBin, opts.AggregateOpts, opts.ActiveSet, stderr)
 	}
 	if err != nil {
-		var amb *ambiguousSelectionError
+		var amb *exit.AmbiguousSelectionError
 		if errors.As(err, &amb) {
-			return nil, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
 	}
@@ -82,10 +87,10 @@ func produceCapaddObservation(opts capaddPipelineOpts, stderr io.Writer) (*Sidec
 // capadd_validation block carries the per-cap verdicts. ReplicaCapDisagreement is
 // populated with the dangerous caps observed on fewer than all replicas (the
 // capadd analog of the cap observer's same field), feeding the confidence rubric.
-func capaddToSidecar(obs *capaddObservation, opts capaddPipelineOpts) *Sidecar {
-	s := NewSidecar()
-	s.Target.Mode = opts.AggregateOpts.modeLabel()
-	s.Target.Selector = opts.AggregateOpts.selector()
+func capaddToSidecar(obs *capaddObservation, opts capaddPipelineOpts) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Target.Mode = opts.AggregateOpts.ModeLabel()
+	s.Target.Selector = opts.AggregateOpts.Selector()
 	s.Target.ReplicasObserved = len(obs.PerReplica)
 	for rid, c := range obs.PerReplicaCount {
 		s.Target.PerReplicaEventCounts[rid] = c
@@ -138,8 +143,8 @@ func capaddToSidecar(obs *capaddObservation, opts capaddPipelineOpts) *Sidecar {
 // aggregateCapadd swapped in for aggregate() — the same gadget and the same
 // stderr-drain + ringbuf-loss accounting; only the aggregation differs (keyed on
 // syscall-per-cap rather than deduped to a cap set).
-func observeCapadd(ctx context.Context, igBin string, opts aggregateOpts, activeSet map[string]struct{}, stderrSink io.Writer) (*capaddObservation, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", TraceCapabilitiesGadget, "--output", "json")
+func observeCapadd(ctx context.Context, igBin string, opts attrib.Opts, activeSet map[string]struct{}, stderrSink io.Writer) (*capaddObservation, error) {
+	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceCapabilitiesGadget, "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -149,8 +154,8 @@ func observeCapadd(ctx context.Context, igBin string, opts aggregateOpts, active
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		if isIGMissing(err) {
-			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		if exit.IsIGMissing(err) {
+			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
 		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
@@ -162,7 +167,7 @@ func observeCapadd(ctx context.Context, igBin string, opts aggregateOpts, active
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lost = parseIGStderr(stderrPipe, stderrSink)
+		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	obs, aggErr := aggregateCapadd(stdout, opts, activeSet)

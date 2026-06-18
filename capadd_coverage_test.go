@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // This file closes the v0.4 capadd test gaps the #120 deep review flagged
@@ -83,9 +87,9 @@ func TestRun_CapaddAllFormats(t *testing.T) {
 // TestComputeCapaddConfidence is TG2: the rubric's grade + factors across the
 // states that drive it, including the L9 substitution-pricing regression.
 func TestComputeCapaddConfidence(t *testing.T) {
-	mk := func(mut func(s *Sidecar)) *Sidecar {
-		s := NewSidecar()
-		s.CapaddValidation = &capaddValidation{GrantedSetProvided: true}
+	mk := func(mut func(s *sidecar.Sidecar)) *sidecar.Sidecar {
+		s := sidecar.NewSidecar()
+		s.CapaddValidation = &sidecar.CapaddValidation{GrantedSetProvided: true}
 		mut(s)
 		computeCapaddConfidence(s)
 		return s
@@ -93,37 +97,37 @@ func TestComputeCapaddConfidence(t *testing.T) {
 
 	// Clean: a used cap, workload provided, no drops/disagreement → moderate
 	// (the deferred factors cap the grade at moderate).
-	s := mk(func(s *Sidecar) {
-		s.CapaddValidation.Findings = []CapaddFinding{{Cap: "NET_RAW", Used: true}}
+	s := mk(func(s *sidecar.Sidecar) {
+		s.CapaddValidation.Findings = []sidecar.CapaddFinding{{Cap: "NET_RAW", Used: true}}
 		s.Workload = "/w.sh"
 	})
-	if s.Confidence.Level != ConfidenceModerate {
+	if s.Confidence.Level != sidecar.ConfidenceModerate {
 		t.Errorf("clean: level = %q, want moderate (%v)", s.Confidence.Level, s.Confidence.Factors)
 	}
 
 	// No workload + a small (<1%) drop rate = two moderate factors → low.
-	s = mk(func(s *Sidecar) {
-		s.CapaddValidation.Findings = []CapaddFinding{{Cap: "NET_RAW", Used: true}}
+	s = mk(func(s *sidecar.Sidecar) {
+		s.CapaddValidation.Findings = []sidecar.CapaddFinding{{Cap: "NET_RAW", Used: true}}
 		s.TraceHealth.DropRate = 0.005
 	})
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("no-workload+small-drop: level = %q, want low (%v)", s.Confidence.Level, s.Confidence.Factors)
 	}
 
 	// Drop rate >= 1% forces low on its own.
-	s = mk(func(s *Sidecar) {
+	s = mk(func(s *sidecar.Sidecar) {
 		s.Workload = "/w.sh"
 		s.TraceHealth.DropRate = 0.02
 	})
-	if s.Confidence.Level != ConfidenceLow {
+	if s.Confidence.Level != sidecar.ConfidenceLow {
 		t.Errorf("high-drop: level = %q, want low", s.Confidence.Level)
 	}
 
 	// L9 regression: a finer-cap substitution is priced — it appears as a
 	// workload-bounded factor (not silently ignored). With a workload present it
 	// stays moderate, but the substitution factor must be surfaced.
-	s = mk(func(s *Sidecar) {
-		s.CapaddValidation.Findings = []CapaddFinding{{Cap: "SYS_ADMIN", Used: true, FinerCaps: []string{"PERFMON"}}}
+	s = mk(func(s *sidecar.Sidecar) {
+		s.CapaddValidation.Findings = []sidecar.CapaddFinding{{Cap: "SYS_ADMIN", Used: true, FinerCaps: []string{"PERFMON"}}}
 		s.Workload = "/w.sh"
 	})
 	if !containsSubstr(s.Confidence.Factors, "substitution") {
@@ -132,8 +136,8 @@ func TestComputeCapaddConfidence(t *testing.T) {
 
 	// Substitution without a workload names the substitution caveat and is a
 	// moderate factor (one moderate alone stays moderate).
-	s = mk(func(s *Sidecar) {
-		s.CapaddValidation.Findings = []CapaddFinding{{Cap: "SYS_ADMIN", Used: true, FinerCaps: []string{"PERFMON"}}}
+	s = mk(func(s *sidecar.Sidecar) {
+		s.CapaddValidation.Findings = []sidecar.CapaddFinding{{Cap: "SYS_ADMIN", Used: true, FinerCaps: []string{"PERFMON"}}}
 	})
 	if !containsSubstr(s.Confidence.Factors, "substitution") {
 		t.Errorf("no-workload substitution caveat missing: %v", s.Confidence.Factors)
@@ -151,7 +155,7 @@ func TestObserveCapadd_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := fakeIGRun(t, nd, "level=info msg=starting\nlost 4 samples\n")
 
-	obs, err := observeCapadd(context.Background(), ig, aggregateOpts{}, dangerousCaps, io.Discard)
+	obs, err := observeCapadd(context.Background(), ig, attrib.Opts{}, dangerousCaps, io.Discard)
 	if err != nil {
 		t.Fatalf("observeCapadd: %v", err)
 	}
@@ -168,11 +172,11 @@ func TestObserveCapadd_FakeIG(t *testing.T) {
 	}
 }
 
-// TestObserveCapadd_IGMissing is TG3: a missing ig binary maps to ExitIGMissing.
+// TestObserveCapadd_IGMissing is TG3: a missing ig binary maps to exit.IGMissing.
 func TestObserveCapadd_IGMissing(t *testing.T) {
-	_, err := observeCapadd(context.Background(), "/nonexistent/csd-ig-capadd-test", aggregateOpts{}, dangerousCaps, io.Discard)
-	if exitCodeFor(err) != ExitIGMissing {
-		t.Errorf("exit = %d, want ExitIGMissing (%d); err=%v", exitCodeFor(err), ExitIGMissing, err)
+	_, err := observeCapadd(context.Background(), "/nonexistent/csd-ig-capadd-test", attrib.Opts{}, dangerousCaps, io.Discard)
+	if exit.CodeFor(err) != exit.IGMissing {
+		t.Errorf("exit = %d, want exit.IGMissing (%d); err=%v", exit.CodeFor(err), exit.IGMissing, err)
 	}
 }
 
@@ -185,7 +189,7 @@ func TestObserveDevices_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := fakeIGRun(t, nd, "lost 2 samples\n")
 
-	obs, err := observeDevices(context.Background(), ig, aggregateOpts{}, io.Discard)
+	obs, err := observeDevices(context.Background(), ig, attrib.Opts{}, io.Discard)
 	if err != nil {
 		t.Fatalf("observeDevices: %v", err)
 	}
@@ -210,7 +214,7 @@ func TestCapaddMultiReplica(t *testing.T) {
 	}, "\n")
 
 	// --all-matching aggregates and records the disagreement.
-	opts := aggregateOpts{Image: "img:1", AllMatching: true}
+	opts := attrib.Opts{Image: "img:1", AllMatching: true}
 	obs, err := aggregateCapadd(strings.NewReader(nd), opts, dangerousCaps)
 	if err != nil {
 		t.Fatalf("aggregateCapadd: %v", err)
@@ -221,10 +225,10 @@ func TestCapaddMultiReplica(t *testing.T) {
 	}
 
 	// --image matching >1 replica without --all-matching is ambiguous.
-	_, err = aggregateCapadd(strings.NewReader(nd), aggregateOpts{Image: "img:1"}, dangerousCaps)
-	var amb *ambiguousSelectionError
+	_, err = aggregateCapadd(strings.NewReader(nd), attrib.Opts{Image: "img:1"}, dangerousCaps)
+	var amb *exit.AmbiguousSelectionError
 	if err == nil || !errors.As(err, &amb) {
-		t.Fatalf("err = %v, want *ambiguousSelectionError", err)
+		t.Fatalf("err = %v, want *exit.AmbiguousSelectionError", err)
 	}
 }
 
@@ -246,8 +250,8 @@ func TestRun_CapaddNegativePaths(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errBuf bytes.Buffer
 			err := run(tc.args, &out, &errBuf)
-			if exitCodeFor(err) != ExitUsage {
-				t.Errorf("exit = %d, want ExitUsage (%d); err=%v", exitCodeFor(err), ExitUsage, err)
+			if exit.CodeFor(err) != exit.Usage {
+				t.Errorf("exit = %d, want exit.Usage (%d); err=%v", exit.CodeFor(err), exit.Usage, err)
 			}
 		})
 	}
@@ -262,13 +266,13 @@ func TestCheckCapaddComposeLintContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	clean := func() *Sidecar {
-		s := NewSidecar()
+	clean := func() *sidecar.Sidecar {
+		s := sidecar.NewSidecar()
 		s.ImageDigest = "img@sha256:" + strings.Repeat("a", 64)
 		s.Workload = workload
 		s.DurationSeconds = ComposeLintMinDurationSeconds
-		s.Confidence.Level = ConfidenceModerate
-		s.CapaddValidation = &capaddValidation{GrantedSetProvided: true}
+		s.Confidence.Level = sidecar.ConfidenceModerate
+		s.CapaddValidation = &sidecar.CapaddValidation{GrantedSetProvided: true}
 		return s
 	}
 
@@ -285,7 +289,7 @@ func TestCheckCapaddComposeLintContract(t *testing.T) {
 
 	// Below-moderate confidence is a violation.
 	s = clean()
-	s.Confidence.Level = ConfidenceLow
+	s.Confidence.Level = sidecar.ConfidenceLow
 	if v := checkCapaddComposeLintContract(s); !containsSubstr(v, "below moderate") {
 		t.Errorf("missing confidence violation: %v", v)
 	}

@@ -1,4 +1,4 @@
-package main
+package ig
 
 import (
 	"bytes"
@@ -13,8 +13,8 @@ func TestParseIGStderr_LossLines(t *testing.T) {
 		"lost 4 samples\n" +
 		"some other diagnostic\n" +
 		"lost 6 samples\n"
-	if got := parseIGStderr(strings.NewReader(in), nil); got != 10 {
-		t.Errorf("parseIGStderr = %d, want 10", got)
+	if got := ParseIGStderr(strings.NewReader(in), nil); got != 10 {
+		t.Errorf("ParseIGStderr = %d, want 10", got)
 	}
 }
 
@@ -30,15 +30,15 @@ func TestParseIGStderr_OversizedLineDoesNotDropSubsequentCounts(t *testing.T) {
 	buf.WriteString("lost 7 samples\n")
 	buf.WriteString("lost 3 samples\n")
 
-	if got := parseIGStderr(&buf, nil); got != 10 {
-		t.Errorf("parseIGStderr = %d, want 10 — loss lines after an oversized line must survive (M1)", got)
+	if got := ParseIGStderr(&buf, nil); got != 10 {
+		t.Errorf("ParseIGStderr = %d, want 10 — loss lines after an oversized line must survive (M1)", got)
 	}
 }
 
 // TestParseIGStderr_NoTrailingNewline ensures a final line without a trailing
 // newline (the EOF case) is still parsed.
 func TestParseIGStderr_NoTrailingNewline(t *testing.T) {
-	if got := parseIGStderr(strings.NewReader("lost 5 samples"), nil); got != 5 {
-		t.Errorf("parseIGStderr = %d, want 5 (final line without newline)", got)
+	if got := ParseIGStderr(strings.NewReader("lost 5 samples"), nil); got != 5 {
+		t.Errorf("ParseIGStderr = %d, want 5 (final line without newline)", got)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeDeviceComposePatch emits a unified diff that sets services.<service>'s
@@ -21,7 +23,7 @@ import (
 // exactly what csd must not do. Dropping `privileged: true` itself is the
 // composition path's job (the device observer alone does not observe caps), so
 // this patch only manages the `devices:` block.
-func writeDeviceComposePatch(w io.Writer, rec deviceRecommendation, original []byte, inPath, service string) error {
+func writeDeviceComposePatch(w io.Writer, rec sidecar.DeviceRecommendation, original []byte, inPath, service string) error {
 	if service == "" {
 		return fmt.Errorf("--service is required")
 	}

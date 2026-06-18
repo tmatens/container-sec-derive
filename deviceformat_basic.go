@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // The v0.3 device formatters below mirror the cap formatters (docker_run.go /
@@ -20,7 +22,7 @@ import (
 // recommendation: one `--device <node>:<node>` per observed node, space-
 // separated for pasting into an existing `docker run`. Derived-cap hints follow
 // as `#`-comment lines (shell-safe), pointing at the cap-observing modes.
-func writeDeviceDockerRun(w io.Writer, rec deviceRecommendation) error {
+func writeDeviceDockerRun(w io.Writer, rec sidecar.DeviceRecommendation) error {
 	if len(rec.Devices) == 0 {
 		_, err := fmt.Fprintln(w, "# no non-default device opens observed; no --device flags required")
 		return err
@@ -48,7 +50,7 @@ func writeDeviceDockerRun(w io.Writer, rec deviceRecommendation) error {
 // conclusion (`securityContext.privileged: false`) plus a `#`-commented list of
 // the observed nodes and a pointer to device plugins. This is the design call
 // recorded in issue #92 (open question 2).
-func writeDeviceK8s(w io.Writer, rec deviceRecommendation) error {
+func writeDeviceK8s(w io.Writer, rec sidecar.DeviceRecommendation) error {
 	if len(rec.Devices) == 0 {
 		if _, err := fmt.Fprintln(w, "# no non-default device opens observed; no device-plugin grant required"); err != nil {
 			return err
@@ -85,7 +87,7 @@ func writeDeviceK8s(w io.Writer, rec deviceRecommendation) error {
 // how to resolve the numbers on the host. Users merge this against an existing
 // config.json; the annotations are inert to runtimes that don't read them and
 // informative to those (and humans) that do.
-func writeDeviceOCI(w io.Writer, rec deviceRecommendation) error {
+func writeDeviceOCI(w io.Writer, rec sidecar.DeviceRecommendation) error {
 	annotations := map[string]string{}
 	if len(rec.Devices) == 0 {
 		annotations["org.containersecderive.observed-devices"] = ""

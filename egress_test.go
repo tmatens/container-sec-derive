@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
 
 func TestAggregateEgress(t *testing.T) {
@@ -20,7 +22,7 @@ func TestAggregateEgress(t *testing.T) {
 {"type":"connect","dst":{"addr":"203.0.113.7","port":443,"version":4},"proc":{"comm":"x"},"runtime":{"containerId":"bbb","containerName":"other-1","containerImageName":"other:1"}}
 `
 	// No selector: unions everything (no ambiguity guard without --image/--container).
-	all, err := aggregateEgress(strings.NewReader(nd), aggregateOpts{})
+	all, err := aggregateEgress(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +42,7 @@ func TestAggregateEgress(t *testing.T) {
 
 	// Target selection: only web-1's destinations; the duplicate 1.1.1.1:443
 	// collapses to one dest but counts twice.
-	sel, err := aggregateEgress(strings.NewReader(nd), aggregateOpts{Container: "web-1"})
+	sel, err := aggregateEgress(strings.NewReader(nd), attrib.Opts{Container: "web-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,10 +64,10 @@ func TestAggregateEgressImageAmbiguity(t *testing.T) {
 {"type":"connect","dst":{"addr":"1.1.1.1","port":443,"version":4},"proc":{"comm":"a"},"runtime":{"containerId":"aaa","containerName":"web-1","containerImageName":"web:1"}}
 {"type":"connect","dst":{"addr":"2.2.2.2","port":443,"version":4},"proc":{"comm":"a"},"runtime":{"containerId":"bbb","containerName":"web-2","containerImageName":"web:1"}}
 `
-	if _, err := aggregateEgress(strings.NewReader(nd), aggregateOpts{Image: "web:1"}); err == nil {
+	if _, err := aggregateEgress(strings.NewReader(nd), attrib.Opts{Image: "web:1"}); err == nil {
 		t.Fatal("expected ambiguous-selection error for >1 replica under --image")
 	}
-	obs, err := aggregateEgress(strings.NewReader(nd), aggregateOpts{Image: "web:1", AllMatching: true})
+	obs, err := aggregateEgress(strings.NewReader(nd), attrib.Opts{Image: "web:1", AllMatching: true})
 	if err != nil {
 		t.Fatalf("--all-matching should union, got %v", err)
 	}
@@ -81,7 +83,7 @@ func TestAggregateEgressMalformedHardFails(t *testing.T) {
 {"type":"connect","dst":{"addr":"1.1.1.1","port":443,"version":4},"runtime":{"containerName":"web-1"}}
 
 {bogus`
-	if _, err := aggregateEgress(strings.NewReader(nd), aggregateOpts{}); err == nil {
+	if _, err := aggregateEgress(strings.NewReader(nd), attrib.Opts{}); err == nil {
 		t.Fatal("expected hard error on malformed NDJSON line")
 	}
 }
@@ -92,7 +94,7 @@ func TestAggregateEgressFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	obs, err := aggregateEgress(f, aggregateOpts{Container: "egress-target"})
+	obs, err := aggregateEgress(f, attrib.Opts{Container: "egress-target"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +116,6 @@ func FuzzAggregateEgress(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Arbitrary NDJSON must never panic; a parse error is an acceptable
 		// outcome (the hard-fail contract), a clean observation is the other.
-		_, _ = aggregateEgress(bytes.NewReader(data), aggregateOpts{})
+		_, _ = aggregateEgress(bytes.NewReader(data), attrib.Opts{})
 	})
 }

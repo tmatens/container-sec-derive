@@ -1,24 +1,6 @@
 package main
 
-// deviceRecommendation is the v0.3 device-decomposition decision derived from
-// the observed non-default device nodes:
-//   - Devices is the minimum explicit device-grant list (compose `devices:`,
-//     `--device` for docker run). Unlike the fs tmpfs recommendation, device
-//     nodes are NOT collapsed to ancestors: a grant is per-node, so
-//     /dev/dri/card0 and /dev/dri/renderD128 are listed separately.
-//   - DerivedCaps are capabilities a granted device is known to imply, surfaced
-//     as hints. They are deliberately conservative (see deviceCapHints); the
-//     privileged-composition path (issue #92, capstone PR) prefers the cap set
-//     actually observed by trace_capabilities over this static table.
-//
-// Foot-gun (issue #92): csd reports the devices the workload *opened*. A device
-// the workload never touched during the window is not surfaced — the standing
-// Caveat (workload-bounded, not a correctness proof) applies to devices exactly
-// as it does to caps and writable paths.
-type deviceRecommendation struct {
-	Devices     []string `json:"devices"`
-	DerivedCaps []string `json:"derived_caps,omitempty"`
-}
+import "github.com/tmatens/container-sec-derive/internal/sidecar"
 
 // deviceCapHints maps a device node to a capability that opening/using it is
 // well-established to require. Kept intentionally minimal and evidence-backed —
@@ -35,8 +17,13 @@ var deviceCapHints = map[string]string{
 // derived-capability hints from the observed (sorted, deduplicated) device
 // nodes. devices is expected sorted, as aggregateDevices returns it; the output
 // Devices slice preserves that order and DerivedCaps is sorted+deduplicated.
-func deviceToRecommendation(devices []string) deviceRecommendation {
-	rec := deviceRecommendation{Devices: append([]string(nil), devices...)}
+//
+// Foot-gun (issue #92): csd reports the devices the workload *opened*. A device
+// the workload never touched during the window is not surfaced — the standing
+// Caveat (workload-bounded, not a correctness proof) applies to devices exactly
+// as it does to caps and writable paths.
+func deviceToRecommendation(devices []string) sidecar.DeviceRecommendation {
+	rec := sidecar.DeviceRecommendation{Devices: append([]string(nil), devices...)}
 	caps := map[string]struct{}{}
 	for _, d := range devices {
 		if c, ok := deviceCapHints[d]; ok {

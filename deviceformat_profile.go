@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeDeviceComposeLintProfile emits a YAML entry for contributing a v0.3
@@ -21,7 +23,7 @@ import (
 // replica_device_disagreement empty (the device analog of the cap/fs
 // disagreement gate). coverage_warnings is not checked — it is the cap
 // entrypoint-cross-check signal and is always empty on a device run.
-func writeDeviceComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory bool) error {
+func writeDeviceComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := checkDeviceComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
 		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
@@ -46,7 +48,7 @@ func writeDeviceComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory boo
 
 	rec := s.DeviceRecommendation
 	if rec == nil {
-		rec = &deviceRecommendation{}
+		rec = &sidecar.DeviceRecommendation{}
 	}
 	// devices + derived_caps as flow-style sequences to match the caps/fs
 	// entries' compact shape; both are already sorted by the decision layer.
@@ -86,7 +88,7 @@ func writeDeviceComposeLintProfile(w io.Writer, s *Sidecar, allowExploratory boo
 // checkDeviceComposeLintContract returns the device acceptance-contract
 // violations in a fixed order (the same deterministic-diagnostic requirement as
 // the cap/fs contracts). Empty slice means the sidecar clears the gate.
-func checkDeviceComposeLintContract(s *Sidecar) []string {
+func checkDeviceComposeLintContract(s *sidecar.Sidecar) []string {
 	var v []string
 	switch {
 	case s.SchemaVersion == "":
@@ -109,7 +111,7 @@ func checkDeviceComposeLintContract(s *Sidecar) []string {
 		v = append(v, fmt.Sprintf("duration_seconds %d < %d", s.DurationSeconds, ComposeLintMinDurationSeconds))
 	}
 	switch s.Confidence.Level {
-	case ConfidenceHigh, ConfidenceModerate:
+	case sidecar.ConfidenceHigh, sidecar.ConfidenceModerate:
 		// ok
 	case "":
 		v = append(v, "confidence.level not set")

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // writeK8s emits a Kubernetes `securityContext.capabilities` YAML block
@@ -16,7 +18,7 @@ import (
 // drop: [ALL] is always emitted. add is omitted entirely when the
 // observed set is empty -- the "drop everything, add nothing" shape
 // mirrors writeCompose and writeDockerRun.
-func writeK8s(w io.Writer, s *Sidecar) error {
+func writeK8s(w io.Writer, s *sidecar.Sidecar) error {
 	if _, err := fmt.Fprintln(w, "securityContext:"); err != nil {
 		return err
 	}

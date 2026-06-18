@@ -12,6 +12,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/exit"
+	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // devicePipelineOpts bundles every input the v0.3 device-decomposition observe
@@ -20,7 +25,7 @@ import (
 // observer it needs no mount config — a device grant is not volume-correlated —
 // so there is no MountsFixture analog.
 type devicePipelineOpts struct {
-	AggregateOpts aggregateOpts
+	AggregateOpts attrib.Opts
 	Fixture       string // trace_open NDJSON; empty → live ig
 	IGBin         string
 	Duration      time.Duration
@@ -33,7 +38,7 @@ type devicePipelineOpts struct {
 // already scored. It is the device-observer analog of produceFSObservation:
 // same fixture-vs-live branch shape and typed-exit translation. The device
 // nodes come from trace_open; deviceToSidecar assembles the artifact.
-func produceDeviceObservation(opts devicePipelineOpts, stderr io.Writer) (*Sidecar, error) {
+func produceDeviceObservation(opts devicePipelineOpts, stderr io.Writer) (*sidecar.Sidecar, error) {
 	observedAt := time.Now().UTC()
 	var (
 		dev *deviceObservation
@@ -48,7 +53,7 @@ func produceDeviceObservation(opts devicePipelineOpts, stderr io.Writer) (*Sidec
 		dev, err = aggregateDevices(src, opts.AggregateOpts)
 	} else {
 		noteWSL2IfDetected(stderr)
-		if verr := checkIGVersion(opts.IGBin, stderr); verr != nil {
+		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -58,9 +63,9 @@ func produceDeviceObservation(opts devicePipelineOpts, stderr io.Writer) (*Sidec
 		dev, err = observeDevices(ctx, opts.IGBin, opts.AggregateOpts, stderr)
 	}
 	if err != nil {
-		var amb *ambiguousSelectionError
+		var amb *exit.AmbiguousSelectionError
 		if errors.As(err, &amb) {
-			return nil, wrapCoded(ExitTargetAmbiguous, err)
+			return nil, exit.WrapCoded(exit.TargetAmbiguous, err)
 		}
 		return nil, err
 	}
@@ -80,10 +85,10 @@ func produceDeviceObservation(opts devicePipelineOpts, stderr io.Writer) (*Sidec
 // device section (device_paths + device_recommendation) carries the
 // observation. PLAN.md §Output schema: one observer per run populates its own
 // block.
-func deviceToSidecar(dev *deviceObservation, opts aggregateOpts) *Sidecar {
-	s := NewSidecar()
-	s.Target.Mode = opts.modeLabel()
-	s.Target.Selector = opts.selector()
+func deviceToSidecar(dev *deviceObservation, opts attrib.Opts) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Target.Mode = opts.ModeLabel()
+	s.Target.Selector = opts.Selector()
 	s.Target.ReplicasObserved = len(dev.PerReplica)
 	for rid, c := range dev.PerReplicaCount {
 		s.Target.PerReplicaEventCounts[rid] = c
@@ -110,13 +115,13 @@ func deviceToSidecar(dev *deviceObservation, opts aggregateOpts) *Sidecar {
 // the device-specific fields — not Target.Mode/Selector/Image or trace_health,
 // which the two callers own differently — so the merge can add devices to a cap
 // sidecar without clobbering the cap Target.
-func applyDeviceFields(s *Sidecar, dev *deviceObservation) {
+func applyDeviceFields(s *sidecar.Sidecar, dev *deviceObservation) {
 	rec := deviceToRecommendation(dev.Devices)
 	s.DeviceRecommendation = &rec
 
-	dp := make([]DevicePath, 0, len(dev.Devices))
+	dp := make([]sidecar.DevicePath, 0, len(dev.Devices))
 	for _, p := range dev.Devices {
-		entry := DevicePath{Path: p}
+		entry := sidecar.DevicePath{Path: p}
 		if st := dev.Stats[p]; st != nil {
 			entry.EventCount = st.eventCount
 			entry.CommSamples = sortedKeys(st.commSamples)
@@ -159,8 +164,8 @@ func applyDeviceFields(s *Sidecar, dev *deviceObservation) {
 // aggregateDevices swapped in for aggregateWrites — the same gadget (trace_open,
 // --paths for the symlink-resolved fpath), the same stderr-drain + ringbuf-loss
 // accounting; only the classifier differs (isDeviceOpen vs IsWrite/isRootfsWrite).
-func observeDevices(ctx context.Context, igBin string, opts aggregateOpts, stderrSink io.Writer) (*deviceObservation, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", TraceOpenGadget, "--paths", "--output", "json")
+func observeDevices(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*deviceObservation, error) {
+	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceOpenGadget, "--paths", "--output", "json")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
@@ -170,8 +175,8 @@ func observeDevices(ctx context.Context, igBin string, opts aggregateOpts, stder
 		return nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		if isIGMissing(err) {
-			return nil, wrapCoded(ExitIGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
+		if exit.IsIGMissing(err) {
+			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
 		}
 		return nil, fmt.Errorf("start %s: %w", igBin, err)
 	}
@@ -183,7 +188,7 @@ func observeDevices(ctx context.Context, igBin string, opts aggregateOpts, stder
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		lost = parseIGStderr(stderrPipe, stderrSink)
+		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
 	}()
 
 	obs, aggErr := aggregateDevices(stdout, opts)

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // deriveExpectedCaps is pure over entrypointInspection; table tests cover
@@ -251,14 +253,14 @@ func TestApplyEntrypointCrossCheck_FixtureWins(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "ignored-because-fixture-wins"
-	s.Capabilities = []Capability{{Name: "CHOWN"}}
+	s.Capabilities = []sidecar.Capability{{Name: "CHOWN"}}
 	var stderrBuf bytes.Buffer
 	applyEntrypointCrossCheck(s, path, false, &stderrBuf)
 
-	if s.crossCheckStatus != crossCheckStatusOK {
-		t.Errorf("status = %q, want %q", s.crossCheckStatus, crossCheckStatusOK)
+	if s.CrossCheckStatus != sidecar.CrossCheckStatusOK {
+		t.Errorf("status = %q, want %q", s.CrossCheckStatus, sidecar.CrossCheckStatusOK)
 	}
 	if !equalSlice(s.ExpectedCapsFromEntrypoint, []string{"CHOWN", "DAC_OVERRIDE", "FOWNER"}) {
 		t.Errorf("expected caps = %v", s.ExpectedCapsFromEntrypoint)
@@ -274,13 +276,13 @@ func TestApplyEntrypointCrossCheck_FixtureWins(t *testing.T) {
 }
 
 func TestApplyEntrypointCrossCheck_FixtureModeSkipsSilently(t *testing.T) {
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16" // ignored in fixture mode without --inspect-fixture
 	var stderrBuf bytes.Buffer
 	applyEntrypointCrossCheck(s, "", true, &stderrBuf)
 
-	if s.crossCheckStatus != "" {
-		t.Errorf("fixture-mode skip should leave status empty, got %q", s.crossCheckStatus)
+	if s.CrossCheckStatus != "" {
+		t.Errorf("fixture-mode skip should leave status empty, got %q", s.CrossCheckStatus)
 	}
 	if len(s.ExpectedCapsFromEntrypoint) != 0 {
 		t.Errorf("expected caps should be empty on skip, got %v", s.ExpectedCapsFromEntrypoint)
@@ -294,23 +296,23 @@ func TestApplyEntrypointCrossCheck_FixtureModeSkipsSilently(t *testing.T) {
 }
 
 func TestApplyEntrypointCrossCheck_NoImageInLiveModeRecordsReason(t *testing.T) {
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	// No Image, not fixture mode, no inspect-fixture.
 	applyEntrypointCrossCheck(s, "", false, nil)
-	if s.crossCheckStatus == "" || s.crossCheckStatus == crossCheckStatusOK {
-		t.Errorf("expected non-ok reason for live mode without image, got %q", s.crossCheckStatus)
+	if s.CrossCheckStatus == "" || s.CrossCheckStatus == sidecar.CrossCheckStatusOK {
+		t.Errorf("expected non-ok reason for live mode without image, got %q", s.CrossCheckStatus)
 	}
 }
 
 func TestApplyEntrypointCrossCheck_InspectFixtureUnreadable(t *testing.T) {
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
 	applyEntrypointCrossCheck(s, "/nonexistent/inspect.json", false, nil)
-	if s.crossCheckStatus == crossCheckStatusOK || s.crossCheckStatus == "" {
-		t.Errorf("missing fixture should yield unavailable reason; got %q", s.crossCheckStatus)
+	if s.CrossCheckStatus == sidecar.CrossCheckStatusOK || s.CrossCheckStatus == "" {
+		t.Errorf("missing fixture should yield unavailable reason; got %q", s.CrossCheckStatus)
 	}
-	if !strings.Contains(s.crossCheckStatus, "fixture") {
-		t.Errorf("reason should mention fixture; got %q", s.crossCheckStatus)
+	if !strings.Contains(s.CrossCheckStatus, "fixture") {
+		t.Errorf("reason should mention fixture; got %q", s.CrossCheckStatus)
 	}
 }
 
@@ -358,10 +360,10 @@ func TestRun_CleanCrossCheckSerializesEmptySlice(t *testing.T) {
 
 func TestPickRepoDigest_MatchesByRepo(t *testing.T) {
 	cases := []struct {
-		name      string
-		imageRef  string
-		digests   []string
-		want      string
+		name     string
+		imageRef string
+		digests  []string
+		want     string
 	}{
 		{
 			name:     "tagged ref matches by repo prefix",
@@ -424,11 +426,11 @@ func TestApplyEntrypointCrossCheck_PromotesRepoDigest(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
 	applyEntrypointCrossCheck(s, path, false, nil)
-	if s.crossCheckStatus != crossCheckStatusOK {
-		t.Fatalf("status = %q, want %q", s.crossCheckStatus, crossCheckStatusOK)
+	if s.CrossCheckStatus != sidecar.CrossCheckStatusOK {
+		t.Fatalf("status = %q, want %q", s.CrossCheckStatus, sidecar.CrossCheckStatusOK)
 	}
 	want := "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	if s.ImageDigest != want {
@@ -449,7 +451,7 @@ func TestApplyEntrypointCrossCheck_PreservesExistingDigest(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	s := NewSidecar()
+	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
 	s.ImageDigest = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
 	applyEntrypointCrossCheck(s, path, false, nil)
@@ -460,10 +462,10 @@ func TestApplyEntrypointCrossCheck_PreservesExistingDigest(t *testing.T) {
 
 func TestSetcapCapsFromHistory_IgnoresNonSetcapMentions(t *testing.T) {
 	lines := []string{
-		"/bin/sh -c apt-get install libcap2-bin",                 // no setcap
-		"/bin/sh -c getcap cap_net_raw /usr/bin/ping",            // getcap, not setcap
-		"/bin/sh -c setcap cap_net_admin=+ep /usr/sbin/adm-bin",  // match
-		"/bin/sh -c SETCAP CAP_SYS_TIME=+ep /usr/bin/time-bin",   // case-insensitive
+		"/bin/sh -c apt-get install libcap2-bin",                // no setcap
+		"/bin/sh -c getcap cap_net_raw /usr/bin/ping",           // getcap, not setcap
+		"/bin/sh -c setcap cap_net_admin=+ep /usr/sbin/adm-bin", // match
+		"/bin/sh -c SETCAP CAP_SYS_TIME=+ep /usr/bin/time-bin",  // case-insensitive
 	}
 	got := setcapCapsFromHistory(lines)
 	want := []string{"NET_ADMIN", "SYS_TIME"}

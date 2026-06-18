@@ -11,19 +11,32 @@
      package pulls) would render broken or leak existence. Swap to dynamic
      badges when the project goes public. -->
 
-Runtime observation tool that derives the minimum container security configuration an image actually needs by watching it run.
+**Derive the minimum security config a container actually needs — by watching it run, not by guessing.**
 
-> **Status: v0.5.0 released.** v0.1 delivered capability observation, the evidence sidecar, seven output formatters, `csd verify`, reference-image bisections, the IG version-pin CI gate, the WSL2 smoke matrix, and the cosign release pipeline (SPDX + CycloneDX SBOMs + OpenVEX) on signed static binaries plus a cosign-signed multi-arch GHCR image. **v0.2 added the read-only-filesystem + tmpfs observer** (`--observe fs`). **v0.3 adds privileged-mode decomposition**: a device observer (`--observe devices`) that derives the minimum `devices:` grant from observed opens of non-default `/dev` nodes, and the `--observe privileged` composition that runs the capability and device observers together to replace `privileged: true` with the minimum `cap_add` + `devices` — emitted in all seven formats, with a `privileged_decomposition` evidence block, a combined confidence rubric, and a hardware-free live integration-CI smoke. **v0.3.1** flags that decomposition as **partial** — the AppArmor/seccomp (`security_opt`) dimension of `privileged: true` is not observed (no denial gadget at the pinned IG), surfaced via a `# WARNING (partial decomposition)` header, `partial`/`security_opt` sidecar fields, and a stderr advisory. **v0.4.0 adds the dangerous-`cap_add` validator** (`--observe capadd`): the inverse of v0.1, it validates an already-granted dangerous capability against observed syscalls — reporting which syscalls invoked it, any finer-grained substitute (e.g. `SYS_ADMIN` used only via `perf_event_open` → `CAP_PERFMON`), and, with the granted set supplied via `--cap-add`, caps granted but never exercised plus a recommended minimized `cap_add`. (This is the ROADMAP §v0.5 observer, pulled ahead of the §v0.4 Docker-socket observer, which is deferred/signal-blocked.) **v0.4.1** is a maintenance release hardening the deep-review findings (#120): a `0600` evidence sidecar, stricter `cap_add` validation (denied attempts no longer weaken a recommendation), faithful `compose-patch` line I/O (CRLF / large lines / anchored-block refusal), and tighter drop-rate + target-selection accounting — all strictly more conservative, no schema change. **v0.5.0 adds the v0.8 network-egress observer** (`--observe egress`): it runs `trace_tcp` and derives the minimum outbound allowlist from the destinations the container actually contacted, emitting it as ready-to-enforce **`--format nftables`** or **`--format k8s-networkpolicy`** (plus `json`). It carries the egress *inverted-risk* caveat front and center — unlike caps/devices, a too-tight allowlist blocks the app, so an incomplete allowlist is a hard failure. See [PLAN.md](PLAN.md), [ROADMAP.md](ROADMAP.md) §v0.8, and [the latest release](https://github.com/tmatens/container-sec-derive/releases).
+Container hardening (capabilities, read-only rootfs, devices, `privileged`, egress) is hard to get right statically, so the usual workflow is trial-and-error: drop a setting, run it, see what breaks, add it back, repeat. `csd` replaces that loop with eBPF observation: point it at a running container, exercise it, and it emits the **minimum config that would have satisfied the observed behavior** — with a signed evidence sidecar so the recommendation is auditable, not a guess.
 
-## What it does
+The headline case: turn a hand-waved **`privileged: true`** into the evidence-backed **`--device /dev/dri` + `cap_add: [SYS_NICE]`** it actually used.
 
-Container hardening config (capabilities, read-only filesystem + tmpfs paths, devices, etc.) is hard to derive statically. The conventional answer is trial-and-error: drop a setting, run the container, watch what breaks, add the setting back, repeat. This tool replaces that loop with eBPF observation.
+## What it derives today
 
-You point it at a running container; it traces the kernel calls relevant to a given security setting; after a recording window, it emits the minimum config that would have satisfied the observed behavior — in your choice of output format (Compose stanza, `docker run` flags, OCI spec, Kubernetes SecurityContext, JSON).
+Point `csd` at a running container, pick an observer, and after a recording window it emits the minimum config for that dimension:
+
+| `--observe` | Derives | Output |
+|---|---|---|
+| `caps` *(default)* | the minimum capability set | `cap_drop` / `cap_add` |
+| `fs` | a read-only rootfs + the `tmpfs:` paths it actually writes | `read_only: true` + `tmpfs:` |
+| `devices` | the non-default `/dev` nodes it opens | `devices:` |
+| `privileged` | the minimal **`cap_add` + `devices`** equivalent of `privileged: true` (partial — see below) | decomposed grant |
+| `capadd` | validates an already-granted **dangerous** cap against the syscalls that used it (finer substitute, or "never exercised") | minimized `cap_add` |
+| `egress` | the minimum outbound allowlist from the destinations it contacted | `nftables` or k8s `NetworkPolicy` |
+
+Every observer emits to your choice of format (Compose, `docker run`, Kubernetes, OCI, JSON, …) and writes the same canonical JSON evidence sidecar.
+
+> **Status: v0.5.0 released**, actively developed. The current observer is `caps`/`fs`/`devices`/`privileged`/`capadd`/`egress`; the Docker-socket and host-network observers are still ahead (see [ROADMAP.md](ROADMAP.md)). Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Audience
 
-Anyone hardening container security on Docker / Podman / OCI-compatible runtimes. Not orchestrator-specific — the engine observes containers, not Compose files. Compose-shaped output is one of several output formatters.
+Anyone hardening container security on Docker / Podman / OCI-compatible runtimes. Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed.
 
 ## Relationship to compose-lint
 
@@ -37,6 +50,15 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
        ↓                                                      |
   user runs `compose-lint`  → "no profile for image X" → user runs `container-sec-derive` against image X
 ```
+
+## Requirements
+
+- **Host:** Linux kernel ≥ 5.8, cgroup v2, a container runtime (Docker / Podman / containerd).
+- **Privilege:** live observation runs root-equivalent — `CAP_BPF` + `CAP_PERFMON` + `--pid=host` + a runtime-socket mount (see [the tool's own security posture](#a-note-on-the-tools-own-security-posture)).
+- **`ig`:** [Inspektor Gadget](https://www.inspektor-gadget.io/) at the pinned release for live mode. The `--fixture` path (replaying captured NDJSON) needs none of the above — most development works without a kernel.
+- **Build:** Go 1.26+.
+
+Not supported: kernels < 5.8, cgroup v1-only hosts, rootless Podman. See PLAN.md "Runtime requirements".
 
 ## Container image
 
@@ -52,13 +74,11 @@ echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password
 docker pull ghcr.io/tmatens/container-sec-derive:0.5.0
 ```
 
-The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts). Running `csd` needs the privileges described under [the tool's own security posture](#a-note-on-the-tools-own-security-posture).
+The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts).
 
 > **Private while unpublished (COI).** The image is pushed **private** (collaborator-only) and signed with no public Rekor entry. The only public/COI-gated step is flipping the GHCR package to public, done after the COI decision — so the package link above resolves for authenticated collaborators, not anonymously.
 
 ## Building from source
-
-Build the binary from source:
 
 ```sh
 git clone https://github.com/tmatens/container-sec-derive
@@ -70,13 +90,13 @@ Requires Go 1.26+. Live observation needs Inspektor Gadget (`ig`) at the pinned 
 
 ## Quickstart
 
-Replay a pre-captured fixture (no `ig` needed) to see the default Compose output:
+**No kernel needed** — replay a pre-captured fixture to see the default Compose output:
 
 ```sh
 ./csd observe --fixture testdata/ig-versions/v0.51.0/sample.ndjson --container postgres-1
 ```
 
-Or observe a real running container for 30 seconds and emit a Compose stanza plus a JSON evidence sidecar:
+**Live** — observe a real container for 30s and emit a Compose stanza plus a JSON evidence sidecar:
 
 ```sh
 sudo ./csd observe \
@@ -86,7 +106,15 @@ sudo ./csd observe \
   --out sidecar.json
 ```
 
-`--workload` records the script that exercised the container; the sidecar's confidence rubric and the `compose-lint-profile` contribution gate both look for it.
+**Egress allowlist** — derive a ready-to-enforce nftables ruleset from what the container actually dials out to:
+
+```sh
+sudo ./csd observe --observe egress \
+  --container my-app --duration 30s --workload ./exercise.sh \
+  --format nftables
+```
+
+`--workload` records the script that exercised the container; the sidecar's confidence rubric and the `compose-lint-profile` contribution gate both look for it. (Egress especially: an allowlist is only as complete as the traffic you generated — see the inverted-risk note under [Output formats](#output-formats).)
 
 ## Usage
 
@@ -101,7 +129,7 @@ Choosing an observer:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--observe caps\|fs\|devices\|privileged\|capadd` | `caps` | `caps` derives the minimum capability set (v0.1). `fs` derives a read-only-filesystem + `tmpfs:` recommendation from write-intent opens (v0.2). `devices` derives the minimum `devices:` grant from opens of non-default `/dev` nodes, and `privileged` composes caps + devices to replace `privileged: true` with the minimum equivalent (v0.3). `capadd` validates already-granted dangerous capabilities against the syscalls that invoked them (v0.4.0). |
+| `--observe caps\|fs\|devices\|privileged\|capadd\|egress` | `caps` | `caps` derives the minimum capability set. `fs` derives a read-only-filesystem + `tmpfs:` recommendation from write-intent opens. `devices` derives the minimum `devices:` grant from opens of non-default `/dev` nodes, and `privileged` composes caps + devices to replace `privileged: true` with the minimum equivalent. `capadd` validates already-granted dangerous capabilities against the syscalls that invoked them. `egress` derives the minimum outbound allowlist from observed `connect()`s. |
 | `--mounts-fixture <file>` | unset | `fs` only: read the container's mount destinations from a `docker inspect .Mounts` JSON file instead of running `docker inspect` (hermetic tests / CI). |
 | `--cap-add <CAP,...>` | unset | `capadd` only: the currently-granted caps to validate (e.g. `SYS_ADMIN,NET_RAW`). Enables unused-cap detection and a recommended minimized `cap_add`. Without it, `capadd` reports observed usage of the built-in dangerous-cap set. |
 
@@ -158,6 +186,10 @@ Window and output:
 | `k8s` | `securityContext.capabilities` snippet | Splice into a Pod / Deployment manifest. |
 | `oci` | OCI runtime spec capability arrays | Hand to a runtime configurator. |
 | `json` | Canonical sidecar JSON | Same shape as `--out`; pipe to `jq` or downstream tooling. |
+
+The **`egress`** observer uses its own enforcement formats instead of the compose-security ones above — `nftables` (a default-DROP `inet csd_egress` output chain with an accept rule per destination) and `k8s-networkpolicy` (a NetworkPolicy with an Egress `ipBlock`/port rule per destination), plus `json`. They're rejected for the other observers, and vice-versa.
+
+> **Egress carries an *inverted risk*.** For caps/devices the danger is *over*-permission; for an egress allowlist it's the opposite — a destination the workload never exercised will be **blocked** by a default-deny ruleset, breaking the app. So an incomplete allowlist is a hard failure, the output leads with a non-strippable caveat, and the confidence rubric forces a **low** grade when no `--workload` is supplied. Verify completeness before enforcing.
 
 ## Sidecar
 
@@ -216,27 +248,23 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 
 - [CHANGELOG.md](CHANGELOG.md) — notable changes per release ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 - [PLAN.md](PLAN.md) — v1 architecture, decisions, success criteria, threat model, exit codes, confidence rubric.
-- [ROADMAP.md](ROADMAP.md) — post-v1 observers (read-only, privileged decomp, devices, egress, …) and the maturity-parity track.
+- [ROADMAP.md](ROADMAP.md) — shipped + planned observers (read-only, privileged decomp, devices, capadd, egress, …) and the maturity-parity track.
 - [docs/RELEASING.md](docs/RELEASING.md) — the release checklist (version bumps, changelog, tagging, the signed pipeline).
 - [docs/architecture.md](docs/architecture.md) — diagrams of the four-layer pipeline, the three-phase workflow, the workload-coverage cross-checks, and the privilege/supply-chain posture.
 - [docs/dev-setup.md](docs/dev-setup.md) — local development prerequisites, installing `ig`, smoke-running `csd observe`, bisecting a new reference image.
 - [docs/known-deltas.md](docs/known-deltas.md) — every documented difference between observed cap sets and bisected ground truth, with cause and disposition.
 - [docs/wsl2.md](docs/wsl2.md) — WSL2 + Docker Desktop smoke matrix, kernel/BTF caveats, gap-reporting flow.
 
-## v1 scope
+## Scope
 
-**Capability profiles only.** Observe `cap_capable()` checks, attribute per container/image, emit minimum `cap_drop:` / `cap_add:` set. See [PLAN.md](PLAN.md).
-
-## Future scope
-
-Read-only filesystem + tmpfs paths shipped in **v0.2** (`--observe fs`); privileged-mode decomposition and the device profile shipped in **v0.3** (`--observe privileged` / `--observe devices`). Still ahead: Docker socket usage, dangerous-cap validation, host-network necessity, network egress allowlists. See [ROADMAP.md](ROADMAP.md). All future observers slot into the same architecture as v1.
+**Shipped:** capability profiles (v1), read-only filesystem + tmpfs (`fs`), device profiles + privileged decomposition (`devices` / `privileged`), the dangerous-`cap_add` validator (`capadd`), and the network-egress allowlist (`egress`). **Still ahead:** Docker socket API usage (signal-blocked, deferred) and host-network necessity. Every observer slots into the same four-layer architecture; see [ROADMAP.md](ROADMAP.md).
 
 ## Out of scope
 
-- **Enforcement.** This tool observes and recommends; it does not enforce policy. (Use AppArmor / seccomp / PSS for that.)
+- **Enforcement.** This tool observes and recommends; it does not enforce policy. (Use AppArmor / seccomp / PSS for that — csd *generates* the artifacts, you apply them.)
 - **Static analysis of images or compose files.** That's compose-lint's job.
 - **Build-time / Dockerfile analysis.** Different problem class.
-- **Kubernetes-first UX.** K8s output formatter is in scope; K8s-specific deployment isn't a v1 priority. The `--format k8s` formatter exists so derived profiles can be applied to k8s workloads, not because the tool is intended to live as a DaemonSet.
+- **Kubernetes-first UX.** K8s output formatters are in scope; K8s-specific deployment isn't. The `--format k8s` / `k8s-networkpolicy` formatters exist so derived profiles can be applied to k8s workloads, not because the tool is intended to live as a DaemonSet.
 - **Kernels < 5.8, cgroupv1-only hosts, rootless Podman.** See PLAN.md "Runtime requirements" for the full non-goal list.
 
 ## A note on the tool's own security posture
@@ -289,13 +317,13 @@ The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/con
 cosign verify \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.4.0
+  ghcr.io/tmatens/container-sec-derive:0.5.0
 
 # Attestations (SBOM + OpenVEX)
 cosign verify-attestation --type spdxjson \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.4.0
+  ghcr.io/tmatens/container-sec-derive:0.5.0
 
 # Vendored ig provenance — IG version, upstream per-arch tarball digests, and
 # the cosign-verified pin (predicate sourced from ig-pin/)
@@ -303,10 +331,10 @@ cosign verify-attestation \
   --type https://github.com/tmatens/container-sec-derive/attestations/ig-provenance/v1 \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.4.0
+  ghcr.io/tmatens/container-sec-derive:0.5.0
 ```
 
-> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.4.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
+> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.5.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
 
 ## License
 

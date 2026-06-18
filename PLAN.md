@@ -390,6 +390,14 @@ Documentation is deliberately omitted from this list. Upstream docs are often ab
 
 Reference-image selection matters for the same reason (below): small, exercisable surface areas give the workload a chance to hit every path.
 
+### Bisection minimizer: 1-minimal vs. globally minimum (issue #32)
+
+`scripts/bisect_caps.sh` reduces the Docker default cap set to a minimum sufficient set in two phases: a **greedy** single pass (remove each cap in turn; keep it only if removal breaks the workload), then a **stabilization fixpoint** that re-tests every still-kept cap against the *current, smaller* keep set until a full pass drops nothing. The fixpoint is the fix for greedy's order-dependence: a cap tested while the keep set was large can be locked in even though it is unneeded once other caps are later dropped (e.g. cap A is only needed while cap B is present; if B is dropped after A is tested, plain greedy never re-tests A). The result is robustly **1-minimal** — no single cap can be removed without the workload failing — independent of elimination order.
+
+1-minimal is *not always* the **globally minimum-sized** set. They diverge only under (a) **substitutability** — a code path satisfied by either of two caps, so the minimum size is right but the *identity* of the kept cap depends on order — or (b) genuinely **cap-dependent behavior** (a non-monotone workload that takes a different, differently-privileged path when a cap is absent). True globally-minimum requires searching subsets beyond the kept set — exponential in the 14-cap default (2¹⁴ trials × minutes-per-trial), infeasible. Two bounded, opt-in tools approximate it: `ORDERS=N` runs the minimizer from N shuffled orders and flags substitutability (logged + a `substitutable` field on `ground_truth.json`) when results diverge, keeping the smallest; `VERIFY_MINIMAL=1` exhaustively tests every proper subset of the (small) kept set to *prove* 1-minimality and to surface a non-monotone workload (a passing proper subset) rather than silently trust an ambiguous "minimum".
+
+For the current reference images (postgres/caddy/tailscale) the kept caps cover distinct kernel paths and are non-substitutable, so 1-minimal == globally minimum and the stabilization pass produces no drops — the existing `ground_truth.json` sets are unaffected. The minimizer is oracle-driven (the "does this set work?" predicate is pluggable via `CSD_BISECT_ORACLE`), and `scripts/bisect_caps_selftest.sh` (`make bisect-selftest`, gated in `ci.yml`) validates the greedy+stabilization, substitutability detection, and `verify_minimal` logic **hermetically** with synthetic oracles — no Docker — since the real container-driven bisection (`make ground-truth-*`) is dispatch-only.
+
 ## Foot-guns to design around
 
 Documented up front because they're easy to miss in implementation:

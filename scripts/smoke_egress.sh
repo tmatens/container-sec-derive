@@ -134,28 +134,39 @@ fi
 # concurrent two-gadget path and surfacing the REAL event schema. This
 # disambiguates a capture problem (0 raw events) from a csd parse/selection
 # problem (raw events present but dns_resolvers empty).
-echo "-- egress(dns) diagnostic: standalone trace_dns probe --"
+# Diagnostic lines are all prefixed `INFO ` so the integration workflow's
+# allowlist grep (^(PASS|FAIL|INFO|smoke-egress:)) routes them into the PR
+# comment — the only channel readable without the Actions log API.
 IG_VER="$(awk -F'"' '/PinnedIGVersion *=/{print $2; exit}' internal/ig/ig.go 2>/dev/null)"
 DNS_GADGET="ghcr.io/inspektor-gadget/gadget/trace_dns:${IG_VER:-v0.51.0}"
 probe="${WORKDIR}/dns_probe.ndjson"
 probe_err="${WORKDIR}/dns_probe.err"
-ig run "${DNS_GADGET}" --output json >"${probe}" 2>"${probe_err}" &
-IGPID=$!
-sleep 1
-for i in $(seq 1 15); do
-    docker exec "${CONTAINER}" nslookup "csd-dns-probe-${i}.example.com" >/dev/null 2>&1 || true
-    sleep 0.3
-done
-sleep 1
-kill "${IGPID}" >/dev/null 2>&1 || true
-wait "${IGPID}" 2>/dev/null || true
-echo "trace_dns raw events captured (standalone): $(wc -l <"${probe}" 2>/dev/null || echo 0)"
-echo "trace_dns sample (first 2 lines):"
-head -2 "${probe}" 2>/dev/null || true
-echo "trace_dns probe stderr (first 5 lines):"
-head -5 "${probe_err}" 2>/dev/null || true
-echo "csd dns_resolvers: $(jq -c '(.egress_recommendation.dns_resolvers)//[]' "${sidecar}" 2>/dev/null)"
-echo "-- end diagnostic --"
+if command -v ig >/dev/null 2>&1; then
+    ig run "${DNS_GADGET}" --output json >"${probe}" 2>"${probe_err}" &
+    IGPID=$!
+    sleep 1
+    for i in $(seq 1 15); do
+        docker exec "${CONTAINER}" nslookup "csd-dns-probe-${i}.example.com" >/dev/null 2>&1 || true
+        sleep 0.3
+    done
+    sleep 1
+    kill "${IGPID}" >/dev/null 2>&1 || true
+    wait "${IGPID}" 2>/dev/null || true
+else
+    echo "ig not on PATH for standalone probe" >"${probe_err}"
+    : >"${probe}"
+fi
+n_raw="$(wc -l <"${probe}" 2>/dev/null || echo 0)"
+echo "INFO egress(dns) diag: trace_dns standalone raw_events=${n_raw}"
+if [[ "${n_raw}" -gt 0 ]]; then
+    echo "INFO egress(dns) diag: first-event keys=$(head -1 "${probe}" | jq -c 'keys' 2>/dev/null || echo '?')"
+    echo "INFO egress(dns) diag: first-event=$(head -1 "${probe}" | jq -c '{qr,qr_raw,name,addresses,nameserver,src,dst,runtime}' 2>/dev/null || echo '?')"
+    echo "INFO egress(dns) diag: a-response=$(jq -c 'select((.qr_raw==1) or (.qr=="R")) | {name,addresses,src,dst}' "${probe}" 2>/dev/null | head -1)"
+    echo "INFO egress(dns) diag: distinct runtime.containerName=$(jq -rc '.runtime.containerName // .containerName // "<none>"' "${probe}" 2>/dev/null | sort -u | tr '\n' ',')"
+else
+    echo "INFO egress(dns) diag: trace_dns produced NO events standalone — capture problem (gadget/attach/traffic), not a csd parse issue; stderr: $(head -3 "${probe_err}" 2>/dev/null | tr '\n' '|')"
+fi
+echo "INFO egress(dns) diag: csd dns_resolvers=$(jq -c '(.egress_recommendation.dns_resolvers)//[]' "${sidecar}" 2>/dev/null)"
 
 if jq -e '((.egress_recommendation.dns_resolvers) // []) | length > 0' "${sidecar}" >/dev/null; then
     echo "PASS egress(dns): dns_resolvers non-empty: $(jq -c '[((.egress_recommendation.dns_resolvers)//[])[] | "\(.addr):\(.port)"]' "${sidecar}")"

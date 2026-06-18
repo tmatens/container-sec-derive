@@ -71,12 +71,18 @@ jobs:
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: go.mod
-          cache: false
+          # Cache the Go module/build cache so CodeQL's autobuild isn't fully
+          # cold each run — shaves the extraction/build phase.
+          cache: true
       - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          queries: security-and-quality
+          # security-extended keeps the thorough *security* query set but drops
+          # the maintainability/quality queries (which overlap with go vet +
+          # review) — the bulk of the per-run query-eval time. Faster scans on a
+          # root-equivalent tool without losing security coverage.
+          queries: security-extended
       - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           category: "/language:${{ matrix.language }}"

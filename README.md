@@ -253,7 +253,28 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 - [docs/architecture.md](docs/architecture.md) — diagrams of the four-layer pipeline, the three-phase workflow, the workload-coverage cross-checks, and the privilege/supply-chain posture.
 - [docs/dev-setup.md](docs/dev-setup.md) — local development prerequisites, installing `ig`, smoke-running `csd observe`, bisecting a new reference image.
 - [docs/known-deltas.md](docs/known-deltas.md) — every documented difference between observed cap sets and bisected ground truth, with cause and disposition.
+- [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — the structural limits on what csd can derive (dynamic-only floor, the `security_opt` blind spot, inverted-risk derivations, signal-blocked dimensions) and why.
 - [docs/wsl2.md](docs/wsl2.md) — WSL2 + Docker Desktop smoke matrix, kernel/BTF caveats, gap-reporting flow.
+
+## Limitations
+
+`csd` derives from **dynamic observation of a single run**, so it has structural
+limits — distinct from the not-yet-built backlog in [ROADMAP.md](ROADMAP.md):
+
+- **Dynamic-only floor.** Anything the workload doesn't exercise during the
+  observation window is invisible, to every observer. The output is a floor on what
+  was seen, *not* a correctness proof — review it, don't enforce it blind.
+- **`privileged` decomposition is partial.** `--observe privileged` recovers caps +
+  devices but cannot observe the AppArmor/seccomp (`security_opt`) dimension — no
+  built-in IG denial gadget exists. The output flags this.
+- **Inverted-risk derivations.** For egress (and the planned host-network
+  validator), a missed signal yields a default-deny rule that *blocks* the app, so
+  these force low confidence without a `--workload`.
+- **Signal-blocked dimensions.** Docker socket API scoping (`AF_UNIX` + plaintext
+  HTTP) is deferred for lack of a built-in gadget (issue #110).
+
+Each is surfaced at runtime via non-strippable caveats and confidence levels. See
+[docs/LIMITATIONS.md](docs/LIMITATIONS.md) for the full account and the reasoning.
 
 ## Scope
 

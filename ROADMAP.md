@@ -150,7 +150,7 @@ Which `/dev/*` nodes does the container actually open? Hardware acceleration (`/
 > against real `ig` (`scripts/smoke_egress.sh` in `integration.yml`). **Not a
 > compose-lint rule** (per below).
 >
-> **DNS/hostname follow-up — in progress (issue #159).** Both deferred siblings
+> **DNS/hostname follow-up — RELEASED in v0.6.0 (issue #159).** Both deferred siblings
 > above are unblocked by the same signal: the survey confirmed `trace_dns` exists
 > at the pin with the needed fields (`name`, `addresses`, `qr`, `id`, resolver
 > endpoint) — **no pin bump**. Landing incrementally: the `trace_dns` event

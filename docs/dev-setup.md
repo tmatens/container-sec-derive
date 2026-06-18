@@ -7,13 +7,13 @@ What you need to develop and exercise `csd` end-to-end on a Linux host.
 - **Go** 1.26 or newer.
 - **Docker** (or another OCI runtime reachable via the docker socket). Used by the bisection driver and as the runtime `csd observe` attaches to.
 - **Linux kernel** 5.10+ with BPF + perf enabled. eBPF gadgets need `CAP_BPF` + `CAP_PERFMON` (root works; unprivileged setups must grant both).
-- **Inspektor Gadget (`ig`)** at the version pinned in `main.go`. See below.
+- **Inspektor Gadget (`ig`)** at the version pinned in `internal/ig/ig.go`. See below.
 
 The bisection driver (`scripts/bisect_caps.sh`) only needs Go, bash, and Docker — it does not need `ig`. `ig` is required for `csd observe` and any test path that exercises the live BPF observer (anything beyond `--fixture`).
 
 ## Installing `ig`
 
-`csd` pins to a specific `ig` release; the constants in `main.go` are the source of truth:
+`csd` pins to a specific `ig` release; the constants in `internal/ig/ig.go` are the source of truth:
 
 ```
 PinnedIGVersion    = "v0.51.0"
@@ -52,7 +52,7 @@ The second command pulls the gadget OCI image (also pinned to `v0.51.0`) and val
 After `ig` is installed, you can run the live observer against any container:
 
 ```sh
-go build -o csd .
+go build -o csd ./cmd/csd
 sudo ./csd observe --container <name-or-id> --duration 30s
 ```
 

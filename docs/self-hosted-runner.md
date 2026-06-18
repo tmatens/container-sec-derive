@@ -25,7 +25,7 @@ churn from the production host).
 
 The runner host must have:
 - **Docker** (the smokes spin containers).
-- The **pinned `ig`** on `PATH` (the version in `main.go` `PinnedIGVersion`).
+- The **pinned `ig`** on `PATH` (the version in `internal/ig/ig.go` `PinnedIGVersion`).
   Install it the same way `integration.yml` does — download the per-arch tarball
   for that tag and verify it against `ig-pin/SHA256SUMS` before installing to
   `/usr/local/bin`.

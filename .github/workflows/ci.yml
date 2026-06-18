@@ -54,7 +54,7 @@ jobs:
       - name: go test -race
         run: go test -race ./...
       - name: go build
-        run: go build -o csd .
+        run: go build -o csd ./cmd/csd
       # Hermetic validation of the capability minimizer (greedy + #32
       # stabilization fixpoint, substitutability detection, verify_minimal) with
       # synthetic oracles — no Docker, so it belongs in the fast gate rather than

@@ -51,7 +51,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
           CGO_ENABLED: '0'
         # -trimpath strips local file paths from the binary;
-        # -ldflags "-s -w" strips symbol/debug tables; -X main.version
+        # -ldflags "-s -w" strips symbol/debug tables; -X internal/cli.version
         # stamps the release version (tag without the leading v) so
         # `csd --version` reports e.g. "csd 0.1.0" instead of the "dev"
         # default. The container image injects the same value (Dockerfile
@@ -60,7 +60,7 @@ jobs:
         # pinned + trimmed, not yet bit-for-bit.
         run: |
           version="${GITHUB_REF_NAME#v}"
-          go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "csd_linux_${GOARCH}" .
+          go build -trimpath -ldflags "-s -w -X github.com/tmatens/container-sec-derive/internal/cli.version=${version}" -o "csd_linux_${GOARCH}" ./cmd/csd
       # Smoke the stamped version on the native arch only — the arm64
       # binary is cross-compiled and cannot exec on the amd64 runner.
       # Catches a regression where the -X injection falls off and a real

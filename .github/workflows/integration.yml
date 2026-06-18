@@ -133,7 +133,7 @@ jobs:
           ig version
 
       - name: Build csd
-        run: go build -o csd .
+        run: go build -o csd ./cmd/csd
 
       # Fixed-fact preflight so a failure self-classifies (BTF absent →
       # CO-RE can't attach; ig version mismatch → SchemaMismatch). These
@@ -357,7 +357,7 @@ jobs:
           sudo install -m 0755 /tmp/ig /usr/local/bin/ig
 
       - name: Build csd
-        run: go build -o csd .
+        run: go build -o csd ./cmd/csd
 
       - name: Measure kretprobe miss-rate
         env:

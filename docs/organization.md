@@ -14,18 +14,10 @@ any file call any other, so the layering can erode silently. Real package
 boundaries make the import direction load-bearing: the compiler rejects an
 import that points the wrong way.
 
-> **Migration status (issue #149).** The move from the original flat
-> `package main` to this layout is staged. **Landed:** the foundation packages
-> `internal/exit`, `internal/sidecar`, `internal/ig`, `internal/attrib`; the
-> shared observer scaffolding `internal/observe`; and **all six observers**
-> under `internal/observe/<name>` (`caps`, `fs`, `devices`, `privileged`,
-> `capadd`, `egress` — egress carrying its own enforcement formatter).
-> **In progress:** extracting the shared compose-security formatters into
-> `internal/format`, `csd verify` into `internal/verify`, the CLI into
-> `internal/cli`, and the entry point into `cmd/csd` (which also switches the
-> build path to `./cmd/csd`). Until that completes, the formatters, `verify`,
-> and the CLI live in the repo root `package main` and import the packages
-> above. The target below is the standard new code is written against.
+The flat `package main` is gone (issue #149): there is **no `.go` source in the
+repo root**. The binary builds from `./cmd/csd`, and the layout below is the
+real, landed structure — not an aspiration. New code is written against it, and
+CI enforces the import direction via the package boundaries.
 
 ## Package map
 
@@ -48,12 +40,16 @@ internal/
     caps/                  cap event + aggregate + decide + confidence (trace_capabilities)
     fs/                    fileevent, fsobserve, fsdecision, fsconfidence (trace_open write-intent)
     devices/               deviceevent, deviceobserve, devdecision, deviceconfidence (trace_open /dev)
-    privileged/            privilegedobserve + format (caps + devices composition)
+    privileged/            privilegedobserve (caps + devices composition; its formatter
+                           is in internal/format — it reuses the compose machinery)
     capadd/                capadd, capaddobserve, capadddecision, capaddconfidence (trace_capabilities)
     egress/                egressevent, egress, egressobserve, egressdecision, egressconfidence,
                            egressformat (trace_tcp) — owns its enforcement formatter (see Formatters)
-  format/                  the cross-observer compose-security formatters
-                           (compose, docker-run, k8s, oci, json, compose-patch, compose-lint-profile)
+  format/                  the compose-security formatters — the cross-observer ones
+                           (compose, docker-run, k8s, oci, json, compose-patch,
+                           compose-lint-profile) plus each observer's compose-security
+                           renderer (fs/device/capadd/privileged), which all share the
+                           compose-patch + lint-profile machinery
   verify/                  `csd verify` (sidecar-vs-sidecar + run mode)
   cli/                     run(), flag definitions, --observe/--format dispatch, per-observer wiring
   obstest/                 test-only helpers shared across observer test suites
@@ -127,8 +123,16 @@ into that same family. An observer with a **distinct output family** owns its
 formatter in its own package — `egress` emits `nftables` / `k8s-networkpolicy`
 enforcement rules, which are nothing like the compose-security shapes, so
 `egressformat.go` lives in `internal/observe/egress`. The test: if a new
-observer's output is just another compose-security section, it belongs in
-`internal/format`; if it's a new enforcement target, the observer owns it.
+observer's output is just another compose-security section — or reuses the
+shared compose-patch / lint-profile machinery in `internal/format` at all — it
+belongs in `internal/format` (that reuse is the practical reason `privileged`'s
+formatter lives there even though the observer is its own package); if it's a
+self-contained new enforcement target like egress's, the observer owns it.
+
+A formatter that builds its fixture from an observation does so through the
+observer's **exported producer** (`capadd.ProduceCapaddObservation`, …), never
+by reaching into observer internals — so the formatter and its test stay in
+`internal/format` without `internal/format` depending "up" on an observer.
 
 ## Seams designed in on purpose
 

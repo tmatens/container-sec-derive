@@ -94,7 +94,7 @@ missrate: build
 	./scripts/kretprobe_missrate.sh
 
 build:
-	go build -o csd .
+	go build -o csd ./cmd/csd
 
 test:
 	go test ./...

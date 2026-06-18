@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/tmatens/container-sec-derive/internal/ig"
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
 // WriteTemp writes content to a uniquely-named temp file and returns its path.
@@ -85,3 +86,24 @@ const PrivDevFixture = `{"syscall":"openat","flags_raw":2,"fpath":"/dev/dri/card
 {"syscall":"openat","flags_raw":1,"fpath":"/dev/null","proc":{"comm":"renderer"},"runtime":{"containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
 {"syscall":"openat","flags_raw":2,"fpath":"/dev/net/tun","proc":{"comm":"vpn"},"runtime":{"containerId":"ccc333ccc333","containerName":"gpu-1","containerImageName":"gpu:1"}}
 `
+
+// MakeSidecar builds a minimal valid Sidecar with the named caps plus optional
+// knobs. Tests use it instead of inlining literal sidecar JSON so a future
+// schema-additive bump touches one helper.
+func MakeSidecar(image, digest, workload string, durationSeconds int, caps ...string) *sidecar.Sidecar {
+	s := sidecar.NewSidecar()
+	s.Image = image
+	s.ImageDigest = digest
+	s.Workload = workload
+	s.DurationSeconds = durationSeconds
+	for _, c := range caps {
+		s.Capabilities = append(s.Capabilities, sidecar.Capability{
+			Name:              c,
+			EventCount:        1,
+			FirstSeenOffsetMs: 0,
+			LastSeenOffsetMs:  0,
+			CommSamples:       []string{c + "-sample"},
+		})
+	}
+	return s
+}

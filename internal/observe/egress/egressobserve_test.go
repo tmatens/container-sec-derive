@@ -190,8 +190,8 @@ func TestObserveDNS_FakeIG(t *testing.T) {
 	// The live trace_dns path: a query + its response + a drop line. observeDNS
 	// must build the IP->hostname map, record the resolver, and surface drops.
 	nd := strings.Join([]string{
-		`{"qr":"Q","qr_raw":0,"name":"api.example.com.","id":1,"dst":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
-		`{"qr":"R","qr_raw":1,"name":"api.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+		`{"qr":"Q","qr_raw":false,"name":"api.example.com.","id":1,"dst":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+		`{"qr":"R","qr_raw":true,"name":"api.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
 	}, "\n")
 	fakeIG := obstest.FakeIGRun(t, nd, "level=info msg=starting\nlost 2 samples\n")
 

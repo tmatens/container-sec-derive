@@ -15,15 +15,16 @@ import (
 // egress allowlist, and its query packets reveal the resolver endpoint that a
 // default-DROP allowlist must permit or all name resolution breaks.
 //
-// The field NAMES and types below are taken from the trace_dns gadget config
-// (the `application/vnd.gadget.config.v1+yaml` blob) surveyed at the pin in
-// issue #159 — the authoritative source for the datasource schema. As with
-// tcpEvent the parser is lenient: hand-rolled fixtures need not carry every
-// field, and the exact live serialization is pinned by the integration smoke
-// (the trace_dns leg of scripts/smoke_egress.sh) in a later PR, mirroring how
-// trace_tcp's schema was confirmed against a real capture. l4Endpoint is shared
-// with tcpEvent (egressevent.go) — DNS endpoints use the same `l4endpoint`
-// template, only with proto 17 (UDP) instead of 6 (TCP).
+// The field shapes below are confirmed against a REAL v0.51.0 trace_dns event
+// captured on a live runner (issue #159, the smoke's standalone probe), not just
+// the gadget config — two shapes the config survey got wrong and that silently
+// broke the first live run: `qr_raw` serializes as a JSON bool (not an int), and
+// `nameserver` is an l4endpoint object (not a string). Getting either type wrong
+// fails json.Unmarshal for the whole event, so every DNS event was rejected and
+// the live correlation came back empty. As with tcpEvent the parser is lenient:
+// hand-rolled fixtures need not carry every field. l4Endpoint is shared with
+// tcpEvent (egressevent.go) — DNS endpoints use the same `l4endpoint` template,
+// only with proto 17 (UDP) instead of 6 (TCP).
 
 // dnsEvent is the subset of ig trace_dns fields the egress DNS correlation
 // consumes. `addresses` is the comma-separated A/AAAA list ig emits (per the
@@ -32,16 +33,15 @@ import (
 // endpoint contacted for a query (the destination a query() reaches), the
 // source endpoint for a response.
 type dnsEvent struct {
-	Name       string // domain queried, trailing dot trimmed
-	Addresses  []string
-	Qtype      string // record type: A, AAAA, ...
-	Rcode      string // response code text: NoError, NXDomain, ...
-	ID         string // DNS query/response id, matches a response to its query
-	Response   bool   // qr: true for a response packet, false for a query
-	Src        l4Endpoint
-	Dst        l4Endpoint // resolver endpoint for a query; client for a response
-	Nameserver string     // resolver address ig reports on the event
-	Proc       struct {
+	Name      string // domain queried, trailing dot trimmed
+	Addresses []string
+	Qtype     string // record type: A, AAAA, ...
+	Rcode     string // response code text: NoError, NXDomain, ...
+	ID        string // DNS query/response id, matches a response to its query
+	Response  bool   // qr: true for a response packet, false for a query
+	Src       l4Endpoint
+	Dst       l4Endpoint // resolver endpoint for a query; client for a response
+	Proc      struct {
 		Comm string
 		Pid  int
 	}
@@ -70,18 +70,20 @@ func (e *dnsEvent) UnmarshalJSON(data []byte) error {
 		RuntimeName    string `json:"runtimeName"`
 	}
 	var wire struct {
-		Name       string          `json:"name"`
-		Addresses  string          `json:"addresses"`
-		Qtype      string          `json:"qtype"`
-		Rcode      string          `json:"rcode"`
-		ID         json.RawMessage `json:"id"` // number or string across ig builds
-		QR         string          `json:"qr"`
-		QRRaw      int             `json:"qr_raw"`
-		Src        endpointT       `json:"src"`
-		Dst        endpointT       `json:"dst"`
-		Nameserver string          `json:"nameserver"`
-		Proc       procT           `json:"proc"`
-		Runtime    runtimeT        `json:"runtime"`
+		Name      string          `json:"name"`
+		Addresses string          `json:"addresses"`
+		Qtype     string          `json:"qtype"`
+		Rcode     string          `json:"rcode"`
+		ID        json.RawMessage `json:"id"` // number or string across ig builds
+		QR        string          `json:"qr"`
+		QRRaw     bool            `json:"qr_raw"` // v0.51.0 serializes qr_raw as a bool (true=response)
+		Src       endpointT       `json:"src"`
+		Dst       endpointT       `json:"dst"`
+		// `nameserver` is an l4endpoint object in v0.51.0, not a string; csd
+		// derives the resolver from src/dst (Resolver()) so it is intentionally
+		// left unparsed — declaring no field lets json ignore the object cleanly.
+		Proc    procT    `json:"proc"`
+		Runtime runtimeT `json:"runtime"`
 		// Flat fallbacks: comm/pid at the top level when there is no `proc`
 		// envelope (the older ig serialization). The nested form wins.
 		FlatComm string `json:"comm"`
@@ -95,12 +97,11 @@ func (e *dnsEvent) UnmarshalJSON(data []byte) error {
 	e.Qtype = wire.Qtype
 	e.Rcode = wire.Rcode
 	e.ID = normalizeID(wire.ID)
-	// qr: ig renders the column as "R"/"response" for responses and carries a
-	// 0/1 qr_raw sibling. Treat either signal as authoritative.
-	e.Response = wire.QRRaw == 1 || isResponseLabel(wire.QR)
+	// qr: v0.51.0 renders the column as "Q"/"R" with a boolean qr_raw sibling
+	// (true = response). Treat either signal as authoritative.
+	e.Response = wire.QRRaw || isResponseLabel(wire.QR)
 	e.Src = l4Endpoint{Addr: wire.Src.Addr, Port: wire.Src.Port, Version: wire.Src.Version}
 	e.Dst = l4Endpoint{Addr: wire.Dst.Addr, Port: wire.Dst.Port, Version: wire.Dst.Version}
-	e.Nameserver = wire.Nameserver
 	e.Proc.Comm, e.Proc.Pid = wire.Proc.Comm, wire.Proc.Pid
 	if e.Proc.Comm == "" {
 		e.Proc.Comm = wire.FlatComm

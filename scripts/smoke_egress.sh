@@ -124,54 +124,18 @@ else
     fail=1
 fi
 
-# DNS leg (issue #159): the container's DNS queries must surface a resolver in
-# egress_recommendation.dns_resolvers — proving the live trace_dns attach + parse,
-# not just fixture replay. The resolver IP is runtime-configured (not knowable in
-# advance), so the gate is "non-empty".
-#
-# Diagnostic probe (always runs): a standalone `ig run trace_dns` for a few
-# seconds while the container issues lookups, isolating trace_dns from the
-# concurrent two-gadget path and surfacing the REAL event schema. This
-# disambiguates a capture problem (0 raw events) from a csd parse/selection
-# problem (raw events present but dns_resolvers empty).
-# Diagnostic lines are all prefixed `INFO ` so the integration workflow's
-# allowlist grep (^(PASS|FAIL|INFO|smoke-egress:)) routes them into the PR
-# comment — the only channel readable without the Actions log API.
-IG_VER="$(awk -F'"' '/PinnedIGVersion *=/{print $2; exit}' internal/ig/ig.go 2>/dev/null)"
-DNS_GADGET="ghcr.io/inspektor-gadget/gadget/trace_dns:${IG_VER:-v0.51.0}"
-probe="${WORKDIR}/dns_probe.ndjson"
-probe_err="${WORKDIR}/dns_probe.err"
-if command -v ig >/dev/null 2>&1; then
-    ig run "${DNS_GADGET}" --output json >"${probe}" 2>"${probe_err}" &
-    IGPID=$!
-    sleep 1
-    for i in $(seq 1 15); do
-        docker exec "${CONTAINER}" nslookup "csd-dns-probe-${i}.example.com" >/dev/null 2>&1 || true
-        sleep 0.3
-    done
-    sleep 1
-    kill "${IGPID}" >/dev/null 2>&1 || true
-    wait "${IGPID}" 2>/dev/null || true
-else
-    echo "ig not on PATH for standalone probe" >"${probe_err}"
-    : >"${probe}"
-fi
-n_raw="$(wc -l <"${probe}" 2>/dev/null || echo 0)"
-echo "INFO egress(dns) diag: trace_dns standalone raw_events=${n_raw}"
-if [[ "${n_raw}" -gt 0 ]]; then
-    echo "INFO egress(dns) diag: first-event keys=$(head -1 "${probe}" | jq -c 'keys' 2>/dev/null || echo '?')"
-    echo "INFO egress(dns) diag: first-event=$(head -1 "${probe}" | jq -c '{qr,qr_raw,name,addresses,nameserver,src,dst,runtime}' 2>/dev/null || echo '?')"
-    echo "INFO egress(dns) diag: a-response=$(jq -c 'select((.qr_raw==1) or (.qr=="R")) | {name,addresses,src,dst}' "${probe}" 2>/dev/null | head -1)"
-    echo "INFO egress(dns) diag: distinct runtime.containerName=$(jq -rc '.runtime.containerName // .containerName // "<none>"' "${probe}" 2>/dev/null | sort -u | tr '\n' ',')"
-else
-    echo "INFO egress(dns) diag: trace_dns produced NO events standalone — capture problem (gadget/attach/traffic), not a csd parse issue; stderr: $(head -3 "${probe_err}" 2>/dev/null | tr '\n' '|')"
-fi
-echo "INFO egress(dns) diag: csd dns_resolvers=$(jq -c '(.egress_recommendation.dns_resolvers)//[]' "${sidecar}" 2>/dev/null)"
-
+# DNS leg (issue #159): the container's DNS queries (via its configured resolver)
+# must surface a resolver in egress_recommendation.dns_resolvers — proving the
+# live trace_dns attach + parse, not just fixture replay. The resolver IP is
+# runtime-configured (not knowable in advance), so the gate is "non-empty".
 if jq -e '((.egress_recommendation.dns_resolvers) // []) | length > 0' "${sidecar}" >/dev/null; then
     echo "PASS egress(dns): dns_resolvers non-empty: $(jq -c '[((.egress_recommendation.dns_resolvers)//[])[] | "\(.addr):\(.port)"]' "${sidecar}")"
 else
-    echo "FAIL egress(dns): dns_resolvers empty (see diagnostic above for capture-vs-parse)"
+    # On failure, surface what csd saw so a regression is debuggable from the PR
+    # comment (INFO survives the workflow's allowlist grep). An empty result is
+    # either a capture gap (trace_dns saw no query) or a parser/schema drift.
+    echo "INFO egress(dns): dns_resolvers=$(jq -c '(.egress_recommendation.dns_resolvers)//[]' "${sidecar}" 2>/dev/null), egress_tcp_events=$(jq -r '.trace_health.events_recorded//0' "${sidecar}" 2>/dev/null)"
+    echo "FAIL egress(dns): dns_resolvers empty — trace_dns produced no parseable resolver (capture gap or schema drift vs dnsevent.go)"
     fail=1
 fi
 

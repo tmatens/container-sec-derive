@@ -13,9 +13,9 @@ func TestAggregateDNSCorrelation(t *testing.T) {
 	// Two response packets map two IPs to two hostnames; both queries and
 	// responses share one resolver (10.0.0.2:53). All for one container.
 	nd := strings.Join([]string{
-		`{"qr":"Q","qr_raw":0,"name":"api.example.com.","id":1,"dst":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
-		`{"qr":"R","qr_raw":1,"name":"api.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
-		`{"qr":"R","qr_raw":1,"name":"db.internal.","addresses":"10.0.0.5","id":2,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+		`{"qr":"Q","qr_raw":false,"name":"api.example.com.","id":1,"dst":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+		`{"qr":"R","qr_raw":true,"name":"api.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
+		`{"qr":"R","qr_raw":true,"name":"db.internal.","addresses":"10.0.0.5","id":2,"src":{"addr":"10.0.0.2","port":53,"version":4},"runtime":{"containerName":"web"}}`,
 	}, "\n")
 	c, err := aggregateDNS(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
@@ -39,9 +39,9 @@ func TestAggregateDNSMultipleHostnamesOneIP(t *testing.T) {
 	// Two names resolving to the same IP (shared CDN) must both annotate it,
 	// sorted and de-duplicated.
 	nd := strings.Join([]string{
-		`{"qr":"R","qr_raw":1,"name":"b.example.com.","addresses":"1.1.1.1","id":1}`,
-		`{"qr":"R","qr_raw":1,"name":"a.example.com.","addresses":"1.1.1.1","id":2}`,
-		`{"qr":"R","qr_raw":1,"name":"a.example.com.","addresses":"1.1.1.1","id":3}`,
+		`{"qr":"R","qr_raw":true,"name":"b.example.com.","addresses":"1.1.1.1","id":1}`,
+		`{"qr":"R","qr_raw":true,"name":"a.example.com.","addresses":"1.1.1.1","id":2}`,
+		`{"qr":"R","qr_raw":true,"name":"a.example.com.","addresses":"1.1.1.1","id":3}`,
 	}, "\n")
 	c, err := aggregateDNS(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
@@ -56,8 +56,8 @@ func TestAggregateDNSSelectorFilters(t *testing.T) {
 	// Two containers; the selector keeps only the matching one's mappings and
 	// resolver. The "other" container uses a different resolver (10.9.9.9).
 	nd := strings.Join([]string{
-		`{"qr":"R","qr_raw":1,"name":"keep.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53},"runtime":{"containerName":"web"}}`,
-		`{"qr":"R","qr_raw":1,"name":"drop.example.org.","addresses":"203.0.113.7","id":2,"src":{"addr":"10.9.9.9","port":53},"runtime":{"containerName":"other"}}`,
+		`{"qr":"R","qr_raw":true,"name":"keep.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53},"runtime":{"containerName":"web"}}`,
+		`{"qr":"R","qr_raw":true,"name":"drop.example.org.","addresses":"203.0.113.7","id":2,"src":{"addr":"10.9.9.9","port":53},"runtime":{"containerName":"other"}}`,
 	}, "\n")
 	c, err := aggregateDNS(strings.NewReader(nd), attrib.Opts{Container: "web"})
 	if err != nil {
@@ -80,7 +80,7 @@ func TestAggregateDNSSelectorFilters(t *testing.T) {
 func TestAggregateDNSNXDomainNoMapping(t *testing.T) {
 	// An NXDomain response carries no addresses → no IP mapping, but the
 	// resolver is still recorded (the query traffic happened).
-	nd := `{"qr":"R","qr_raw":1,"name":"missing.example.com.","rcode":"NXDomain","addresses":"","id":1,"src":{"addr":"10.0.0.2","port":53}}`
+	nd := `{"qr":"R","qr_raw":true,"name":"missing.example.com.","rcode":"NXDomain","addresses":"","id":1,"src":{"addr":"10.0.0.2","port":53}}`
 	c, err := aggregateDNS(strings.NewReader(nd), attrib.Opts{})
 	if err != nil {
 		t.Fatal(err)

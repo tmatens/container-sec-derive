@@ -15,10 +15,21 @@
 # same commit.
 name: ci
 on:
-  push:
-    branches: [main]
+  # PR-only: a squash-merge to main produces the same tree the PR already
+  # validated, so a push-to-main re-run is pure duplication (#143). docs /
+  # license / renovate changes can't affect vet/test/build, so skip them.
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'renovate.json'
+      - 'LICENSE'
+
+# Cancel a superseded run when a PR is pushed again.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

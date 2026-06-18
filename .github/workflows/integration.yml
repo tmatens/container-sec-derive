@@ -68,6 +68,12 @@ permissions:
   contents: read
   pull-requests: write # post the allowlisted diagnostic report as a PR comment
 
+# Cancel a superseded live-BPF run when a PR is pushed again — this is the
+# priciest job (~7 min), so cancelling stale runs saves the most (#143).
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Live observe → assert. Hard gates: postgres (attach proof — events
   # recorded > 0; observed set may be empty per docs/known-deltas.md) and

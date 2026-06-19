@@ -46,12 +46,13 @@ on:
       - 'docs/**'
       - 'renovate.json'
       - 'LICENSE'
-  schedule:
-    # Every-3-days FULL run: the reference workloads (postgres/caddy/tailscale)
-    # at the full 30s window AND the arm64 live-BPF lane (per-PR is amd64-only +
-    # synthetic-only + 10s for speed — see the smoke job's matrix/env). This
-    # scheduled run is where the broader reference + arm64 coverage lives.
-    - cron: "41 5 */3 * *"
+  # PAUSED for the Actions-minutes budget (90% used; resets ~2026-07-01).
+  # Re-enable this cron after the reset — it's the every-3-days FULL run:
+  # reference workloads @30s + the arm64 live-BPF lane + the podman cross-runtime
+  # smoke (per-PR stays amd64/synthetic-only/10s). workflow_dispatch covers
+  # on-demand runs meanwhile.
+  # schedule:
+  #   - cron: "41 5 */3 * *"
   workflow_dispatch:
     inputs:
       duration:

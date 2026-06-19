@@ -15,8 +15,10 @@
 name: ClusterFuzzLite batch fuzzing
 
 on:
-  schedule:
-    - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC
+  # PAUSED for the Actions-minutes budget (90% used; resets ~2026-07-01).
+  # Re-enable after the reset (weekly Monday); workflow_dispatch meanwhile.
+  # schedule:
+  #   - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC
   workflow_dispatch:
 
 permissions: {}

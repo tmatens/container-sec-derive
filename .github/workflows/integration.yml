@@ -47,11 +47,11 @@ on:
       - 'renovate.json'
       - 'LICENSE'
   schedule:
-    # Nightly FULL run: the reference workloads (postgres/caddy/tailscale) at the
-    # full 30s window. Per-PR runs are trimmed for speed (synthetic-only, 10s —
-    # see the smoke job's env), so this nightly is where the broader reference
-    # coverage lives.
-    - cron: "41 5 * * *"
+    # Every-3-days FULL run: the reference workloads (postgres/caddy/tailscale)
+    # at the full 30s window AND the arm64 live-BPF lane (per-PR is amd64-only +
+    # synthetic-only + 10s for speed — see the smoke job's matrix/env). This
+    # scheduled run is where the broader reference + arm64 coverage lives.
+    - cron: "41 5 */3 * *"
   workflow_dispatch:
     inputs:
       duration:
@@ -91,15 +91,25 @@ jobs:
   # informational — their privileged ops happen pre-attach, so zero events
   # is expected and must not fail the build (see scripts/smoke_wsl2.sh).
   smoke:
-    name: live-bpf smoke
-    runs-on: ubuntu-24.04
+    name: live-bpf smoke (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     # Per-PR runs are trimmed for Actions cost; scheduled/dispatch runs go broad.
     # A dispatch `duration` input overrides the window everywhere. The PR window
     # (10s, closed-loop 15s) comfortably exceeds gadget attach + the 500ms
     # init-window + several exercise cycles, so the deterministic gates still fire;
     # SMOKE_ONLY restricts caps/fs to the synthetic hard gate (the reference
-    # workloads are informational and run nightly).
+    # workloads are informational and run on the every-3-days schedule).
+    #
+    # Runner matrix: per-PR runs amd64 only (the cheap, fast gate). The
+    # scheduled/dispatch runs add a native ubuntu-24.04-arm leg so the eBPF
+    # attach/parse path is validated on arm64 too — we ship a signed arm64
+    # binary + image, so the runtime path must be proven, not just compiled.
+    # fail-fast:false so an arm64-only flake doesn't void the amd64 result.
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ${{ (github.event_name == 'pull_request') && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04", "ubuntu-24.04-arm"]') }}
     env:
       SMOKE_DURATION: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '10s' || '30s') }}
       SMOKE_DURATION_CL: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '15s' || '30s') }}
@@ -134,12 +144,16 @@ jobs:
       # ig-pin/SHA256SUMS (signed at pin-bump time by refresh-ig-pin.sh),
       # then install to /usr/local/bin (on sudo's secure_path). No
       # fallback download path — a digest miss fails the job.
-      - name: Install pinned ig (amd64, verified against ig-pin/SHA256SUMS)
+      - name: Install pinned ig (per-arch, verified against ig-pin/SHA256SUMS)
         env:
           IG_VERSION: ${{ steps.vars.outputs.ig_version }}
         run: |
           set -euo pipefail
-          artifact="ig-linux-amd64-${IG_VERSION}.tar.gz"
+          # ig ships per-arch tarballs; pick by the runner's arch so the arm64
+          # leg installs arm64 ig. dpkg's arch names (amd64/arm64) match ig's
+          # artifact naming exactly, and ig-pin/SHA256SUMS carries both digests.
+          arch="$(dpkg --print-architecture)"
+          artifact="ig-linux-${arch}-${IG_VERSION}.tar.gz"
           url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"
           curl -fsSL "${url}" -o "/tmp/${artifact}"
           line="$(grep -E "  ${artifact}\$" ig-pin/SHA256SUMS || true)"
@@ -161,6 +175,7 @@ jobs:
       - name: Preflight (kernel / BTF / ig)
         run: |
           {
+            echo "preflight: arch=$(uname -m)"
             echo "preflight: kernel=$(uname -r)"
             if [ -e /sys/kernel/btf/vmlinux ]; then
               echo "preflight: BTF=present"
@@ -361,12 +376,16 @@ jobs:
           fi
           echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
 
-      - name: Install pinned ig (amd64, verified against ig-pin/SHA256SUMS)
+      - name: Install pinned ig (per-arch, verified against ig-pin/SHA256SUMS)
         env:
           IG_VERSION: ${{ steps.vars.outputs.ig_version }}
         run: |
           set -euo pipefail
-          artifact="ig-linux-amd64-${IG_VERSION}.tar.gz"
+          # ig ships per-arch tarballs; pick by the runner's arch so the arm64
+          # leg installs arm64 ig. dpkg's arch names (amd64/arm64) match ig's
+          # artifact naming exactly, and ig-pin/SHA256SUMS carries both digests.
+          arch="$(dpkg --print-architecture)"
+          artifact="ig-linux-${arch}-${IG_VERSION}.tar.gz"
           url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"
           curl -fsSL "${url}" -o "/tmp/${artifact}"
           line="$(grep -E "  ${artifact}\$" ig-pin/SHA256SUMS || true)"

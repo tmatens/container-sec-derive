@@ -27,11 +27,11 @@ on:
   # markdown/docs paths-ignore) when development slows; push-to-main stays dropped
   # (#143: a squash-merge re-scans an identical tree). workflow_dispatch allows an
   # on-demand run before a release or after a security-relevant change.
-  schedule:
-    # Every-3-days run catches regressions + new CodeQL queries / advisories. Was
-    # weekly (cron "27 4 * * 1"); the per-PR trigger is dropped, so this runs on
-    # days 1,4,7,…,28,31 (cron day-of-month step; resets at month boundaries).
-    - cron: "27 4 */3 * *"
+  # PAUSED for the Actions-minutes budget (90% used; resets ~2026-07-01).
+  # Re-enable after the reset (every-3-days; was weekly "27 4 * * 1");
+  # workflow_dispatch covers an on-demand scan meanwhile.
+  # schedule:
+  #   - cron: "27 4 */3 * *"
   workflow_dispatch:
 
 concurrency:

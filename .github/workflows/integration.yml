@@ -111,9 +111,15 @@ jobs:
       matrix:
         runner: ${{ (github.event_name == 'pull_request') && fromJSON('["ubuntu-24.04"]') || fromJSON('["ubuntu-24.04", "ubuntu-24.04-arm"]') }}
     env:
-      SMOKE_DURATION: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '10s' || '30s') }}
+      # The arm64 leg is a portability check (does each gadget attach + parse on
+      # arm64) — synthetic-only at the short window REGARDLESS of event, since the
+      # reference workloads only duplicate amd64 coverage and the closed-loop is
+      # arch-agnostic Go logic (skipped on arm64 below). The amd64 leg keeps the
+      # event-based behavior: PR = synthetic/10s; scheduled/dispatch = full
+      # reference set / 30s. A dispatch `duration` input overrides the window.
+      SMOKE_DURATION: ${{ github.event.inputs.duration || ((matrix.runner == 'ubuntu-24.04-arm' || github.event_name == 'pull_request') && '10s' || '30s') }}
       SMOKE_DURATION_CL: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '15s' || '30s') }}
-      SMOKE_ONLY: ${{ github.event_name == 'pull_request' && 'synthetic' || 'postgres,caddy,tailscale,synthetic' }}
+      SMOKE_ONLY: ${{ (matrix.runner == 'ubuntu-24.04-arm' || github.event_name == 'pull_request') && 'synthetic' || 'postgres,caddy,tailscale,synthetic' }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -278,7 +284,12 @@ jobs:
       # re-run the workload under exactly that profile (must succeed = sufficient),
       # then with all caps dropped (must fail = necessary). Hardware-free; the
       # derive phase reuses trace_capabilities (attach already proven above).
+      # Skipped on the arm64 leg: closed-loop validates derived OUTPUT
+      # correctness (cap derive -> apply -> verify), which is arch-agnostic Go
+      # logic already covered on amd64. The arm64 leg only needs the per-gadget
+      # attach/parse proof from the synthetic gates above.
       - name: Closed-loop meets-intent test
+        if: matrix.runner != 'ubuntu-24.04-arm'
         env:
           DURATION: ${{ env.SMOKE_DURATION_CL }}
         run: |

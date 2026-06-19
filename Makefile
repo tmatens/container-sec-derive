@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress closed-loop missrate build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress closed-loop missrate release-prep build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -92,6 +92,14 @@ closed-loop: build
 # Requires docker + ig + a privileged host; see scripts/kretprobe_missrate.sh.
 missrate: build
 	./scripts/kretprobe_missrate.sh
+
+# release-prep runs the deterministic release bumps locally for inspection
+# (CHANGELOG/ToolVersion/README/goldens/test assertions + build/vet/test gate);
+# it does NOT commit, push, or tag. CI runs the same script via release-prep.yml.
+# Usage: make release-prep VERSION=X.Y.Z
+release-prep:
+	@test -n "$(VERSION)" || { echo "usage: make release-prep VERSION=X.Y.Z"; exit 2; }
+	./scripts/release-prep.sh "$(VERSION)"
 
 build:
 	go build -o csd ./cmd/csd

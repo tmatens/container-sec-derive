@@ -305,7 +305,7 @@ csd observe ──► subprocess: ig run trace_capabilities --output json --cont
 
 **Supported:**
 - Linux kernel ≥ 5.8 with cgroupv2 unified hierarchy (or hybrid with cgroupv2 present)
-- Docker ≥ 20.10 — the only tested/supported container runtime (see the non-Docker non-goal below)
+- Docker ≥ 20.10 — the default + only per-PR-tested container runtime. Podman is selectable via `--runtime podman` (experimental; see the non-Docker note below)
 - BTF available at `/sys/kernel/btf/vmlinux` (CO-RE path; all mainstream distros since ~2022)
 - `ig` binary vendored in the release artifact (see "IG version pinning" below)
 
@@ -318,8 +318,8 @@ Document `--privileged` as a fallback for distros where capability dropping brea
 **Explicit non-goals for v1:**
 - Kernels < 5.8 (RHEL 7, CentOS 7, Amazon Linux 1, Debian 10 stock). BCC-based approaches could cover these but are out of scope for a tool already dependent on IG. Not a "TODO" — a "won't."
 - Cgroupv1-only hosts. Unified or hybrid hierarchy required.
-- **Non-Docker runtimes (Podman, containerd, cri-o) — untested, not supported as of v0.6.** The eBPF observation layer *is* runtime-agnostic (csd passes no runtime flag; `ig` auto-detects), but image and mount inspection shells out to the `docker` CLI — `docker inspect`/`docker history` in the caps observer (`internal/observe/caps/entrypoint.go`) and `docker inspect .Mounts` in the fs observer (`internal/observe/fs/fsobserve.go`) — so on a non-Docker host those steps fail. The decision (2026-06-18) is to claim Docker-only as the *tested* surface rather than imply a Podman compatibility the code doesn't deliver. Extracting the inspect/history/mounts calls behind a runtime interface (+ a podman test lane) is the path to supporting it; tracked in **#164**.
-- Rootless Podman specifically. Even once rootful Podman is supported, cgroup path layout, user-namespace attribution, and non-root BPF privilege requirements differ enough that supporting it is separate work; a post-v1 item, not a v1 gap.
+- **Podman — selectable but EXPERIMENTAL (`--runtime podman`, #164).** The eBPF observation layer is runtime-agnostic (`ig` auto-detects); the only Docker-coupled touchpoints — `inspect`/`history` in the caps observer (`internal/observe/caps/entrypoint.go`) and `inspect .Mounts` in the fs observer (`internal/observe/fs/fsobserve.go`) — are now parameterized by the container CLI via `internal/runtime` (`--runtime docker|podman`, default docker). docker and podman share the same commands + `--format` templates (podman's docker-compatible inspect surface). **What's still missing before podman is "supported": a live podman smoke** validating the inspect/history/mounts output shape *and* `ig` attach/attribution under podman — until that lands, Docker stays the default + only per-PR-tested runtime, and `--runtime podman` is best-effort. **containerd/cri-o** have no docker-compatible CLI and remain unsupported.
+- **Rootless Podman** specifically — even once rootful podman is validated, cgroup path layout, user-namespace attribution, and non-root BPF privilege requirements differ enough to be separate work; a post-v1 item, not a v1 gap.
 - Kubernetes-in-cluster deployment as a DaemonSet. The `--format k8s` formatter is in scope; running `csd` itself inside k8s is not.
 
 **WSL2 / Docker Desktop:** nominally supported — kernel ≥ 5.8 and BTF are usually present on recent WSL2 kernel builds — but "usually" isn't a shippable claim. v1 ships a `make smoke-wsl2` target that runs the reference images inside WSL2 + Docker Desktop and reports pass/fail per image. If `/proc/version` matches `microsoft` / `WSL2`, `csd observe` surfaces a runtime note pointing at `docs/wsl2.md`, which lists known-good WSL2 kernel versions and where BTF has been observed absent.

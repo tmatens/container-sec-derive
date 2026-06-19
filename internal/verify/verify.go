@@ -11,6 +11,7 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/observe/caps"
+	"github.com/tmatens/container-sec-derive/internal/runtime"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -52,11 +53,16 @@ func RunVerify(args []string, stdout, stderr io.Writer) error {
 		inspectFixture = fs.String("inspect-fixture", "", "run-mode: pre-captured image-inspection JSON")
 		duration       = fs.Duration("duration", 30*time.Second, "run-mode: observation window (ignored in --fixture mode)")
 		igBin          = fs.String("ig", "ig", "run-mode: path to the ig binary")
+		runtimeFlag    = fs.String("runtime", runtime.Default, "run-mode: container CLI for image inspection (docker/podman; does not affect ig)")
 		initWindowMs   = fs.Int("init-window-ms", 500, "run-mode: drop capability events observed within this many ms of the first matching event (0 disables)")
 		workload       = fs.String("workload", "", "run-mode: path to the workload script that exercised the container under the proposed config")
 	)
 	if err := fs.Parse(args); err != nil {
 		return exit.WrapCoded(exit.Usage, err)
+	}
+	runtimeBin, rtErr := runtime.Resolve(*runtimeFlag)
+	if rtErr != nil {
+		return exit.WrapCoded(exit.Usage, rtErr)
 	}
 	if *baseline == "" {
 		return exit.CodedErrorf(exit.Usage, "csd verify requires --baseline <sidecar>")
@@ -113,6 +119,7 @@ func RunVerify(args []string, stdout, stderr io.Writer) error {
 			FixtureStderr:  *fixtureErr,
 			InspectFixture: *inspectFixture,
 			IGBin:          *igBin,
+			RuntimeBin:     runtimeBin,
 			Duration:       *duration,
 			Workload:       *workload,
 		}, stderr)

@@ -133,6 +133,7 @@ type PipelineOpts struct {
 	FixtureStderr  string
 	InspectFixture string
 	IGBin          string
+	RuntimeBin     string // container CLI for inspect/history (internal/runtime); empty → docker
 	Duration       time.Duration
 	Workload       string
 }
@@ -202,7 +203,7 @@ func ProduceObservation(opts PipelineOpts, stderr io.Writer) (*sidecar.Sidecar, 
 
 	s.ObservedAt = observedAt
 	s.Workload = opts.Workload
-	ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.Fixture != "", stderr)
+	ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.RuntimeBin, opts.Fixture != "", stderr)
 	ComputeConfidence(s)
 	return s, nil
 }

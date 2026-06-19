@@ -1,0 +1,69 @@
+# ClusterFuzzLite batch fuzzing (ROADMAP §Maturity).
+#
+# WEEKLY batch run + on-demand dispatch — no per-PR fuzzing (cost-conscious; the
+# per-PR `ci.yml` already runs the fuzz targets CPU-bounded). Batch mode keeps an
+# accumulating corpus in the GitHub Actions cache across weeks and reports any
+# crash as a tracked issue.
+#
+# Private-repo posture: unlike the compose-lint sibling this does NOT upload SARIF
+# to the Security tab (csd is private without GHAS, same reason CodeQL runs in
+# artifact mode) — crashes surface as a job failure + the issue below. Go fuzzing
+# uses the `address` sanitizer only (undefined/memory are C/C++).
+#
+# Actions SHA-pinned per CLAUDE.md §Dependency pinning (checkout in lockstep with
+# ci.yml; the clusterfuzzlite action tag tracked in the trailing comment).
+name: ClusterFuzzLite batch fuzzing
+
+on:
+  schedule:
+    - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  batch-fuzzing:
+    name: batch fuzz
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write # persist/restore the fuzz corpus in the Actions cache
+      issues: write  # file a tracked issue on a crash / scheduled failure
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build fuzzers
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: go
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run fuzzers (batch)
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: go
+          sanitizer: address
+          fuzz-seconds: 600 # total budget split across the targets; weekly, so cheap
+          mode: batch
+          output-sarif: false
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Report scheduled failure as issue
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Scheduled run failed: ${WORKFLOW}"
+          body=$(printf -- '- Workflow: **%s**\n- Run: %s\n- Commit: %s\n\nA crash or build failure was detected by the weekly batch fuzz. Close when triaged.' \
+            "${WORKFLOW}" "${RUN_URL}" "${GITHUB_SHA}")
+          existing=$(gh issue list --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+          else
+            gh issue create --title "${title}" --body "${body}"
+          fi

@@ -24,11 +24,11 @@ Each of those needs a real host. The tiers below say which.
 
 | Tier | Proves | Where it runs | Status |
 |---|---|---|---|
-| Static analysis (`go vet`, CodeQL, govulncheck) | No obvious bugs / known CVEs / scanning | `ci.yml`, `codeql.yml`, `govulncheck.yml` | ✅ |
+| Static analysis (`go vet`, govulncheck) + CodeQL | No obvious bugs / known CVEs / scanning | `ci.yml`, `govulncheck.yml` per-PR; **`codeql.yml` every-3-days + dispatch** (temporary cost trim, #165 — not per-PR) | ✅ |
 | Unit + golden + `--fixture` pipeline | The transform: aggregation, decision logic, every formatter, the sidecar schema, exit codes | local + `ci.yml` | ✅ (the hermetic core) |
 | Fuzz | Parser robustness on hostile input | `ci.yml` (CPU-bounded) | ✅ ig NDJSON (`capEvent`/`fileEvent`) + `capadd` aggregator + `parseMountDestinations` + `compose-patch` rewriter |
-| Live-BPF integration smokes | Attach + attribution + `ig`-schema conformance, on a real kernel | `integration.yml` on **GitHub-hosted** runners (`scripts/smoke_{wsl2,fs,device,capadd}.sh`) | ✅ baseline (one kernel, hardware-free) |
-| Closed-loop "meets intent" | A **derived config actually works** (and a tighter one breaks) | hosted or self-hosted runner | ✅ `scripts/closed_loop.sh` / `make closed-loop`, in `integration.yml` |
+| Live-BPF integration smokes | Attach + attribution + `ig`-schema conformance, on a real kernel | `integration.yml`, **GitHub-hosted** (`scripts/smoke_{wsl2,fs,device,capadd,egress}.sh`). **Per-PR: amd64, synthetic-only, 10s** (cost trim). **Every-3-days + dispatch: full reference set @30s + a native arm64 leg** | ✅ baseline (per-PR one kernel/amd64; arm64 + reference on the schedule) |
+| Closed-loop "meets intent" | A **derived config actually works** (and a tighter one breaks) | hosted or self-hosted runner | ✅ `scripts/closed_loop.sh` / `make closed-loop`, in `integration.yml` (amd64; skipped on the arm64 leg — arch-agnostic) |
 | Hardware-ful device | Real `/dev/dri` / `/dev/net/tun` / `/dev/kvm` detection | self-hosted runner with that hardware | 🟡 scaffolded (`scripts/smoke_device_hw.sh` + `integration-selfhosted.yml`); needs a registered runner (#116) |
 | Kernel/distro matrix | BPF attach across kernels (incl. the future LSM-BPF path, kernel ≥5.7) | self-hosted runner(s) / VM matrix | 🟡 scaffolded (the full suite runs on the self-hosted runner's kernel); a true matrix needs multiple runners (#116) |
 | Dogfooding | csd against the real target stack | the homelab host | ❌ host-side (#116) |
@@ -84,13 +84,24 @@ the CLI end-to-end (`--observe × --format`) is exercisable hermetically.
 ## The live tier (needs a real kernel)
 
 `integration.yml` runs the `scripts/smoke_*.sh` gates on GitHub-hosted
-`ubuntu-24.04` runners, which provide a real kernel + `sudo` + docker — enough for
-`ig`/BPF. Each smoke uses a **deterministic, hardware-free hard gate** (e.g. the
-synthetic exerciser; a `--device /dev/null:/dev/csd-exerciser-dev` mapping for
-devices; the exerciser's CHOWN/SETUID/SETGID checks for capadd). Reference images
-are informational (they can legitimately observe zero post-attach events — see
-`docs/known-deltas.md`). Locally these need docker + the pinned `ig` + root:
-`make smoke-wsl2 / smoke-fs / smoke-device / smoke-capadd`.
+runners, which provide a real kernel + `sudo` + docker — enough for `ig`/BPF. Each
+smoke uses a **deterministic, hardware-free hard gate** (e.g. the synthetic
+exerciser; a `--device /dev/null:/dev/csd-exerciser-dev` mapping for devices; the
+exerciser's CHOWN/SETUID/SETGID checks for capadd; a gateway connect + DNS query
+for egress). Reference images are informational (they can legitimately observe
+zero post-attach events — see `docs/known-deltas.md`).
+
+**Cost-trimmed cadence (2026-06-19):** the per-PR run is **amd64-only,
+synthetic-only, 10s** — the deterministic gates fire within ~1-2s of attach
+(500ms init-window), so 10s proves attach/parse without the ~6.5 min of a full
+30s reference sweep. The **full reference set (30s)** and a **native
+`ubuntu-24.04-arm` leg** (proving the eBPF path on arm64, since we ship arm64
+artifacts) run on the **every-3-days `schedule` + `workflow_dispatch`**. The
+window/scope are job env keyed on `github.event_name` + `matrix.runner`; a
+dispatch `duration` input overrides everywhere. Validate a new live lane before
+merge by dispatching it on the branch (don't ship an untested CI path). Locally
+these need docker + the pinned `ig` + root: `make smoke-wsl2 / smoke-fs /
+smoke-device / smoke-capadd` (+ `scripts/smoke_egress.sh`).
 
 ## What the `claude-station` sandbox cannot do
 

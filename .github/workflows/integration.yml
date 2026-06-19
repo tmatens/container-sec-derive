@@ -279,6 +279,23 @@ jobs:
           cat smoke_egress.txt
           exit $rc
 
+      # Cross-runtime: the --runtime podman path (issue #164). Validates that ig
+      # attaches + attributes PODMAN containers and that csd's podman
+      # inspect/history/mounts calls parse, using the synthetic exerciser under
+      # podman (scripts/smoke_podman.sh). SCHEDULED-ONLY + amd64-only: podman is
+      # the experimental runtime and this is the heavier cross-runtime check, so
+      # it stays off the per-PR path (Actions cost). podman is preinstalled on
+      # ubuntu-24.04 runners.
+      - name: Cross-runtime podman smoke
+        if: github.event_name != 'pull_request' && matrix.runner == 'ubuntu-24.04'
+        env:
+          DURATION: ${{ env.SMOKE_DURATION }}
+        run: |
+          sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" \
+            scripts/smoke_podman.sh > smoke_podman.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_podman.txt
+          exit $rc
+
       # Closed-loop "meets intent" test (scripts/closed_loop.sh). The only gate
       # that validates csd's OUTPUT, not just its pipeline: derive a cap profile,
       # re-run the workload under exactly that profile (must succeed = sufficient),
@@ -329,6 +346,8 @@ jobs:
                        grep -hE '^(PASS|FAIL|INFO|smoke-capadd:)' smoke_capadd.txt 2>/dev/null || true; \
                        echo '-- egress observer --'; \
                        grep -hE '^(PASS|FAIL|INFO|smoke-egress:)' smoke_egress.txt 2>/dev/null || true; \
+                       echo '-- cross-runtime (podman) --'; \
+                       grep -hE '^(PASS|FAIL|INFO|smoke-podman:)' smoke_podman.txt 2>/dev/null || true; \
                        echo '-- closed-loop (meets intent) --'; \
                        grep -hE '^(PASS|FAIL|INFO|closed-loop:)' closed_loop.txt 2>/dev/null || true; } )"
           [ -n "$report" ] || report="(no status lines captured — see the Actions run)"

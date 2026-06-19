@@ -51,6 +51,36 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
   user runs `compose-lint`  → "no profile for image X" → user runs `container-sec-derive` against image X
 ```
 
+## How it compares to other tools
+
+Runtime-derived least privilege is **not** an empty category — observing a workload
+and emitting the minimum policy it needs is an old idea with several active
+implementations. The honest one-paragraph map (full version in
+[docs/comparison.md](docs/comparison.md)):
+
+- **Inspektor Gadget `advise`** — IG (which `csd` is built on) already derives
+  seccomp profiles and Kubernetes network policies from observation. `csd` adds the
+  dimensions `ig advise` doesn't cover (capabilities, read-only fs + `tmpfs`,
+  devices, the `privileged:` decomposition, `cap_add` validation), Compose-first
+  output, and an evidence sidecar — but deliberately does **not** emit seccomp (the
+  `security_opt` blind spot, see [docs/LIMITATIONS.md](docs/LIMITATIONS.md)).
+- **Security Profiles Operator / Kubescape `kapprofiler` / SlimToolkit / oci-seccomp-bpf-hook**
+  — the closest peers: each records runtime behaviour and emits a profile (seccomp /
+  AppArmor / SELinux). They are Kubernetes-operator- or image-minify-shaped; `csd`
+  is a Docker-first one-shot CLI covering a different artifact set.
+- **Cilium/Hubble, Otterize, Sysdig** — auto-generate Kubernetes egress network
+  policies from observed traffic; `csd`'s `egress` observer is the Docker/`nftables`
+  counterpart.
+- **KubeArmor / Tetragon / Falco** — observe behaviour to *enforce* least privilege;
+  `csd` generates config and leaves enforcement to you (out of scope, below).
+- **compose-lint / Trivy / Checkov / Polaris** — derive hardening *statically* from
+  manifests; `csd`'s whole pitch is to stop guessing and watch the container run.
+
+`csd`'s defensible niche is the **combination**: a Docker-first, multi-dimensional,
+evidence-backed, Compose-native deriver. No single public tool produces the same set
+of artifacts. See [docs/comparison.md](docs/comparison.md) for the per-tool detail
+and the summary matrix.
+
 ## Requirements
 
 - **Host:** Linux kernel ≥ 5.8, cgroup v2, **Docker** ≥ 20.10 (default + only per-PR-tested runtime) or **rootful Podman** via `--runtime podman` (supported — validated by an every-3-days smoke). containerd/cri-o and rootless podman are unsupported. See PLAN.md "Runtime requirements".
@@ -249,6 +279,7 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 - [CHANGELOG.md](CHANGELOG.md) — notable changes per release ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/)).
 - [PLAN.md](PLAN.md) — v1 architecture, decisions, success criteria, threat model, exit codes, confidence rubric.
 - [ROADMAP.md](ROADMAP.md) — shipped + planned observers (read-only, privileged decomp, devices, capadd, egress, …) and the maturity-parity track.
+- [docs/comparison.md](docs/comparison.md) — how csd compares to related runtime-derived and static hardening tools (IG `advise`, Security Profiles Operator, Kubescape, SlimToolkit, Cilium/Hubble, …), with a summary matrix.
 - [docs/RELEASING.md](docs/RELEASING.md) — the release checklist (version bumps, changelog, tagging, the signed pipeline).
 - [docs/architecture.md](docs/architecture.md) — diagrams of the four-layer pipeline, the three-phase workflow, the workload-coverage cross-checks, and the privilege/supply-chain posture.
 - [docs/dev-setup.md](docs/dev-setup.md) — local development prerequisites, installing `ig`, smoke-running `csd observe`, bisecting a new reference image.

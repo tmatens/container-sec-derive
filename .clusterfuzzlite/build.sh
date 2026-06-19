@@ -18,3 +18,4 @@ compile_native_go_fuzzer github.com/tmatens/container-sec-derive/internal/observ
 compile_native_go_fuzzer github.com/tmatens/container-sec-derive/internal/format         FuzzCapEventUnmarshal     FuzzCapEventUnmarshal
 compile_native_go_fuzzer github.com/tmatens/container-sec-derive/internal/format         FuzzCapaddComposePatch    FuzzCapaddComposePatch
 compile_native_go_fuzzer github.com/tmatens/container-sec-derive/internal/observe/egress FuzzAggregateEgress       FuzzAggregateEgress
+compile_native_go_fuzzer github.com/tmatens/container-sec-derive/internal/observe/egress FuzzAggregateDNS          FuzzAggregateDNS

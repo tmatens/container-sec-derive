@@ -1,11 +1,9 @@
 # ClusterFuzzLite build image (ROADMAP §Maturity). The OSS-Fuzz base-builder-go
-# image provides compile_native_go_fuzzer + the Go fuzzing toolchain.
-#
-# DIGEST PIN: this should be digest-pinned (CLAUDE.md §Dependency pinning). It is
-# left on the :v1 tag here only because the digest could not be resolved from the
-# dev sandbox (gcr.io is not in the egress allowlist). Renovate manages this pin —
-# its first run will convert :v1 to a sha256 digest; confirm that lands.
-FROM gcr.io/oss-fuzz-base/base-builder-go:v1
+# image provides compile_native_go_fuzzer + the Go fuzzing toolchain (it
+# auto-downloads the go.mod toolchain, so csd's Go 1.26 is fine). Digest-pinned
+# per CLAUDE.md §Dependency pinning; Renovate manages the bump (the :v1 tag in the
+# comment tracks which base-builder-go line it maps to).
+FROM gcr.io/oss-fuzz-base/base-builder-go:v1@sha256:3b6a12725517022ed1e21a0dbb043be3d892eedc9e67285ab5c108f4d65034be
 
 COPY . $SRC/container-sec-derive
 WORKDIR $SRC/container-sec-derive

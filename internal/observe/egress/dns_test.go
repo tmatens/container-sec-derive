@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"bytes"
 	"os"
 	"reflect"
 	"strings"
@@ -8,6 +9,22 @@ import (
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 )
+
+// FuzzAggregateDNS hardens the trace_dns parser + correlation against hostile
+// input. The trace_dns schema is the one csd got wrong once (qr_raw is a JSON
+// bool, nameserver an l4endpoint object — issue #159), and it parses external
+// ig output on a root-equivalent tool, so robustness matters. Arbitrary input
+// must never panic: a parse error (the hard-fail contract) or a clean
+// correlation are the only acceptable outcomes.
+func FuzzAggregateDNS(f *testing.F) {
+	f.Add([]byte(`{"qr":"R","qr_raw":true,"name":"a.example.com.","addresses":"1.1.1.1","id":1,"src":{"addr":"10.0.0.2","port":53,"version":4}}`))
+	f.Add([]byte(`{"qr":"Q","qr_raw":false,"name":"a.","dst":{"addr":"10.0.0.2","port":53,"proto":"UDP","version":4},"nameserver":{"addr":"10.0.0.2","version":4}}`))
+	f.Add([]byte(`{"qr":"R","qr_raw":true,"name":"cdn.","addresses":"2606:4700::1, 2606:4700::2","id":2}`))
+	f.Add([]byte("not json at all"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = aggregateDNS(bytes.NewReader(data), attrib.Opts{})
+	})
+}
 
 func TestAggregateDNSCorrelation(t *testing.T) {
 	// Two response packets map two IPs to two hostnames; both queries and

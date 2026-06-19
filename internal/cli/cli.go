@@ -24,6 +24,7 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/observe/egress"
 	"github.com/tmatens/container-sec-derive/internal/observe/fs"
 	"github.com/tmatens/container-sec-derive/internal/observe/privileged"
+	"github.com/tmatens/container-sec-derive/internal/runtime"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 	"github.com/tmatens/container-sec-derive/internal/verify"
 )
@@ -116,6 +117,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		inspectFixture   = flags.String("inspect-fixture", "", "read pre-captured image-inspection JSON from this file instead of running `docker inspect`")
 		duration         = flags.Duration("duration", 30*time.Second, "observation window (ignored in --fixture mode)")
 		igBin            = flags.String("ig", "ig", "path to the ig binary")
+		runtimeFlag      = flags.String("runtime", runtime.Default, "container CLI for image/mount inspection: docker or podman (does NOT affect ig, which auto-detects). Docker is the only per-PR-tested runtime")
 		initWindowMs     = flags.Int("init-window-ms", 500, "drop capability events observed within this many ms of the first matching event (0 disables)")
 		outPath          = flags.String("out", "", "write canonical JSON evidence sidecar to this file (stdout still prints the chosen --format)")
 		formatMode       = flags.String("format", FormatCompose, "output format for stdout (compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci; egress-only: nftables, k8s-networkpolicy)")
@@ -168,6 +170,14 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 	if *observeMode != ObserveCapadd && *capAddIn != "" {
 		return exit.CodedErrorf(exit.Usage, "--cap-add is only meaningful with --observe %s", ObserveCapadd)
+	}
+	// Resolve the container CLI for inspect/history/mounts (docker/podman). An
+	// unknown value fails fast with EX_USAGE rather than shelling out to a
+	// missing binary mid-run. Only caps/fs/privileged shell out; the others
+	// ignore it.
+	runtimeBin, rtErr := runtime.Resolve(*runtimeFlag)
+	if rtErr != nil {
+		return exit.WrapCoded(exit.Usage, rtErr)
 	}
 	// Workload is recorded on the sidecar and surfaced as a confidence factor
 	// (both observers); the compose-lint contribution gate also requires the
@@ -268,6 +278,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			},
 			Fixture:       *fixture,
 			MountsFixture: *mountsFixture,
+			RuntimeBin:    runtimeBin,
 			IGBin:         *igBin,
 			Duration:      *duration,
 			Workload:      *workload,
@@ -443,6 +454,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			DeviceFixture:  *deviceFixture,
 			FixtureStderr:  *fixtureErr,
 			InspectFixture: *inspectFixture,
+			RuntimeBin:     runtimeBin,
 			IGBin:          *igBin,
 			Duration:       *duration,
 			Workload:       *workload,

@@ -30,8 +30,9 @@ import (
 type FSPipelineOpts struct {
 	AggregateOpts attrib.Opts
 	Fixture       string // trace_open NDJSON; empty → live ig
-	MountsFixture string // docker-inspect .Mounts JSON; empty → live docker inspect (or none in fixture mode)
+	MountsFixture string // <runtime>-inspect .Mounts JSON; empty → live inspect (or none in fixture mode)
 	IGBin         string
+	RuntimeBin    string // container CLI for `inspect .Mounts` (internal/runtime); empty → docker
 	Duration      time.Duration
 	Workload      string // --workload path recorded on the sidecar + fed to fs confidence
 }
@@ -263,7 +264,7 @@ func acquireMounts(opts FSPipelineOpts, observedReplicas []string, stderr io.Wri
 	defer cancel()
 
 	if opts.AggregateOpts.Container != "" {
-		return mountDestinations(ctx, opts.AggregateOpts.Container)
+		return mountDestinations(ctx, opts.AggregateOpts.Container, opts.RuntimeBin)
 	}
 
 	// --image: inspect each observed replica and union mount destinations.
@@ -275,7 +276,7 @@ func acquireMounts(opts FSPipelineOpts, observedReplicas []string, stderr io.Wri
 	}
 	union := map[string]struct{}{}
 	for _, rid := range observedReplicas {
-		dests, err := mountDestinations(ctx, rid)
+		dests, err := mountDestinations(ctx, rid, opts.RuntimeBin)
 		if err != nil {
 			return nil, err
 		}
@@ -286,15 +287,19 @@ func acquireMounts(opts FSPipelineOpts, observedReplicas []string, stderr io.Wri
 	return observe.SortedKeys(union), nil
 }
 
-// mountDestinations runs `docker inspect --format '{{json .Mounts}}'` for the
-// container and returns its sorted, non-empty mount destinations. Runtime is
-// hardcoded to docker in this increment, matching inspectEntrypoint.
-func mountDestinations(ctx context.Context, container string) ([]string, error) {
+// mountDestinations runs `<runtime> inspect --format '{{json .Mounts}}'` for the
+// container and returns its sorted, non-empty mount destinations. runtimeBin is
+// the container CLI (`docker`/`podman`, internal/runtime); empty defaults to
+// docker. The command + template are docker-compatible across both.
+func mountDestinations(ctx context.Context, container, runtimeBin string) ([]string, error) {
+	if runtimeBin == "" {
+		runtimeBin = "docker"
+	}
 	// "--" terminates flag parsing so a container id/name beginning with "-"
-	// can't be smuggled in as a docker flag (deep-review L2; defense-in-depth).
-	out, err := exec.CommandContext(ctx, "docker", "inspect", "--format", "{{json .Mounts}}", "--", container).Output()
+	// can't be smuggled in as a runtime flag (deep-review L2; defense-in-depth).
+	out, err := exec.CommandContext(ctx, runtimeBin, "inspect", "--format", "{{json .Mounts}}", "--", container).Output()
 	if err != nil {
-		return nil, fmt.Errorf("docker inspect %s mounts: %w", container, err)
+		return nil, fmt.Errorf("%s inspect %s mounts: %w", runtimeBin, container, err)
 	}
 	return parseMountDestinations(out)
 }

@@ -53,7 +53,7 @@ compose-lint catalog ← PRs with derived profiles ← container-sec-derive
 
 ## Requirements
 
-- **Host:** Linux kernel ≥ 5.8, cgroup v2, **Docker** ≥ 20.10 (the only tested runtime; Podman / containerd are untested — see PLAN.md "Runtime requirements").
+- **Host:** Linux kernel ≥ 5.8, cgroup v2, **Docker** ≥ 20.10 (default + only per-PR-tested runtime). Podman is selectable via `--runtime podman` (experimental — not yet covered by a live smoke); containerd has no docker-compatible CLI. See PLAN.md "Runtime requirements".
 - **Privilege:** live observation runs root-equivalent — `CAP_BPF` + `CAP_PERFMON` + `--pid=host` + a runtime-socket mount (see [the tool's own security posture](#a-note-on-the-tools-own-security-posture)).
 - **`ig`:** [Inspektor Gadget](https://www.inspektor-gadget.io/) at the pinned release for live mode. The `--fixture` path (replaying captured NDJSON) needs none of the above — most development works without a kernel.
 - **Build:** Go 1.26+.

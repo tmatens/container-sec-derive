@@ -101,17 +101,20 @@ type signalHit struct {
 	triggeredCaps []string
 }
 
-// inspectEntrypoint runs `docker inspect` + `docker history` for image
+// inspectEntrypoint runs `<runtime> inspect` + `<runtime> history` for image
 // and returns the combined metadata. Both subprocesses must succeed; a
 // partial-data path would force callers to distinguish "no history" from
 // "history unavailable," which is more cognitive load than it's worth
-// for a proxy signal. Runtime is hardcoded to `docker` in v0.1.0-rc --
-// runtime abstraction (containerd/podman) lands once, across observe and
-// inspect, in a later step.
-func inspectEntrypoint(ctx context.Context, image string) (entrypointInspection, error) {
+// for a proxy signal. runtimeBin is the container CLI (`docker`/`podman`, see
+// internal/runtime); empty defaults to docker. docker and podman share these
+// commands + --format templates (podman's docker-compatible inspect surface).
+func inspectEntrypoint(ctx context.Context, image, runtimeBin string) (entrypointInspection, error) {
 	insp := entrypointInspection{Image: image}
 	if image == "" {
 		return insp, fmt.Errorf("no image reference available for cross-check")
+	}
+	if runtimeBin == "" {
+		runtimeBin = "docker"
 	}
 
 	// Combine the two fields we need into one inspect call. RepoDigests is
@@ -121,9 +124,9 @@ func inspectEntrypoint(ctx context.Context, image string) (entrypointInspection,
 	const inspectFormat = `{"config":{{json .Config}},"repo_digests":{{json .RepoDigests}}}`
 	// "--" terminates flag parsing so an image ref beginning with "-" can't be
 	// smuggled in as a docker flag (deep-review L2; defense-in-depth, not injection).
-	inspectOut, err := exec.CommandContext(ctx, "docker", "inspect", "--format", inspectFormat, "--", image).Output()
+	inspectOut, err := exec.CommandContext(ctx, runtimeBin, "inspect", "--format", inspectFormat, "--", image).Output()
 	if err != nil {
-		return insp, fmt.Errorf("docker inspect %s: %w", image, err)
+		return insp, fmt.Errorf("%s inspect %s: %w", runtimeBin, image, err)
 	}
 	var combined struct {
 		Config struct {
@@ -139,9 +142,9 @@ func inspectEntrypoint(ctx context.Context, image string) (entrypointInspection,
 	insp.Cmd = combined.Config.Cmd
 	insp.RepoDigests = combined.RepoDigests
 
-	historyOut, err := exec.CommandContext(ctx, "docker", "history", "--no-trunc", "--format", "{{.CreatedBy}}", "--", image).Output()
+	historyOut, err := exec.CommandContext(ctx, runtimeBin, "history", "--no-trunc", "--format", "{{.CreatedBy}}", "--", image).Output()
 	if err != nil {
-		return insp, fmt.Errorf("docker history %s: %w", image, err)
+		return insp, fmt.Errorf("%s history %s: %w", runtimeBin, image, err)
 	}
 	scan := bufio.NewScanner(bytes.NewReader(historyOut))
 	scan.Buffer(make([]byte, 64*1024), 1024*1024)
@@ -234,7 +237,7 @@ func setcapCapsFromHistory(lines []string) []string {
 // Phase A (PLAN.md §Workload coverage item 2 deferred): divergence is
 // recorded but does NOT force confidence to low; ComputeConfidence reads
 // the populated fields and emits an informational factor.
-func ApplyEntrypointCrossCheck(s *sidecar.Sidecar, inspectFixture string, fixtureMode bool, stderrSink io.Writer) {
+func ApplyEntrypointCrossCheck(s *sidecar.Sidecar, inspectFixture, runtimeBin string, fixtureMode bool, stderrSink io.Writer) {
 	var (
 		insp entrypointInspection
 		err  error
@@ -257,7 +260,7 @@ func ApplyEntrypointCrossCheck(s *sidecar.Sidecar, inspectFixture string, fixtur
 	default:
 		ctx, cancel := context.WithTimeout(context.Background(), observe.InspectDefaultTimeout)
 		defer cancel()
-		insp, err = inspectEntrypoint(ctx, s.Image)
+		insp, err = inspectEntrypoint(ctx, s.Image, runtimeBin)
 		if err != nil {
 			if stderrSink != nil {
 				fmt.Fprintf(stderrSink, "csd: entrypoint cross-check unavailable: %v\n", err)

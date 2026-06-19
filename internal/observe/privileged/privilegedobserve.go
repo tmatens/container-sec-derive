@@ -35,6 +35,7 @@ type PrivilegedPipelineOpts struct {
 	FixtureStderr  string
 	InspectFixture string
 	IGBin          string
+	RuntimeBin     string // container CLI for inspect/history (internal/runtime); empty → docker
 	Duration       time.Duration
 	Workload       string
 }
@@ -169,7 +170,7 @@ func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer)
 
 	s.ObservedAt = observedAt
 	s.Workload = opts.Workload
-	caps.ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.Fixture != "" || opts.DeviceFixture != "", stderr)
+	caps.ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.RuntimeBin, opts.Fixture != "" || opts.DeviceFixture != "", stderr)
 	computePrivilegedConfidence(s)
 	return s, nil
 }

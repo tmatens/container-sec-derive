@@ -258,7 +258,7 @@ func TestApplyEntrypointCrossCheck_FixtureWins(t *testing.T) {
 	s.Image = "ignored-because-fixture-wins"
 	s.Capabilities = []sidecar.Capability{{Name: "CHOWN"}}
 	var stderrBuf bytes.Buffer
-	ApplyEntrypointCrossCheck(s, path, false, &stderrBuf)
+	ApplyEntrypointCrossCheck(s, path, "", false, &stderrBuf)
 
 	if s.CrossCheckStatus != sidecar.CrossCheckStatusOK {
 		t.Errorf("status = %q, want %q", s.CrossCheckStatus, sidecar.CrossCheckStatusOK)
@@ -280,7 +280,7 @@ func TestApplyEntrypointCrossCheck_FixtureModeSkipsSilently(t *testing.T) {
 	s := sidecar.NewSidecar()
 	s.Image = "postgres:16" // ignored in fixture mode without --inspect-fixture
 	var stderrBuf bytes.Buffer
-	ApplyEntrypointCrossCheck(s, "", true, &stderrBuf)
+	ApplyEntrypointCrossCheck(s, "", "", true, &stderrBuf)
 
 	if s.CrossCheckStatus != "" {
 		t.Errorf("fixture-mode skip should leave status empty, got %q", s.CrossCheckStatus)
@@ -299,7 +299,7 @@ func TestApplyEntrypointCrossCheck_FixtureModeSkipsSilently(t *testing.T) {
 func TestApplyEntrypointCrossCheck_NoImageInLiveModeRecordsReason(t *testing.T) {
 	s := sidecar.NewSidecar()
 	// No Image, not fixture mode, no inspect-fixture.
-	ApplyEntrypointCrossCheck(s, "", false, nil)
+	ApplyEntrypointCrossCheck(s, "", "", false, nil)
 	if s.CrossCheckStatus == "" || s.CrossCheckStatus == sidecar.CrossCheckStatusOK {
 		t.Errorf("expected non-ok reason for live mode without image, got %q", s.CrossCheckStatus)
 	}
@@ -308,7 +308,7 @@ func TestApplyEntrypointCrossCheck_NoImageInLiveModeRecordsReason(t *testing.T) 
 func TestApplyEntrypointCrossCheck_InspectFixtureUnreadable(t *testing.T) {
 	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
-	ApplyEntrypointCrossCheck(s, "/nonexistent/inspect.json", false, nil)
+	ApplyEntrypointCrossCheck(s, "/nonexistent/inspect.json", "", false, nil)
 	if s.CrossCheckStatus == sidecar.CrossCheckStatusOK || s.CrossCheckStatus == "" {
 		t.Errorf("missing fixture should yield unavailable reason; got %q", s.CrossCheckStatus)
 	}
@@ -401,7 +401,7 @@ func TestApplyEntrypointCrossCheck_PromotesRepoDigest(t *testing.T) {
 	}
 	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
-	ApplyEntrypointCrossCheck(s, path, false, nil)
+	ApplyEntrypointCrossCheck(s, path, "", false, nil)
 	if s.CrossCheckStatus != sidecar.CrossCheckStatusOK {
 		t.Fatalf("status = %q, want %q", s.CrossCheckStatus, sidecar.CrossCheckStatusOK)
 	}
@@ -427,7 +427,7 @@ func TestApplyEntrypointCrossCheck_PreservesExistingDigest(t *testing.T) {
 	s := sidecar.NewSidecar()
 	s.Image = "postgres:16"
 	s.ImageDigest = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
-	ApplyEntrypointCrossCheck(s, path, false, nil)
+	ApplyEntrypointCrossCheck(s, path, "", false, nil)
 	if s.ImageDigest != "sha256:9999999999999999999999999999999999999999999999999999999999999999" {
 		t.Errorf("pre-populated digest overwritten: got %q", s.ImageDigest)
 	}

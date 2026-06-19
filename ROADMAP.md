@@ -239,9 +239,15 @@ but together they are the difference between "works" and "mature."
   **public** repo; `publish_results` on a private repo would also leak the
   repo's existence (same reason the README badges are static). Add it at the
   public flip alongside the CodeQL `upload` change.
-- **Continuous fuzzing (ClusterFuzzLite)** — v0.2 added Go fuzz *targets*; wiring
-  them into a `cflite-pr` / `cflite-batch` flow (as compose-lint does) turns
-  one-off seeds into ongoing coverage of the `ig`/`docker` output parsers.
+- ✅ **Continuous fuzzing (ClusterFuzzLite)** — v0.2 added Go fuzz *targets*;
+  **`cflite-batch.yml` now runs them weekly** (batch mode, accumulating corpus in
+  the Actions cache, crash→tracked issue), turning one-off seeds into ongoing
+  coverage of the `ig`/`docker`/compose parsers. Scoped weekly + batch-only for
+  Actions cost (no per-PR `cflite-pr` flow — `ci.yml` already runs the targets
+  CPU-bounded per PR). Private-repo posture: no SARIF/Security-tab upload (same
+  as CodeQL's artifact mode). Open: digest-pin the base-builder-go image (Renovate);
+  a `dnsEvent` fuzz target is the obvious next addition (the trace_dns parser is
+  the one schema trap we hit).
 - ✅ **Close the live-BPF / "meets intent" testing gap** (**issue #116**, closed
   2026-06-17). The hermetic core was already covered; the kernel-facing half is
   now too — real attach/attribution across three real kernels + real hardware

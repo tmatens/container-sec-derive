@@ -13,15 +13,17 @@ the relevant entry.
 
 ### Added
 
-- **`--runtime docker|podman` flag (experimental podman support, issue #164).**
+- **`--runtime docker|podman` flag — rootful podman support (issue #164).**
   The container CLI used for image/mount inspection (`inspect`/`history` in the
   caps observer, `inspect .Mounts` in fs) is now selectable via a new
   `internal/runtime` seam, defaulting to `docker`. `ig` is unaffected (it
   auto-detects its own runtime). docker and podman share the same commands +
-  `--format` templates (podman's docker-compatible inspect surface). Podman is
-  **experimental** — not yet covered by a live smoke validating the inspect
-  output shape or `ig` attach under podman, so Docker stays the default + only
-  per-PR-tested runtime. No new runtime dependencies (stdlib only).
+  `--format` templates (podman's docker-compatible inspect surface). Validated
+  by a live podman smoke (`scripts/smoke_podman.sh`, every-3-days schedule):
+  ig attach/attribution under podman + the podman inspect/history/mounts parse,
+  green on ubuntu-24.04 + rootful podman. Docker stays the default + only
+  *per-PR*-tested runtime; rootless podman / containerd / cri-o unsupported.
+  No new runtime dependencies (stdlib only).
 
 ### Added
 

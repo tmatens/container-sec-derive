@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress closed-loop missrate release-prep build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman closed-loop missrate release-prep build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -79,6 +79,12 @@ smoke-capadd: build
 
 smoke-egress: build
 	./scripts/smoke_egress.sh
+
+# smoke-podman exercises the --runtime podman path: ig attach/attribution under
+# podman + the podman inspect/history/mounts parse, via the synthetic exerciser.
+# Requires podman + ig + a privileged host; see scripts/smoke_podman.sh.
+smoke-podman: build
+	./scripts/smoke_podman.sh
 
 # closed-loop "meets intent" test — see scripts/closed_loop.sh. Derives a cap
 # profile, RE-RUNS the workload under exactly that profile (must succeed), then

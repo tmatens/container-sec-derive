@@ -15,9 +15,16 @@
 name: ClusterFuzzLite batch fuzzing
 
 on:
-  schedule:
-    - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC
-  workflow_dispatch:
+  # KNOWN-BROKEN — the weekly schedule is disabled until the Go fuzz build is
+  # fixed (issue #174). A validation dispatch (run 27800396840) failed at the
+  # `Build fuzzers` step (compile_native_go_fuzzer) — csd is on Go 1.26 and the
+  # OSS-Fuzz base-builder-go toolchain / go-118-fuzz-build path needs sorting.
+  # The build log is firewalled from the dev sandbox; pinpointing it needs a
+  # human glance at the run or a local docker repro. Re-enable this cron once
+  # the build is green:
+  #   schedule:
+  #     - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC
+  workflow_dispatch: # dispatch stays on for iterating the fix
 
 permissions: {}
 

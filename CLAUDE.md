@@ -47,17 +47,30 @@ closed-loop "meets intent" proof need a real host, and the plan to close those
 gaps is tracked in **issue #116**.
 
 Live-BPF CI (`.github/workflows/integration.yml`) gates PRs beyond the unit
-suite: a per-PR smoke job runs `scripts/smoke_wsl2.sh` against real containers on
-a hosted runner (synthetic fixture is the deterministic gate; the reference
-images are informational — they can legitimately observe zero post-attach cap
-events per `docs/known-deltas.md`). A second matrix (`scripts/smoke_fs.sh`,
-`make smoke-fs`) exercises the v0.2 `--observe fs` trace_open path; the
-synthetic exerciser is its deterministic gate, the reference images
-informational. The kretprobe miss-rate measurement
-(`scripts/kretprobe_missrate.sh`, `make missrate`) is `workflow_dispatch`-only
-(`run_missrate=true`) to conserve minutes. Both jobs post an allowlisted,
-secrets-free result comment on the PR. Locally: `make smoke-wsl2`, `make missrate`
-(need docker + pinned `ig` + root — see `docs/dev-setup.md`).
+suite, **trimmed for Actions cost** (2026-06-19; see `docs/testing.md`). The
+smoke scripts — `smoke_wsl2.sh` (caps),
+`smoke_fs.sh`, `smoke_device.sh`, `smoke_capadd.sh`, `smoke_egress.sh` (incl. the
+DNS leg) — all share the synthetic exerciser as the **deterministic hard gate**;
+the postgres/caddy/tailscale reference images are informational (they can
+legitimately observe zero post-attach events, `docs/known-deltas.md`). Cadence:
+- **Per-PR** (the `smoke` job, keyed on `github.event_name`): **amd64 only,
+  synthetic-only (`SMOKE_ONLY=synthetic`), 10s window** (closed-loop 15s). The
+  deterministic gates fire within ~1-2s of attach (500ms init-window), so 10s is
+  ample; ~1.5-2 min vs the old ~6.5 min.
+- **Every-3-days `schedule` + `workflow_dispatch`**: the **full reference set at
+  30s**, plus a **native `ubuntu-24.04-arm` leg** (runner matrix) that runs the
+  synthetic gates lean (synthetic-only/10s, closed-loop skipped — arch-agnostic)
+  to prove the eBPF attach/parse path on arm64, since we ship arm64 artifacts. A
+  dispatch `duration` input overrides the window. `ig` install is per-arch.
+- The kretprobe miss-rate measurement (`scripts/kretprobe_missrate.sh`,
+  `make missrate`) and the bisection job are `workflow_dispatch`-only.
+
+The smoke job posts an allowlisted, secrets-free result comment on the PR
+(grep `^(PASS|FAIL|INFO|smoke-<x>:)` — prefix diagnostics with `INFO` to surface
+them, since the Actions log API is unreadable from the container). **CodeQL is
+on an every-3-days schedule + `workflow_dispatch` (TEMPORARY, #165 — restore the
+per-PR trigger when development slows), not per-PR.** Locally: `make smoke-wsl2`,
+`make missrate` (need docker + pinned `ig` + root — see `docs/dev-setup.md`).
 
 ## Commit & PR workflow
 

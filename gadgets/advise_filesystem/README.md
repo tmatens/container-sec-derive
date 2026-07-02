@@ -15,9 +15,13 @@ front-end.
 
 - `files` — raw per-(container, path) map iterator of write-intent opens (mntns
   key + resolved `path` + `count`), flushed on stop. Consumed by the WASM operator.
-- `advise` — `read_only: true` plus a sorted `tmpfs:` list of the directories the
-  container wrote to, one packet per container. Carries a review caveat: a tmpfs
-  path that must persist should be a named volume instead.
+- `advise` — the k8s `securityContext` field `readOnlyRootFilesystem: true` plus a
+  neutral `writable_paths:` list of the directories the container wrote to, one
+  packet per container. The front-end maps `writable_paths` to Compose `tmpfs:`,
+  k8s `emptyDir` volumes, or a persistent volume where a path must survive.
+
+Runtime-setup (runc) writes are suppressed in-eBPF (comm `runc[:...]`), like
+`advise_seccomp`, so the list is workload-minimal.
 
 ## Prior art
 

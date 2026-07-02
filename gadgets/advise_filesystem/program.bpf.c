@@ -33,6 +33,8 @@
 #define O_TRUNC 00001000
 #define O_APPEND 00002000
 
+#define TASK_COMM_LEN 16
+
 // write_intent reports whether an open() flags value implies the file may be
 // written (as opposed to a pure O_RDONLY open).
 static __always_inline bool write_intent(int flags)
@@ -42,6 +44,16 @@ static __always_inline bool write_intent(int flags)
 	if (flags & (O_CREAT | O_TRUNC | O_APPEND))
 		return true;
 	return false;
+}
+
+// is_runc reports whether comm belongs to the container runtime's setup process
+// ("runc" / "runc:[...]"). Writes it makes are container-creation writes, not
+// workload writes, and are suppressed — the same runc boundary advise_seccomp
+// uses to skip runc's setup syscalls.
+static __always_inline bool is_runc(const char comm[TASK_COMM_LEN])
+{
+	return comm[0] == 'r' && comm[1] == 'u' && comm[2] == 'n' &&
+	       comm[3] == 'c';
 }
 
 struct fkey {
@@ -86,10 +98,15 @@ static __always_inline int trace_enter(int flags)
 {
 	__u32 pid = (__u32)bpf_get_current_pid_tgid();
 	struct args_t args = {};
+	char comm[TASK_COMM_LEN];
 
 	if (gadget_should_discard_data_current())
 		return 0;
 	if (!write_intent(flags))
+		return 0;
+
+	bpf_get_current_comm(comm, sizeof(comm));
+	if (is_runc(comm))
 		return 0;
 
 	args.flags = flags;

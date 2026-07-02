@@ -43,8 +43,12 @@ func TmpfsDirs(writtenPaths []string) []string {
 	return dirs
 }
 
-// Render turns a container's observed write-intent paths into a read_only +
-// tmpfs recommendation. With no writes it recommends a plain read-only rootfs.
+// Render turns a container's observed write-intent paths into a neutral
+// read-only-rootfs recommendation: the k8s securityContext field
+// readOnlyRootFilesystem plus the writable directories the workload needs. The
+// front-end maps writable_paths to the target form (Compose tmpfs:, k8s emptyDir
+// volumes, or a persistent volume where a path must survive restarts). With no
+// writes it recommends a plain read-only rootfs.
 func Render(containerName string, writtenPaths []string) string {
 	dirs := TmpfsDirs(writtenPaths)
 
@@ -52,14 +56,14 @@ func Render(containerName string, writtenPaths []string) string {
 	if containerName != "" {
 		fmt.Fprintf(&b, "# %s\n", containerName)
 	}
-	b.WriteString("read_only: true\n")
+	b.WriteString("securityContext:\n  readOnlyRootFilesystem: true\n")
 	if len(dirs) == 0 {
-		b.WriteString("# no write-intent opens observed; a read-only rootfs needs no tmpfs\n")
+		b.WriteString("# no write-intent opens observed; a read-only rootfs needs no writable paths\n")
 		return b.String()
 	}
-	b.WriteString("# review: tmpfs entries are writable paths not on a volume;\n")
-	b.WriteString("# move any that must persist to a named volume instead.\n")
-	b.WriteString("tmpfs:\n")
+	b.WriteString("# writable directories the workload needs; the front-end maps these to\n")
+	b.WriteString("# tmpfs / emptyDir, or a persistent volume where a path must survive:\n")
+	b.WriteString("writable_paths:\n")
 	for _, d := range dirs {
 		fmt.Fprintf(&b, "  - %s\n", d)
 	}

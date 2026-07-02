@@ -12,9 +12,13 @@ multi-format output, stay in the csd/compose-lint front-end.
 ## What it emits
 
 - `devices` — raw per-(container, /dev path) map iterator, flushed on stop.
-- `advise` — a `devices:` grant listing the non-default `/dev` nodes the
-  container opened (1:1 host:container mapping the front-end can rewrite), or a
-  note that no grant is required. One packet per container.
+- `advise` — a neutral `device_nodes:` list of the non-default `/dev` nodes the
+  container opened, or a note that none are required. One packet per container.
+  The front-end maps these to Compose `devices:` / docker `--device` (k8s needs a
+  device plugin, so there is no direct securityContext form).
+
+Runtime-setup (runc) device opens are suppressed in-eBPF (comm `runc[:...]`),
+like `advise_seccomp`, so the list is workload-minimal.
 
 ## Prior art
 

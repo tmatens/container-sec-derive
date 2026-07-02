@@ -44,12 +44,12 @@ echo "-----------------------"
 
 echo "== assertions =="
 fail=0
-grep -q "devices:"  <<<"$OUT" || { echo "FAIL: no devices grant emitted"; fail=1; }
-grep -q "$DEVICE"   <<<"$OUT" || { echo "FAIL: expected $DEVICE in grant"; fail=1; }
-grep -q "/dev/null" <<<"$OUT" && { echo "FAIL: default node /dev/null leaked into grant"; fail=1; }
+grep -q "device_nodes:" <<<"$OUT" || { echo "FAIL: no device_nodes list emitted"; fail=1; }
+grep -q "$DEVICE"       <<<"$OUT" || { echo "FAIL: expected $DEVICE in list"; fail=1; }
+grep -q "/dev/null"     <<<"$OUT" && { echo "FAIL: default node /dev/null leaked into list"; fail=1; }
 
 if [ "$fail" -eq 0 ]; then
-  echo "PASS: advise_devices granted $DEVICE and excluded default nodes"
+  echo "PASS: advise_devices listed $DEVICE and excluded default nodes"
 else
   echo "E2E FAILED"; exit 1
 fi

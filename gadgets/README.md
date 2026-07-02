@@ -59,3 +59,44 @@ operator to a core `generate_*` operator enabled by a datasource annotation,
 exactly as `advise_networkpolicy` uses `generate_networkpolicy.enable`. Start with
 `advise_capabilities` against the endorsed, unbuilt issue #173 — comment there to
 confirm current maintainer appetite before opening a PR.
+
+## Differences from core Inspektor Gadget
+
+These gadgets are **advisors**, not tracers, and they differ from the core
+capabilities/open tooling in specific, intentional ways a reviewer should know:
+
+**`advise_capabilities` vs the core `trace_capabilities` tracer**
+
+| | `trace_capabilities` (core) | `advise_capabilities` (here) |
+|---|---|---|
+| Output | one event per capability check (stream) | one k8s `securityContext` per container (aggregate) |
+| Aggregation | none | per-mntns union of held caps (u64 bitmap over the 41 caps), flushed on stop |
+| Denials | reports `capable=false` too | **held-only** — a denied check means the cap isn't in the workload's granted set; insufficiency is the front-end's `verify` job |
+| runc setup caps | reported (raw tracer) | **suppressed** in-eBPF (comm `runc[:...]`), like `advise_seccomp` |
+| Rich context | audit flag, insetid, kernel/user stack, syscall, userns | **dropped** — an advisor needs "which caps, per container," not forensics |
+| Kept from core | — | the real-vs-subjective credential guard (overlayfs copy-up) so overridden-cred checks don't inflate the set |
+
+So `advise_capabilities` is `trace_capabilities`'s signal, reduced to the
+minimal per-container grant and rendered as the artifact issue #173 asks for. It
+is **not** a replacement for the tracer — it answers a different question.
+
+**`advise_filesystem` / `advise_devices` vs core**
+
+IG has **no** open-based advisor; core ships only the `trace_open` tracer. These
+add per-container aggregation of write-intent opens (→ `readOnlyRootFilesystem` +
+writable dirs) and `/dev` opens (→ non-default device nodes), both runc-suppressed
+and mntns-keyed, reusing `trace_open`'s path resolution.
+
+**Shared, honest limits (all three)**
+
+- Dynamic-observation floor: only what the workload exercised in the window is
+  seen — a signal, not a proof; the front-end grades confidence.
+- The capability bit→name mapping assumes kernel order (0..40); guarded by a unit
+  test against the canonical list.
+- On the `--containername` path, ig's own mntns filter already excludes
+  pre-registration runc activity, so runc suppression is belt-and-suspenders
+  there and load-bearing mainly for whole-host observation.
+- Product judgement — confidence rubric, entrypoint cross-check, evidence
+  sidecar, volume-vs-tmpfs correlation, Compose/OCI formatting — is deliberately
+  **not** in these gadgets; it lives in the csd/compose-lint front-end. That
+  scoping is what keeps them upstream-acceptable.

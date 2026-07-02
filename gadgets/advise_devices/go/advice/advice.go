@@ -66,7 +66,11 @@ func NonDefaultDevices(devicePaths []string) []string {
 	return out
 }
 
-// Render turns a container's observed /dev opens into a minimal devices: grant.
+// Render turns a container's observed /dev opens into a neutral list of the
+// non-default device nodes it needs. The front-end maps these to the target
+// form (Compose devices:, docker --device; Kubernetes needs a device plugin, so
+// there is no direct securityContext equivalent). Emitting the raw nodes keeps
+// that mapping — and any host:container remapping — a front-end concern.
 func Render(containerName string, devicePaths []string) string {
 	devs := NonDefaultDevices(devicePaths)
 
@@ -75,14 +79,14 @@ func Render(containerName string, devicePaths []string) string {
 		fmt.Fprintf(&b, "# %s\n", containerName)
 	}
 	if len(devs) == 0 {
-		b.WriteString("# no non-default device nodes opened; no devices: grant required\n")
+		b.WriteString("# no non-default device nodes opened; no device grant required\n")
 		return b.String()
 	}
-	b.WriteString("devices:\n")
+	b.WriteString("# non-default device nodes the workload opened; the front-end maps these\n")
+	b.WriteString("# to compose devices: / docker --device (k8s requires a device plugin):\n")
+	b.WriteString("device_nodes:\n")
 	for _, d := range devs {
-		// docker-compose devices: entries are host:container; a 1:1 mapping is
-		// the safe default the front-end can rewrite.
-		fmt.Fprintf(&b, "  - %s:%s\n", d, d)
+		fmt.Fprintf(&b, "  - %s\n", d)
 	}
 	return b.String()
 }

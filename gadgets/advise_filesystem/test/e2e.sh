@@ -40,12 +40,12 @@ echo "-----------------------"
 
 echo "== assertions =="
 fail=0
-grep -q "read_only: true" <<<"$OUT" || { echo "FAIL: no read_only: true baseline"; fail=1; }
-grep -q "tmpfs:"          <<<"$OUT" || { echo "FAIL: no tmpfs block"; fail=1; }
-grep -q "/var/lib/app"    <<<"$OUT" || { echo "FAIL: expected tmpfs dir /var/lib/app not derived"; fail=1; }
+grep -q "readOnlyRootFilesystem: true" <<<"$OUT" || { echo "FAIL: no readOnlyRootFilesystem baseline"; fail=1; }
+grep -q "writable_paths:"              <<<"$OUT" || { echo "FAIL: no writable_paths block"; fail=1; }
+grep -q "/var/lib/app"                 <<<"$OUT" || { echo "FAIL: expected writable dir /var/lib/app not derived"; fail=1; }
 
 if [ "$fail" -eq 0 ]; then
-  echo "PASS: advise_filesystem recommended read_only: true + tmpfs /var/lib/app"
+  echo "PASS: advise_filesystem recommended readOnlyRootFilesystem + writable_paths /var/lib/app"
 else
   echo "E2E FAILED"; exit 1
 fi

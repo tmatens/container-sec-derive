@@ -41,8 +41,6 @@ func TestNonDefaultDevices(t *testing.T) {
 
 func TestRenderNoNonDefault(t *testing.T) {
 	out := Render("app", []string{"/dev/null", "/dev/urandom"})
-	// The note text itself mentions "devices:", so assert on the absence of an
-	// actual device list entry rather than the substring.
 	if strings.Contains(out, "  - /dev") {
 		t.Errorf("only-default devices should not emit any device entries:\n%s", out)
 	}
@@ -51,15 +49,15 @@ func TestRenderNoNonDefault(t *testing.T) {
 	}
 }
 
-func TestRenderDevicesGrant(t *testing.T) {
+func TestRenderDeviceNodes(t *testing.T) {
 	out := Render("gpu-app", []string{"/dev/dri/card0", "/dev/null", "/dev/fuse"})
 	if !strings.HasPrefix(out, "# gpu-app\n") {
 		t.Errorf("expected container comment header:\n%s", out)
 	}
-	// /dev/null filtered; /dev/dri/card0 and /dev/fuse kept, sorted, 1:1 mapped.
-	want := "devices:\n  - /dev/dri/card0:/dev/dri/card0\n  - /dev/fuse:/dev/fuse\n"
+	// /dev/null filtered; /dev/dri/card0 and /dev/fuse kept, sorted, raw nodes.
+	want := "device_nodes:\n  - /dev/dri/card0\n  - /dev/fuse\n"
 	if !strings.Contains(out, want) {
-		t.Errorf("expected devices block %q in:\n%s", want, out)
+		t.Errorf("expected device_nodes block %q in:\n%s", want, out)
 	}
 }
 

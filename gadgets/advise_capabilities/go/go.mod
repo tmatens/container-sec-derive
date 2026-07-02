@@ -1,4 +1,4 @@
-module main
+module github.com/tmatens/container-sec-derive/gadgets/advise_capabilities/go
 
 go 1.25.7
 
@@ -7,7 +7,8 @@ go 1.25.7
 require github.com/inspektor-gadget/inspektor-gadget v0.51.0
 
 // If/when this gadget is upstreamed into the inspektor-gadget tree (Door 1),
-// replace the require above with the in-tree replace directive the other
-// gadgets use:
+// the other gadgets use `module main` with an in-tree replace directive:
+//   module main
 //   require github.com/inspektor-gadget/inspektor-gadget v0.0.0
 //   replace github.com/inspektor-gadget/inspektor-gadget => ../../../
+// (and the advice subpackage import path becomes main/advice).

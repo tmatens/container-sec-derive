@@ -53,9 +53,11 @@ func HeldCaps(bitmap uint64) []string {
 	return held
 }
 
-// Render turns a held-capability bitmap into a compose-style cap_drop/cap_add
-// block for one container. An empty bitmap yields cap_drop: ALL with an explicit
-// "no cap_add required" note (never a bare/malformed block).
+// Render turns a held-capability bitmap into a Kubernetes securityContext
+// capabilities block for one container — the artifact upstream issue #173 asks
+// for (drop ALL, add the minimum). Capability names use the k8s convention (no
+// CAP_ prefix). An empty bitmap yields drop: [ALL] with no add. The front-end
+// reshapes this into Compose/docker-run/OCI forms as needed.
 func Render(containerName string, bitmap uint64) string {
 	held := HeldCaps(bitmap)
 
@@ -63,14 +65,14 @@ func Render(containerName string, bitmap uint64) string {
 	if containerName != "" {
 		fmt.Fprintf(&b, "# %s\n", containerName)
 	}
-	b.WriteString("cap_drop:\n  - ALL\n")
+	b.WriteString("securityContext:\n  capabilities:\n    drop:\n      - ALL\n")
 	if len(held) == 0 {
-		b.WriteString("# no non-default capabilities observed; cap_add not required\n")
+		b.WriteString("    # no non-default capabilities observed; no add required\n")
 		return b.String()
 	}
-	b.WriteString("cap_add:\n")
+	b.WriteString("    add:\n")
 	for _, c := range held {
-		fmt.Fprintf(&b, "  - %s\n", c)
+		fmt.Fprintf(&b, "      - %s\n", c)
 	}
 	return b.String()
 }

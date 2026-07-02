@@ -80,22 +80,25 @@ func TestHeldCapsDecode(t *testing.T) {
 }
 
 func TestRenderAlwaysDropsAll(t *testing.T) {
-	// Every rendering must start from cap_drop: ALL — the whole point of the
-	// advisor is a deny-by-default baseline.
+	// Every rendering must drop ALL — the whole point of the advisor is a
+	// deny-by-default baseline.
 	for _, bm := range []uint64{0, 1 << 0, 1<<0 | 1<<23, ^uint64(0)} {
 		out := Render("c", bm)
-		if !strings.Contains(out, "cap_drop:\n  - ALL") {
-			t.Errorf("Render(%#x) missing cap_drop: ALL:\n%s", bm, out)
+		if !strings.Contains(out, "drop:\n      - ALL") {
+			t.Errorf("Render(%#x) missing capabilities drop: ALL:\n%s", bm, out)
+		}
+		if !strings.Contains(out, "securityContext:\n  capabilities:") {
+			t.Errorf("Render(%#x) not a k8s securityContext block:\n%s", bm, out)
 		}
 	}
 }
 
-func TestRenderEmptyHasNoBareCapAdd(t *testing.T) {
-	// A zero bitmap must NOT emit a dangling "cap_add:" with no entries; it must
+func TestRenderEmptyHasNoBareAdd(t *testing.T) {
+	// A zero bitmap must NOT emit a dangling "add:" with no entries; it must
 	// state explicitly that none are required.
 	out := Render("app", 0)
-	if strings.Contains(out, "cap_add:") {
-		t.Errorf("empty bitmap should not emit cap_add:\n%s", out)
+	if strings.Contains(out, "add:") {
+		t.Errorf("empty bitmap should not emit an add: list:\n%s", out)
 	}
 	if !strings.Contains(out, "no non-default capabilities observed") {
 		t.Errorf("empty bitmap should note none required:\n%s", out)
@@ -108,10 +111,10 @@ func TestRenderContainerCommentAndCaps(t *testing.T) {
 		t.Errorf("expected container comment header:\n%s", out)
 	}
 	// SYS_NICE must appear (regression guard for the SYS_NICE decode, the
-	// gadget's headline example) and caps must be listed sorted.
-	wantOrder := "cap_add:\n  - CHOWN\n  - SYS_NICE\n"
+	// gadget's headline example) and caps must be listed sorted, k8s-indented.
+	wantOrder := "    add:\n      - CHOWN\n      - SYS_NICE\n"
 	if !strings.Contains(out, wantOrder) {
-		t.Errorf("expected sorted cap_add block %q in:\n%s", wantOrder, out)
+		t.Errorf("expected sorted add block %q in:\n%s", wantOrder, out)
 	}
 }
 

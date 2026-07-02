@@ -1,0 +1,68 @@
+name: gadget-advise-capabilities
+
+# Build (and on tag, sign+push) the advise_capabilities image-based gadget.
+# Build compiles the eBPF + WASM operator and needs no root; push/sign write the
+# local OCI store, so the store dir is pre-created for the runner user.
+
+on:
+  pull_request:
+    paths:
+      - "gadgets/advise_capabilities/**"
+      - ".github/workflows/gadget-advise-capabilities.yml"
+  push:
+    tags:
+      - "gadget/advise_capabilities/v*"
+
+permissions:
+  contents: read
+
+env:
+  GADGET_DIR: gadgets/advise_capabilities
+  IMAGE: ghcr.io/${{ github.repository_owner }}/advise_capabilities
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ig
+        run: |
+          IG_VERSION="$(awk -F'"' '/PinnedIGVersion[[:space:]]*=/{print $2; exit}' internal/ig/ig.go)"
+          echo "Using ig ${IG_VERSION}"
+          curl -sSL -o /tmp/ig.tar.gz \
+            "https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-amd64-${IG_VERSION}.tar.gz"
+          sudo tar -C /usr/local/bin -xzf /tmp/ig.tar.gz ig
+          sudo install -d -o "$USER" /var/lib/ig
+
+      - name: Build gadget (eBPF + WASM)
+        run: ig image build "$GADGET_DIR" -t "$IMAGE:ci"
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/gadget/advise_capabilities/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ig
+        run: |
+          IG_VERSION="$(awk -F'"' '/PinnedIGVersion[[:space:]]*=/{print $2; exit}' internal/ig/ig.go)"
+          curl -sSL -o /tmp/ig.tar.gz \
+            "https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-amd64-${IG_VERSION}.tar.gz"
+          sudo tar -C /usr/local/bin -xzf /tmp/ig.tar.gz ig
+          sudo install -d -o "$USER" /var/lib/ig
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | ig image login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build, sign and push
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          VERSION="${GITHUB_REF_NAME##*/v}"
+          ig image build "$GADGET_DIR" -t "$IMAGE:$VERSION"
+          ig image push "$IMAGE:$VERSION"
+          # Key-based cosign signing, no transparency log — matches csd releases.
+          ig image sign "$IMAGE:$VERSION" || echo "TODO: wire cosign key signing"

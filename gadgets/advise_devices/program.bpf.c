@@ -49,8 +49,6 @@ struct {
 	__type(value, struct dkey);
 } keybuf SEC(".maps");
 
-#define TASK_COMM_LEN 16
-
 // is_dev_path reports whether path begins with "/dev/". path points into a
 // fixed-size map-value buffer, so the constant indexes are in bounds.
 static __always_inline bool is_dev_path(const char *path)
@@ -59,15 +57,9 @@ static __always_inline bool is_dev_path(const char *path)
 	       path[3] == 'v' && path[4] == '/';
 }
 
-// is_runc reports whether comm belongs to the container runtime's setup process
-// ("runc" / "runc:[...]"). Device opens it makes are container-creation opens
-// (e.g. /dev node setup), not workload device use, and are suppressed — the same
-// runc boundary advise_seccomp uses to skip runc's setup syscalls.
-static __always_inline bool is_runc(const char comm[TASK_COMM_LEN])
-{
-	return comm[0] == 'r' && comm[1] == 'u' && comm[2] == 'n' &&
-	       comm[3] == 'c';
-}
+// Runtime-setup ("runc") noise is not special-cased by process name here; see
+// the rationale in advise_capabilities/program.bpf.c. Under --containername, ig's
+// container-registration boundary already excludes the runtime's setup opens.
 
 // The fd being opened is the syscall return value, so the device path can be
 // resolved entirely at exit — no enter hook / args stashing is needed.
@@ -78,15 +70,10 @@ static __always_inline int trace_exit(struct syscall_trace_exit *ctx)
 	struct dval *v;
 	__u32 z = 0;
 	long ret = ctx->ret;
-	char comm[TASK_COMM_LEN];
 
 	if (ret < 0)
 		return 0;
 	if (gadget_should_discard_data_current())
-		return 0;
-
-	bpf_get_current_comm(comm, sizeof(comm));
-	if (is_runc(comm))
 		return 0;
 
 	k = bpf_map_lookup_elem(&keybuf, &z);

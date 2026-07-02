@@ -4,12 +4,11 @@
 # CAP_CHOWN must yield a k8s securityContext that drops ALL and adds exactly the
 # capabilities the workload used (CHOWN) — no runtime-setup caps.
 #
-# On runc suppression: the eBPF suppresses capability checks by the container
-# runtime's setup process (comm "runc[:...]"), matching advise_seccomp. In the
-# --containername path exercised here, ig's own mntns filter already excludes
-# pre-registration runc caps, so this test confirms there is no regression (the
-# derived set is workload-minimal). The suppression additionally protects the
-# whole-host observation path; that is validated by code review.
+# On runtime-setup noise: under --containername (exercised here) ig's own
+# container-registration boundary already excludes the runtime's setup caps, so
+# the derived set is workload-minimal without any comm-based filter. This test
+# asserts that minimality (add CHOWN; no setup caps like SYS_ADMIN/MKNOD). See
+# the design note in ../README.md.
 #
 # ig loads eBPF and writes the OCI store under /var/lib/ig, so ig calls need
 # root. Run as root, or with passwordless sudo scoped to the ig binary.

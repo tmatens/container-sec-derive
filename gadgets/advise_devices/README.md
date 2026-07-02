@@ -17,8 +17,9 @@ multi-format output, stay in the csd/compose-lint front-end.
   The front-end maps these to Compose `devices:` / docker `--device` (k8s needs a
   device plugin, so there is no direct securityContext form).
 
-Runtime-setup (runc) device opens are suppressed in-eBPF (comm `runc[:...]`),
-like `advise_seccomp`, so the list is workload-minimal.
+Runtime-setup device opens are excluded via ig's container-registration boundary
+(no comm-based runtime filter); see the design note in
+[`../README.md`](../README.md#design-note-runtime-setup-runc-noise).
 
 ## Prior art
 

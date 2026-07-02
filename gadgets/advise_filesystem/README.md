@@ -20,8 +20,9 @@ front-end.
   packet per container. The front-end maps `writable_paths` to Compose `tmpfs:`,
   k8s `emptyDir` volumes, or a persistent volume where a path must survive.
 
-Runtime-setup (runc) writes are suppressed in-eBPF (comm `runc[:...]`), like
-`advise_seccomp`, so the list is workload-minimal.
+Runtime-setup writes are excluded via ig's container-registration boundary (no
+comm-based runtime filter); see the design note in
+[`../README.md`](../README.md#design-note-runtime-setup-runc-noise).
 
 ## Prior art
 

@@ -34,12 +34,12 @@ tracers (`trace_open`, `trace_tcp`, `trace_dns`, `trace_capabilities`, …).
 | [`advise_devices`](advise_devices) | minimal `devices:` grant | unit + e2e (`/dev/fuse` opener → grant, defaults excluded) |
 
 `advise_capabilities` is built to the upstream `advise` bar (see issue #173): it
-suppresses runtime-setup (runc) caps in-eBPF like `advise_seccomp`, emits a k8s
-`securityContext` (alban's stated target on #173), and keeps product-specific
-judgement (confidence rubric, entrypoint cross-check, evidence sidecar, Compose
-formatting) OUT of the gadget — in the csd/compose-lint front-end. The other two
-gadgets follow the same division and would get the same treatment before a
-Door-1 PR.
+excludes runtime-setup noise via ig's own container-registration boundary (not a
+comm-based hack — see the design note below), emits a k8s `securityContext`
+(alban's stated target on #173), and keeps product-specific judgement (confidence
+rubric, entrypoint cross-check, evidence sidecar, Compose formatting) OUT of the
+gadget — in the csd/compose-lint front-end. The other two gadgets follow the same
+division.
 
 All three: eBPF (amd64+arm64) + Go→WASM operator compile via `ig image build`;
 pure aggregation host-unit-tested under `go/advice`; live signal verified by
@@ -72,7 +72,7 @@ capabilities/open tooling in specific, intentional ways a reviewer should know:
 | Output | one event per capability check (stream) | one k8s `securityContext` per container (aggregate) |
 | Aggregation | none | per-mntns union of held caps (u64 bitmap over the 41 caps), flushed on stop |
 | Denials | reports `capable=false` too | **held-only** — a denied check means the cap isn't in the workload's granted set; insufficiency is the front-end's `verify` job |
-| runc setup caps | reported (raw tracer) | **suppressed** in-eBPF (comm `runc[:...]`), like `advise_seccomp` |
+| Runtime setup noise | reported (raw tracer) | excluded via ig's container-registration boundary; no comm-based filter (see design note) |
 | Rich context | audit flag, insetid, kernel/user stack, syscall, userns | **dropped** — an advisor needs "which caps, per container," not forensics |
 | Kept from core | — | the real-vs-subjective credential guard (overlayfs copy-up) so overridden-cred checks don't inflate the set |
 
@@ -93,10 +93,28 @@ and mntns-keyed, reusing `trace_open`'s path resolution.
   seen — a signal, not a proof; the front-end grades confidence.
 - The capability bit→name mapping assumes kernel order (0..40); guarded by a unit
   test against the canonical list.
-- On the `--containername` path, ig's own mntns filter already excludes
-  pre-registration runc activity, so runc suppression is belt-and-suspenders
-  there and load-bearing mainly for whole-host observation.
 - Product judgement — confidence rubric, entrypoint cross-check, evidence
   sidecar, volume-vs-tmpfs correlation, Compose/OCI formatting — is deliberately
   **not** in these gadgets; it lives in the csd/compose-lint front-end. That
   scoping is what keeps them upstream-acceptable.
+
+### Design note: runtime-setup ("runc") noise
+
+These gadgets do **not** special-case the container runtime by process name
+(`comm == runc[:...]`). An earlier revision did, matching `advise_seccomp`'s
+runc-awareness, but it was removed because:
+
+- It is a **no-op on the container-scoped path**. Under `--containername`, ig's
+  container-registration boundary already excludes the runtime's setup activity
+  (it runs before the container's mount namespace is tracked). A verified
+  with/without-suppression differential produced identical output there.
+- Comm-string matching is **fragile and runtime-specific**: it catches `runc`
+  but not `crun`, `youki`, or other OCI runtimes IG users run under
+  containerd/CRI-O/Podman.
+
+So setup-noise exclusion relies on ig's own container boundary, which is
+runtime-agnostic. Explicit setup-noise filtering for the **whole-host**
+observation path (where the runtime's setup *is* visible) is deferred to the
+upstream design discussion on issue #173, so it can be solved consistently with
+how IG already handles this for `advise_seccomp` rather than with a bespoke
+heuristic here.

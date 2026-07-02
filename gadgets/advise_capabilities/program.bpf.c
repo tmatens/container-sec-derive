@@ -33,17 +33,15 @@
 // which fit in a single u64 bitmap. cap_capable() is called with the kernel
 // capability number, so bit N corresponds to kernel capability N.
 #define CAP_MAX 64
-#define TASK_COMM_LEN 16
 
-// is_runc reports whether comm belongs to the container runtime's setup process
-// ("runc" / "runc:[...]"). Capability checks it makes are container-creation
-// caps, not workload caps, and are suppressed — the same runc boundary
-// advise_seccomp uses to skip runc's setup syscalls.
-static __always_inline bool is_runc(const char comm[TASK_COMM_LEN])
-{
-	return comm[0] == 'r' && comm[1] == 'u' && comm[2] == 'n' &&
-	       comm[3] == 'c';
-}
+// Runtime-setup ("runc") noise: this gadget does NOT special-case the container
+// runtime by process name. Under container-scoped observation (--containername)
+// ig's own container-registration boundary already excludes the runtime's setup
+// activity — it happens before the container's mount namespace is tracked — so a
+// comm-string filter would be a no-op there and a fragile, runtime-specific
+// heuristic (runc vs crun vs youki) elsewhere. Explicit setup-noise filtering,
+// if wanted for whole-host observation, is deferred to the upstream design
+// discussion (issue #173) so it matches how IG handles this for advise_seccomp.
 
 struct key_t {
 	gadget_mntns_id mntns_id_raw;
@@ -88,16 +86,8 @@ int BPF_KPROBE(ig_cap_e, const struct cred *cred,
 	struct task_struct *task;
 	const struct cred *real_cred;
 	struct args_t args = {};
-	char comm[TASK_COMM_LEN];
 
 	if (gadget_should_discard_data_current())
-		return 0;
-
-	// Suppress the container runtime's own setup caps (comm "runc[:...]"): they
-	// are needed to create the container, not by the workload, so folding them
-	// into the derived set would over-permission the recommendation.
-	bpf_get_current_comm(comm, sizeof(comm));
-	if (is_runc(comm))
 		return 0;
 
 	// Ignore checks made with overridden (subjective) credentials — e.g.

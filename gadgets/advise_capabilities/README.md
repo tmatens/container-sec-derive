@@ -24,17 +24,19 @@ Two datasources:
   front-end reshapes it into Compose/docker-run/OCI forms and applies the
   coverage/confidence judgement before you enforce anything.
 
-### Runtime-setup (runc) suppression
+### Runtime-setup ("runc") noise
 
-The eBPF suppresses capability checks made by the container runtime's setup
-process (comm `runc[:...]`) — those are container-creation caps, not workload
-caps — the same runc boundary `advise_seccomp` uses to skip runc's setup
-syscalls. This keeps the derived set workload-minimal on whole-host observation;
-on the `--containername` path ig's own filter already excludes pre-registration
-runc caps, so the suppression is belt-and-suspenders there. The confidence
-rubric, entrypoint cross-check, and evidence sidecar stay OUT of the gadget (in
-the csd/compose-lint front-end) so the gadget's opinion is scoped to what an
-upstream `advise` gadget should own.
+The derived set excludes the container runtime's setup caps via ig's own
+container-registration boundary — under `--containername`, the runtime's setup
+runs before the container's mount namespace is tracked, so those caps never reach
+the gadget. This gadget deliberately does **not** special-case the runtime by
+process name (a `comm == runc` filter would be a no-op here and would miss
+`crun`/`youki`); explicit whole-host setup filtering is deferred to issue #173.
+See the design note in [`../README.md`](../README.md#design-note-runtime-setup-runc-noise).
+
+The confidence rubric, entrypoint cross-check, and evidence sidecar stay OUT of
+the gadget (in the csd/compose-lint front-end) so its opinion is scoped to what
+an upstream `advise` gadget should own.
 
 ## Build / sign / push (Door 2)
 

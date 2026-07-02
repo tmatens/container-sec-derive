@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gadget: [advise_capabilities, advise_filesystem]
+        gadget: [advise_capabilities, advise_filesystem, advise_devices]
     steps:
       - uses: actions/checkout@v4
 

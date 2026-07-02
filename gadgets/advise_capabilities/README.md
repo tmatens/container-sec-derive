@@ -18,9 +18,23 @@ Two datasources:
 - `capabilities` — the raw per-container held-capability bitmap (a
   `GADGET_MAPITER` over an mntns-keyed eBPF map, flushed on stop). Not rendered
   directly; consumed by the WASM operator and available to the front-end.
-- `advise` — the WASM operator's output: a `cap_drop: ALL` + `cap_add:` block per
-  container. This is the *mechanical* union; treat it as input to the front-end,
-  which applies the coverage/confidence judgement before you enforce anything.
+- `advise` — the WASM operator's output: a Kubernetes `securityContext`
+  capabilities block (`drop: [ALL]` + the minimal `add:`) per container — the
+  artifact upstream issue #173 asks for. This is the *mechanical* union; the
+  front-end reshapes it into Compose/docker-run/OCI forms and applies the
+  coverage/confidence judgement before you enforce anything.
+
+### Runtime-setup (runc) suppression
+
+The eBPF suppresses capability checks made by the container runtime's setup
+process (comm `runc[:...]`) — those are container-creation caps, not workload
+caps — the same runc boundary `advise_seccomp` uses to skip runc's setup
+syscalls. This keeps the derived set workload-minimal on whole-host observation;
+on the `--containername` path ig's own filter already excludes pre-registration
+runc caps, so the suppression is belt-and-suspenders there. The confidence
+rubric, entrypoint cross-check, and evidence sidecar stay OUT of the gadget (in
+the csd/compose-lint front-end) so the gadget's opinion is scoped to what an
+upstream `advise` gadget should own.
 
 ## Build / sign / push (Door 2)
 

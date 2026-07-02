@@ -29,9 +29,17 @@ tracers (`trace_open`, `trace_tcp`, `trace_dns`, `trace_capabilities`, …).
 
 | Gadget | Emits | Validated |
 |---|---|---|
-| [`advise_capabilities`](advise_capabilities) | `cap_drop: ALL` + minimal `cap_add` | unit + e2e (CAP_CHOWN container → `cap_add: CHOWN`) |
+| [`advise_capabilities`](advise_capabilities) | k8s `securityContext` (drop ALL + minimal add); runc-setup caps suppressed in-eBPF | unit + e2e (CAP_CHOWN container → `add: [CHOWN]`, no setup caps) |
 | [`advise_filesystem`](advise_filesystem) | `read_only: true` + `tmpfs:` dirs | unit + e2e (file-writer → `tmpfs: /var/lib/app`) |
 | [`advise_devices`](advise_devices) | minimal `devices:` grant | unit + e2e (`/dev/fuse` opener → grant, defaults excluded) |
+
+`advise_capabilities` is built to the upstream `advise` bar (see issue #173): it
+suppresses runtime-setup (runc) caps in-eBPF like `advise_seccomp`, emits a k8s
+`securityContext` (alban's stated target on #173), and keeps product-specific
+judgement (confidence rubric, entrypoint cross-check, evidence sidecar, Compose
+formatting) OUT of the gadget — in the csd/compose-lint front-end. The other two
+gadgets follow the same division and would get the same treatment before a
+Door-1 PR.
 
 All three: eBPF (amd64+arm64) + Go→WASM operator compile via `ig image build`;
 pure aggregation host-unit-tested under `go/advice`; live signal verified by

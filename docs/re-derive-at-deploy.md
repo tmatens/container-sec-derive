@@ -70,6 +70,10 @@ workload needs → `add`; this one would break at runtime), and **`not_minimized
 candidate set is the declared `cap_add` **unioned** with the Docker default set,
 so both over-grants and missing caps are detectable.
 
+The **exit code is the gate signal** — `0` matches, `10` not-minimized, `11`
+over-permissioned, `12` under-permissioned — so a job can `fail >= 12` and warn
+on the rest, or pick its own threshold.
+
 ## The part re-derivation does *not* solve: the predicate
 
 Deriving against the real config removes the matching guesswork, but **not** the
@@ -82,12 +86,20 @@ a passing workload — which is per-service knowledge, supplied via `PREDICATE`.
 
 ## Where it belongs
 
-This is a **deploy/promote-time** step, not an authoring-time one: that's where
+This is a **deploy/promote-time** concern, not an authoring-time one: that's where
 the exact image + config are in hand, and where the result can gate. It
 complements — does not replace — the static authoring hint, which stays advisory
-(a pointer that admits it can't see your runtime). The homelab deploy pipeline
-(`deploy.sh` health-check + rollback) is the natural host: derive the minimum
-against the just-built service and compare it to the compose's declared caps.
+(a pointer that admits it can't see your runtime).
+
+**It does not belong *inline* in the deploy hot path.** The drop-test takes
+minutes per service and spins up throwaway containers under varied cap sets — far
+too heavy to run inside `deploy.sh` before a `docker compose up`. The right home
+is a **scheduled / on-demand job on the self-hosted BPF runner** (the same place
+the catalog re-derivation loop runs): it reads the services' committed compose
+files, runs the deploy check against each, and reports verdicts (or opens a PR /
+fails on `under_permissioned`) — off the deploy critical path, on image-digest
+bumps and on a schedule. `deploy.sh` stays fast; the security check runs beside
+it, not within it.
 
 ## Status
 

@@ -17,6 +17,7 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/observe"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -31,6 +32,7 @@ type DevicePipelineOpts struct {
 	IGBin         string
 	Duration      time.Duration
 	Workload      string // --workload path recorded on the sidecar + fed to device confidence
+	RuntimeBin    string // container CLI for the image-digest lookup (internal/runtime); empty → docker
 }
 
 // ProduceDeviceObservation runs the fixture-or-live device observe path
@@ -77,6 +79,9 @@ func ProduceDeviceObservation(opts DevicePipelineOpts, stderr io.Writer) (*sidec
 	if opts.Fixture == "" {
 		s.DurationSeconds = int(opts.Duration.Seconds())
 	}
+	// Digest-pin for the compose-lint-profile contract (digest-only helper;
+	// devices never observes caps).
+	caps.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
 	ComputeDeviceConfidence(s)
 	return s, nil
 }

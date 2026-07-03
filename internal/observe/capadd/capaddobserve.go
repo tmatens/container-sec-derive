@@ -17,6 +17,7 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/observe"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -34,6 +35,7 @@ type CapaddPipelineOpts struct {
 	IGBin         string
 	Duration      time.Duration
 	Workload      string
+	RuntimeBin    string // container CLI for the image-digest lookup (internal/runtime); empty → docker
 }
 
 // ProduceCapaddObservation runs the fixture-or-live capadd observe path
@@ -79,6 +81,10 @@ func ProduceCapaddObservation(opts CapaddPipelineOpts, stderr io.Writer) (*sidec
 	if opts.Fixture == "" {
 		s.DurationSeconds = int(opts.Duration.Seconds())
 	}
+	// Digest-pin for the compose-lint-profile contract (digest-only helper;
+	// the capadd validator re-aggregates caps but does not observe an image's
+	// entrypoint caps, so it uses the lightweight digest lookup).
+	caps.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
 	computeCapaddConfidence(s)
 	return s, nil
 }

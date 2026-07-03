@@ -171,6 +171,9 @@ func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer)
 	s.ObservedAt = observedAt
 	s.Workload = opts.Workload
 	caps.ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.RuntimeBin, opts.Fixture != "" || opts.DeviceFixture != "", stderr)
+	// Live digest fallback (see caps.ProduceObservation): robustly pin via the
+	// container's image ID when the cross-check couldn't. No-op if already set.
+	caps.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "" || opts.DeviceFixture != "", stderr)
 	computePrivilegedConfidence(s)
 	return s, nil
 }

@@ -11,6 +11,26 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Live digest-pinning now works for every observer (was silently broken).**
+  The `compose-lint-profile` contract and the catalog schema require a
+  digest-pinned `validated_image` (`…@sha256:…`), but a live `csd observe` run
+  never populated `image_digest`: the image name attributed from the ig event
+  stream is a bare repository (e.g. `postgres`) with no local `:latest` tag, so
+  the `docker inspect` behind digest promotion failed with `exit status 1` and
+  the digest was left empty. Only the hermetic `--inspect-fixture` path (tests)
+  ever pinned a digest, so this went unnoticed until live validation. Fixed by
+  resolving an inspectable reference from the **targeted container's image ID**
+  (`docker inspect --format '{{.Image}}'`) before the RepoDigests lookup, via a
+  new `caps.PopulateImageDigest` helper that all five compose-security observers
+  now call (caps/privileged as a fallback after the entrypoint cross-check;
+  fs/devices/capadd directly). Also threads `RuntimeBin` into the device and
+  capadd pipeline opts so the lookup honors `--runtime`. Verified end-to-end
+  against a live digest-pinned `postgres@sha256:…` container: `--observe fs
+  --format compose-lint-profile` now emits `status: validated` and clears
+  compose-lint's `scripts/validate_profiles.py` (once its CI appends `ci-smoke`).
+
 ### Changed
 
 - **`--format compose-lint-profile` reconciled to the compose-lint catalog

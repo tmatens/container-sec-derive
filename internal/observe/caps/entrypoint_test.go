@@ -3,6 +3,7 @@ package caps
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -385,6 +386,32 @@ func TestPickRepoDigest_MatchesByRepo(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPopulateImageDigest_Guards covers the hermetic no-op guards — the live
+// docker-inspect path is exercised by scripts/smoke_fs.sh, not here. These
+// guards must return before any subprocess so a fixture run (no daemon) and an
+// already-pinned sidecar are untouched.
+func TestPopulateImageDigest_Guards(t *testing.T) {
+	t.Run("fixture mode is a no-op even with a container", func(t *testing.T) {
+		s := sidecar.NewSidecar()
+		s.Image = "postgres"
+		PopulateImageDigest(s, "some-container", "", "docker", true /*fixtureMode*/, io.Discard)
+		if s.ImageDigest != "" {
+			t.Errorf("fixture mode must not set ImageDigest, got %q", s.ImageDigest)
+		}
+	})
+	t.Run("already-pinned digest is preserved (no lookup)", func(t *testing.T) {
+		s := sidecar.NewSidecar()
+		s.Image = "postgres"
+		s.ImageDigest = "sha256:" + strings.Repeat("a", 64)
+		// container set + fixtureMode false would hit docker, but the
+		// already-set guard returns first — so this stays hermetic.
+		PopulateImageDigest(s, "some-container", "", "docker", false, io.Discard)
+		if s.ImageDigest != "sha256:"+strings.Repeat("a", 64) {
+			t.Errorf("already-set ImageDigest must be preserved, got %q", s.ImageDigest)
+		}
+	})
 }
 
 func TestApplyEntrypointCrossCheck_PromotesRepoDigest(t *testing.T) {

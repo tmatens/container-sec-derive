@@ -13,6 +13,25 @@ the relevant entry.
 
 ### Fixed
 
+- **A live run that records zero events no longer looks like success (#201).**
+  A selector that matched nothing (a typo'd `--container`, a wrong `--image`, a
+  window in which the target never ran, or a no-op/broken `ig`) produced a
+  fully-formed, authoritative-looking `cap_drop: ALL` profile at exit 0 with no
+  stderr — indistinguishable from a container observed to genuinely need nothing.
+  A **live** run (fixture replay is exempt) with `events_recorded == 0` now emits
+  a stderr warning naming the selector, across the cap-family observers
+  (caps/capadd/privileged), so an operator or CI grepping stderr can tell the two
+  apart. Zero events can be legitimate (an idle container), so it stays a warning,
+  not a failure — the profile still prints. Also closes a `CheckIGVersion`
+  fail-open: a successful `ig version` that prints no parseable version (a no-op
+  binary) now warns instead of silently passing.
+- **Sidecar is chowned back to the invoking user under sudo (#209).** Live mode
+  needs root, so `sudo csd observe --out sidecar.json` created the evidence
+  `root:root 0600` — unreadable to the human who ran it (and to unprivileged
+  downstream: `jq`, the `compose-lint-profile` contribution flow). When
+  `SUDO_UID`/`SUDO_GID` are set, the sidecar is now chowned to them after writing,
+  preserving the restrictive `0600` mode (only ownership moves). Non-sudo runs are
+  untouched; the chown is best-effort and never fails the run.
 - **Live digest-pinning now works for every observer (was silently broken).**
   The `compose-lint-profile` contract and the catalog schema require a
   digest-pinned `validated_image` (`…@sha256:…`), but a live `csd observe` run

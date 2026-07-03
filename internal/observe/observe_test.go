@@ -1,6 +1,46 @@
 package observe
 
-import "testing"
+import (
+	"bytes"
+	"strings"
+	"testing"
+
+	"github.com/tmatens/container-sec-derive/internal/sidecar"
+)
+
+func TestEmitAdvisoryWarnings_ZeroEvents(t *testing.T) {
+	cases := []struct {
+		name      string
+		live      bool
+		recorded  int
+		container string
+		image     string
+		wantWarn  bool
+		wantText  string
+	}{
+		{"live zero events, container selector", true, 0, "app", "", true, `--container "app"`},
+		{"live zero events, image selector", true, 0, "", "postgres:16", true, `--image "postgres:16"`},
+		{"live zero events, no selector", true, 0, "", "", true, "the target container"},
+		{"fixture zero events is exempt", false, 0, "app", "", false, ""},
+		{"live with events does not warn", true, 5, "app", "", false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &sidecar.Sidecar{}
+			s.TraceHealth.EventsRecorded = tc.recorded
+			var buf bytes.Buffer
+			EmitAdvisoryWarnings(s, &buf, tc.live, tc.container, tc.image)
+			got := buf.String()
+			has := strings.Contains(got, "0 events recorded")
+			if has != tc.wantWarn {
+				t.Fatalf("zero-events warning present = %v, want %v (stderr: %q)", has, tc.wantWarn, got)
+			}
+			if tc.wantWarn && !strings.Contains(got, tc.wantText) {
+				t.Errorf("warning should name the selector %q, got: %q", tc.wantText, got)
+			}
+		})
+	}
+}
 
 func TestLooksLikeWSL2(t *testing.T) {
 	cases := []struct {

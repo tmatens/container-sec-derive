@@ -2,11 +2,57 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
+
+// #209: under sudo the sidecar is created root:root 0600 and the invoking user
+// can't read their own evidence. writeSidecar chowns it back to SUDO_UID/GID
+// while preserving 0600. Chowning to a *different* uid needs root, so we assert
+// the mechanism with a self-chown (SUDO_UID = current uid, which succeeds
+// unprivileged) and assert non-sudo runs are left untouched.
+func TestWriteSidecar_ChownAndMode(t *testing.T) {
+	me := os.Getuid()
+	t.Run("sudo: chowns to SUDO_UID, keeps 0600", func(t *testing.T) {
+		t.Setenv("SUDO_UID", strconv.Itoa(me))
+		t.Setenv("SUDO_GID", strconv.Itoa(os.Getgid()))
+		path := filepath.Join(t.TempDir(), "sidecar.json")
+		if err := writeSidecar(sidecar.NewSidecar(), path); err != nil {
+			t.Fatalf("writeSidecar: %v", err)
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Errorf("mode = %o, want 0600 (chown must not widen perms)", perm)
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && int(st.Uid) != me {
+			t.Errorf("owner uid = %d, want %d (SUDO_UID)", st.Uid, me)
+		}
+	})
+	t.Run("non-sudo: no SUDO_UID, still written 0600", func(t *testing.T) {
+		t.Setenv("SUDO_UID", "")
+		t.Setenv("SUDO_GID", "")
+		path := filepath.Join(t.TempDir(), "sidecar.json")
+		if err := writeSidecar(sidecar.NewSidecar(), path); err != nil {
+			t.Fatalf("writeSidecar: %v", err)
+		}
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Errorf("mode = %o, want 0600", perm)
+		}
+	})
+}
 
 func TestNewSidecar_Constants(t *testing.T) {
 	s := sidecar.NewSidecar()

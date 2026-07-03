@@ -226,6 +226,82 @@ func setcapCapsFromHistory(lines []string) []string {
 	return out
 }
 
+// PopulateImageDigest promotes the observed image's pushed digest onto
+// s.ImageDigest so the compose-lint contribution gate (and the catalog schema's
+// digest-pinned validated_image) can reference it. Unlike ApplyEntrypointCrossCheck
+// it does ONLY the digest lookup — no entrypoint-cap derivation, no
+// coverage_warnings — so the fs/devices/capadd observers, which never observe
+// capabilities, can digest-pin without acquiring caps-specific coverage warnings.
+// It is also the caps/privileged observers' live digest fallback: the entrypoint
+// cross-check pins the digest only from the (hermetic) --inspect-fixture path or
+// when the observed image name happens to be a resolvable local tag, so this
+// robust live lookup runs after it and fills the gap (guarded by the already-set
+// check, it is a no-op when the cross-check already pinned).
+//
+// The image name attributed from the ig event stream is a bare repo (e.g.
+// "postgres") with no local :latest tag, which `docker inspect` cannot resolve;
+// inspectableImageRef reads the targeted container's image ID (always
+// resolvable) instead. No-op when fixtureMode is set (no live runtime) or when a
+// digest was already attributed. A lookup failure is non-fatal: the profile
+// stays un-pinned and the compose-lint contract flags the missing digest.
+func PopulateImageDigest(s *sidecar.Sidecar, container, image, runtimeBin string, fixtureMode bool, stderrSink io.Writer) {
+	if fixtureMode || s.ImageDigest != "" {
+		return
+	}
+	if runtimeBin == "" {
+		runtimeBin = "docker"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), observe.InspectDefaultTimeout)
+	defer cancel()
+	ref := inspectableImageRef(ctx, container, image, s.Image, runtimeBin)
+	if ref == "" {
+		return
+	}
+	digests, err := inspectRepoDigests(ctx, ref, runtimeBin)
+	if err != nil {
+		if stderrSink != nil {
+			fmt.Fprintf(stderrSink, "csd: image-digest lookup unavailable: %v\n", err)
+		}
+		return
+	}
+	s.ImageDigest = pickRepoDigest(s.Image, digests)
+}
+
+// inspectableImageRef returns an image reference `<runtime> inspect` can resolve
+// for the observed target. The name attributed from the ig event stream is a
+// bare repo with no local tag; when a --container was targeted we read the
+// container's image ID (always inspectable), a --image selector is used as
+// given, and the observed name is the last resort.
+func inspectableImageRef(ctx context.Context, container, image, observed, runtimeBin string) string {
+	if container != "" {
+		out, err := exec.CommandContext(ctx, runtimeBin, "inspect", "--format", "{{.Image}}", "--", container).Output()
+		if err == nil {
+			if id := strings.TrimSpace(string(out)); id != "" {
+				return id
+			}
+		}
+	}
+	if image != "" {
+		return image
+	}
+	return observed
+}
+
+// inspectRepoDigests returns the image's RepoDigests ("<repo>@sha256:...", the
+// pushed content digests) for a resolvable ref. Lighter than inspectEntrypoint
+// (no history call) because the digest path needs only this one field.
+func inspectRepoDigests(ctx context.Context, ref, runtimeBin string) ([]string, error) {
+	out, err := exec.CommandContext(ctx, runtimeBin, "inspect", "--format", "{{json .RepoDigests}}", "--", ref).Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s inspect %s: %w", runtimeBin, ref, err)
+	}
+	var digests []string
+	if err := json.Unmarshal(bytes.TrimSpace(out), &digests); err != nil {
+		return nil, fmt.Errorf("parse repo digests: %w", err)
+	}
+	return digests, nil
+}
+
 // ApplyEntrypointCrossCheck populates s.ExpectedCapsFromEntrypoint,
 // s.CoverageWarnings, and s.crossCheckStatus. Priority order for the
 // inspection source:

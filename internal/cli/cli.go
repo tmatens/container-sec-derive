@@ -364,10 +364,11 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				Image:       *image,
 				AllMatching: *allMatching,
 			},
-			Fixture:  *fixture,
-			IGBin:    *igBin,
-			Duration: *duration,
-			Workload: *workload,
+			Fixture:    *fixture,
+			IGBin:      *igBin,
+			Duration:   *duration,
+			Workload:   *workload,
+			RuntimeBin: runtimeBin,
 		}, stderr)
 		if err != nil {
 			return err
@@ -547,12 +548,13 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				Image:       *image,
 				AllMatching: *allMatching,
 			},
-			ActiveSet: activeSet,
-			Granted:   hasGranted,
-			Fixture:   *fixture,
-			IGBin:     *igBin,
-			Duration:  *duration,
-			Workload:  *workload,
+			ActiveSet:  activeSet,
+			Granted:    hasGranted,
+			Fixture:    *fixture,
+			IGBin:      *igBin,
+			Duration:   *duration,
+			Workload:   *workload,
+			RuntimeBin: runtimeBin,
 		}, stderr)
 		if err != nil {
 			return err

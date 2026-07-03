@@ -204,6 +204,11 @@ func ProduceObservation(opts PipelineOpts, stderr io.Writer) (*sidecar.Sidecar, 
 	s.ObservedAt = observedAt
 	s.Workload = opts.Workload
 	ApplyEntrypointCrossCheck(s, opts.InspectFixture, opts.RuntimeBin, opts.Fixture != "", stderr)
+	// Live digest fallback: the cross-check pins the digest only from an
+	// --inspect-fixture or a resolvable-tag image name; this robust lookup
+	// (via the container's image ID) fills the gap for a live run. No-op when
+	// the cross-check already pinned.
+	PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
 	ComputeConfidence(s)
 	return s, nil
 }

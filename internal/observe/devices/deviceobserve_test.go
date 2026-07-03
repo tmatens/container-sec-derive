@@ -31,7 +31,7 @@ func TestProduceDeviceObservationFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.SchemaVersion != "1.5" || s.ToolVersion != "0.6.0" {
+	if s.SchemaVersion != "1.5" || s.ToolVersion != "0.7.0" {
 		t.Errorf("version = %s / %s, want 1.5 / 0.6.0", s.SchemaVersion, s.ToolVersion)
 	}
 	if s.DeviceRecommendation == nil {

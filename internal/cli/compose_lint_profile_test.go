@@ -79,7 +79,7 @@ func TestWriteComposeLintProfile_CleanEmitsContributableEntry(t *testing.T) {
 	for _, want := range []string{
 		"derivation:",
 		"tool: container-sec-derive",
-		`tool_version: "0.6.0"`,
+		`tool_version: "0.7.0"`,
 		`sidecar_schema_version: "1.5"`,
 		"observer: caps",
 		"validated_image: docker.io/library/postgres@sha256:deadbeef",

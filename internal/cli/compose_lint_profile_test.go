@@ -54,32 +54,50 @@ func TestWriteComposeLintProfile_CleanEmitsContributableEntry(t *testing.T) {
 	}
 	got := buf.String()
 
-	// Top-level key: short name derived from the image ref, no exploratory prefix.
-	if !strings.HasPrefix(got, "postgres:\n") {
-		t.Errorf("expected bare 'postgres:' top-level key, got:\n%s", got)
-	}
-	if strings.Contains(got, "exploratory:") {
-		t.Errorf("clean emit must not produce exploratory: block:\n%s", got)
-	}
-	// Caps flow-sequence, deterministic order.
-	if !strings.Contains(got, "caps: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]") {
-		t.Errorf("caps line missing or misordered:\n%s", got)
-	}
-	// Derivation + validated_* block. These are what the receiving catalog
-	// keys on; missing any of them is a shape regression.
+	// Aggregate envelope: catalog schema_version, normalized image field,
+	// validated status, single capabilities dimension. No exploratory markers.
 	for _, want := range []string{
-		"derivation:",
-		"tool: container-sec-derive",
-		`schema_version: "1.5"`,
-		"duration_seconds: 600",
-		"confidence: moderate",
-		"validated_image: postgres:16@sha256:deadbeef",
-		"validated_date: 2026-04-22",
-		"validated_via: [bpf-observation]",
+		"schema_version: \"1.0\"\n",
+		"image: docker.io/library/postgres\n",
+		"status: validated\n",
+		"dimensions:\n",
+		"  capabilities:\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected %q in output, got:\n%s", want, got)
 		}
+	}
+	// cap_drop: [ALL] + cap_add flow-sequence, deterministic order.
+	if !strings.Contains(got, "    cap_drop: [ALL]\n") {
+		t.Errorf("cap_drop: [ALL] line missing:\n%s", got)
+	}
+	if !strings.Contains(got, "    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]\n") {
+		t.Errorf("cap_add line missing or misordered:\n%s", got)
+	}
+	// Per-dimension derivation. These are what the catalog gate keys on;
+	// missing any of them is a shape regression.
+	for _, want := range []string{
+		"derivation:",
+		"tool: container-sec-derive",
+		`tool_version: "0.6.0"`,
+		`sidecar_schema_version: "1.5"`,
+		"observer: caps",
+		"validated_image: docker.io/library/postgres@sha256:deadbeef",
+		`validated_date: "2026-04-22"`,
+		"duration_seconds: 600",
+		"confidence: moderate",
+		"validated_via: [bpf-observation]",
+		"observation_backend:",
+		"ig_version: v0.51.0",
+		"gadgets: []",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in output, got:\n%s", want, got)
+		}
+	}
+	// workload_sha256 is a quoted 64-hex string of the committed workload.
+	if !strings.Contains(got, "workload_sha256: \"") {
+		t.Errorf("workload_sha256 line missing:\n%s", got)
 	}
 	if strings.Contains(got, "acceptance_contract_violations:") {
 		t.Errorf("clean emit must not annotate violations:\n%s", got)
@@ -137,14 +155,19 @@ func TestWriteComposeLintProfile_ExploratoryAnnotatesViolations(t *testing.T) {
 	}
 	got := buf.String()
 
-	if !strings.HasPrefix(got, "exploratory:\n") {
-		t.Errorf("exploratory emit must start with exploratory: key, got:\n%s", got)
+	// status: exploratory with the violations at the top level (schema places
+	// acceptance_contract_violations on the document, not under a dimension),
+	// and the dimension is still emitted (dimensions is always required).
+	if !strings.Contains(got, "status: exploratory\n") {
+		t.Errorf("exploratory emit must carry status: exploratory, got:\n%s", got)
 	}
-	// Service key nested under exploratory:, two-space indented.
-	if !strings.Contains(got, "\n  postgres:\n") {
-		t.Errorf("exploratory emit should nest 'postgres:' under exploratory:, got:\n%s", got)
+	if strings.Contains(got, "status: validated") {
+		t.Errorf("exploratory emit must not claim validated:\n%s", got)
 	}
-	// Each violation becomes an annotation line.
+	if !strings.Contains(got, "  capabilities:\n") {
+		t.Errorf("exploratory emit should still carry the capabilities dimension, got:\n%s", got)
+	}
+	// Each violation becomes an annotation line under the top-level list.
 	if !strings.Contains(got, "acceptance_contract_violations:") {
 		t.Errorf("exploratory emit should include acceptance_contract_violations block:\n%s", got)
 	}
@@ -156,24 +179,27 @@ func TestWriteComposeLintProfile_ExploratoryAnnotatesViolations(t *testing.T) {
 	}
 }
 
-func TestComposeLintKey_StripsRegistryAndTag(t *testing.T) {
+func TestComposeLintImage_Normalizes(t *testing.T) {
 	cases := []struct {
 		image string
 		want  string
 	}{
-		{"postgres:16", "postgres"},
-		{"postgres", "postgres"},
-		{"docker.io/library/postgres:16", "postgres"},
-		{"ghcr.io/tmatens/container-sec-derive:latest", "container-sec-derive"},
-		{"postgres@sha256:abc", "postgres"},
-		{"docker.io/library/postgres:16@sha256:abc", "postgres"},
+		{"postgres:16", "docker.io/library/postgres"},
+		{"postgres", "docker.io/library/postgres"},
+		{"docker.io/library/postgres:16", "docker.io/library/postgres"},
+		{"linuxserver/radarr", "docker.io/linuxserver/radarr"},
+		{"lscr.io/linuxserver/radarr:latest", "lscr.io/linuxserver/radarr"},
+		{"ghcr.io/tmatens/container-sec-derive:latest", "ghcr.io/tmatens/container-sec-derive"},
+		{"localhost:5000/foo", "localhost:5000/foo"},
+		{"postgres@sha256:abc", "docker.io/library/postgres"},
+		{"docker.io/library/postgres:16@sha256:abc", "docker.io/library/postgres"},
 		{"", "unknown"},
 	}
 	for _, tc := range cases {
 		s := sidecar.NewSidecar()
 		s.Image = tc.image
-		if got := format.ComposeLintKey(s); got != tc.want {
-			t.Errorf("format.ComposeLintKey(%q) = %q, want %q", tc.image, got, tc.want)
+		if got := format.ComposeLintImage(s); got != tc.want {
+			t.Errorf("format.ComposeLintImage(%q) = %q, want %q", tc.image, got, tc.want)
 		}
 	}
 }
@@ -219,11 +245,14 @@ func TestRun_FormatComposeLintProfile_ExploratoryEndToEnd(t *testing.T) {
 		t.Fatalf("exploratory run: %v (stderr: %s)", err, stderr.String())
 	}
 	out := stdout.String()
-	if !strings.HasPrefix(out, "exploratory:\n") {
-		t.Errorf("exploratory run did not start with exploratory: block:\n%s", out)
+	if !strings.HasPrefix(out, "schema_version: \"1.0\"\n") {
+		t.Errorf("run did not start with the catalog schema_version envelope:\n%s", out)
 	}
-	if !strings.Contains(out, "  postgres:\n") {
-		t.Errorf("exploratory run did not nest postgres: under exploratory::\n%s", out)
+	if !strings.Contains(out, "status: exploratory\n") {
+		t.Errorf("exploratory run did not carry status: exploratory:\n%s", out)
+	}
+	if !strings.Contains(out, "image: docker.io/library/postgres\n") {
+		t.Errorf("exploratory run did not normalize the image field:\n%s", out)
 	}
 	if !strings.Contains(out, "acceptance_contract_violations:") {
 		t.Errorf("exploratory run missing violations annotation:\n%s", out)

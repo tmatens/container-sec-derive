@@ -160,7 +160,7 @@ func TestWritePrivilegedComposeLintProfileContract(t *testing.T) {
 		t.Fatalf("contract should pass: %v", err)
 	}
 	out := b.String()
-	for _, want := range []string{"observer: privileged", "privileged: false", "cap_add: [SYS_NICE]", "devices: [/dev/dri/card0, /dev/net/tun]"} {
+	for _, want := range []string{"observer: privileged", "  privileged_decomposition:\n", "partial: true", "security_opt_unobserved: true", "cap_add: [SYS_NICE]", "devices: [/dev/dri/card0, /dev/net/tun]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("profile missing %q\n%s", want, out)
 		}

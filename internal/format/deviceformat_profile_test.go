@@ -38,21 +38,23 @@ func TestWriteDeviceComposeLintProfileAccepted(t *testing.T) {
 	}
 	out := b.String()
 	for _, want := range []string{
-		"gpu:",
+		"image: docker.io/library/gpu",
+		"status: validated",
+		"  devices:\n",
 		"devices: [/dev/dri/card0, /dev/net/tun]",
 		"derived_caps: [CAP_NET_ADMIN]",
 		"observer: devices",
-		`schema_version: "1.5"`,
+		`sidecar_schema_version: "1.5"`,
 		"confidence: moderate",
-		"validated_image: gpu@sha256:deadbeef",
+		"validated_image: docker.io/library/gpu@sha256:deadbeef",
 		"validated_via: [bpf-observation]",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("profile missing %q\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "exploratory:") {
-		t.Errorf("accepted profile must not be wrapped in exploratory:\n%s", out)
+	if strings.Contains(out, "status: exploratory") {
+		t.Errorf("accepted profile must not be exploratory:\n%s", out)
 	}
 }
 
@@ -71,8 +73,8 @@ func TestWriteDeviceComposeLintProfileContractGate(t *testing.T) {
 	if err := WriteDeviceComposeLintProfile(&b, s, true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(b.String(), "exploratory:") {
-		t.Errorf("exploratory output should be wrapped:\n%s", b.String())
+	if !strings.Contains(b.String(), "status: exploratory") {
+		t.Errorf("exploratory output should carry status: exploratory:\n%s", b.String())
 	}
 	if !strings.Contains(b.String(), "image_digest missing") {
 		t.Errorf("violations should be listed:\n%s", b.String())

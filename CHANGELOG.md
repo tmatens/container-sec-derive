@@ -11,6 +11,36 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Changed
+
+- **`--format compose-lint-profile` reconciled to the compose-lint catalog
+  schema (csd#218, compose-lint#360 step 1).** The formatter now emits the
+  canonical `profile.schema.json` (Draft 2020-12) shape compose-lint's
+  contribution gate enforces, replacing the earlier flat, bare-short-name
+  fragment. Across all five observers (caps/fs/devices/capadd/privileged) the
+  output is now an **aggregate-per-image document**: top-level
+  `schema_version: "1.0"` (the *catalog* schema version), a normalized `image:`
+  field (registry+namespace expanded to Docker defaults, tag/digest stripped —
+  `postgres` → `docker.io/library/postgres`, mirroring compose-lint's
+  `normalize_repository`), `status: validated|exploratory`, and a `dimensions:`
+  map keyed by dimension (`caps → capabilities` with explicit `cap_drop: [ALL]`,
+  `fs → filesystem`, `devices → devices`, `capadd → cap_add_validation`,
+  `privileged → privileged_decomposition`). Per-dimension `derivation` gains
+  `sidecar_schema_version` (was `schema_version`), `observer`, `workload_sha256`
+  (sha256 of the committed workload), and `observation_backend {ig_version,
+  gadgets: []}`; `validated_image`/`validated_date`/`validated_via` moved inside
+  `derivation`. The `--allow-exploratory` path now sets `status: exploratory`
+  with a top-level `acceptance_contract_violations:` list instead of the old
+  `exploratory:` wrapper. The privileged dimension drops the invalid
+  `privileged: false` line for schema-mandated `partial: true` +
+  `security_opt_unobserved: true`. **Merge model = decision A** (csd#218 §Open
+  decision): each run emits one dimension; the catalog automation unions
+  per-observer runs into one profile per image (no `csd merge` subcommand). No
+  sidecar `schema_version` change (still 1.5); this is an output-shape change to
+  one formatter. Output validated against the real compose-lint
+  `profile.schema.json`. Exported `format.ComposeLintKey` (bare-short-name) is
+  replaced by `format.ComposeLintImage` (normalized repo ref).
+
 ### Added
 
 - **`--runtime docker|podman` flag — rootful podman support (issue #164).**

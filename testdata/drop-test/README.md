@@ -39,6 +39,16 @@ merely alive), reading the container name from `$DROP_TEST_CONTAINER`.
   `[DAC_OVERRIDE, SETGID, SETUID, SYS_ADMIN, SYS_PTRACE]`. Run as a host monitor
   (`pid:host`, host `/proc`,`/sys`,`docker.sock` ro-mounts, host network, the
   granted set present).
+- **`caddy-caps.yaml`** — capabilities. **Validated end-to-end.** Baseline
+  `cap_drop:ALL` + the Docker default set; dropping each and re-verifying the
+  file server serves on `:80` leaves only `[NET_BIND_SERVICE]` (matches the
+  bisected `testdata/caddy/ground_truth.json`).
+- **`caddy-fs.yaml`** — filesystem. **Validated end-to-end.** caddy serves under
+  `--read-only`; `/data` (certs) and `/config` (autosave) drop-test as
+  not-required-as-tmpfs → `read_only:true, tmpfs:[]` (those paths belong on
+  persistent volumes, not tmpfs — the honest contrast to postgres's ephemeral
+  socket dir). Shared predicate `predicates/caddy.sh` (serves a `GET` on `:80`,
+  via `docker exec` so no host ports are published).
 
 ## Adding a spec
 

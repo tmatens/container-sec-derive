@@ -18,7 +18,8 @@
 #
 # Emits the drop_test.sh evidence JSON (with run_config) plus a deploy_check
 # block {recommended, declared, verdict, drop, add}; prints a one-line verdict to
-# stderr.
+# stderr. Exit code is the gate signal: 0 matches, 10 not-minimized,
+# 11 over-permissioned, 12 under-permissioned (missing caps — would break).
 set -uo pipefail
 
 COMPOSE="${1:?usage: compose_derive.sh <compose.yml> <service>}"
@@ -126,4 +127,10 @@ msg = {
     "not_minimized": f"no cap_drop: ALL — recommend cap_drop:[ALL] + cap_add:{sorted(minimum)}",
 }[verdict]
 print(f"compose_derive: {verdict} — {msg}", file=sys.stderr)
+
+# Exit codes make it a gate (mirrors csd verify): 0 matches, 10 not-minimized,
+# 11 over-permissioned, 12 under-permissioned (missing caps — would break, the
+# hard failure). A caller picks its threshold (e.g. fail >=12, warn on 10/11).
+sys.exit({"matches": 0, "not_minimized": 10,
+          "over_permissioned": 11, "under_permissioned": 12}[verdict])
 PYEOF

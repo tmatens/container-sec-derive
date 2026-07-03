@@ -35,9 +35,21 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # (needed, not declared). Declared caps are written to declared.json for the
 # post-derivation comparison.
 "$PY" - "$COMPOSE" "$SERVICE" "$PREDICATE" "$WORK/declared.json" > "$WORK/spec.yaml" <<'PYEOF'
-import sys, json, yaml
+import os, sys, json, yaml
 
 compose, service, predicate, declared_out = sys.argv[1:5]
+compose_dir = os.path.dirname(os.path.abspath(compose))
+
+def resolve_mount(v):
+    # A compose volume is "source:target[:opts]". Compose resolves a relative
+    # bind source (./x, ../x) against the compose file's directory before calling
+    # docker; docker itself does not, so do it here. Named volumes (a bare name)
+    # and absolute paths pass through untouched.
+    parts = v.split(":")
+    src = parts[0]
+    if src.startswith("./") or src.startswith("../"):
+        parts[0] = os.path.normpath(os.path.join(compose_dir, src))
+    return ":".join(parts)
 doc = yaml.safe_load(open(compose)) or {}
 svc = (doc.get("services") or {}).get(service)
 if svc is None:
@@ -72,7 +84,7 @@ run = {
     "network": str(svc.get("network_mode", "") or ""),
     "pid": str(svc.get("pid", "") or ""),
     "security_opt": [str(s) for s in (svc.get("security_opt") or [])],
-    "mounts": [str(v) for v in (svc.get("volumes") or []) if isinstance(v, str)],
+    "mounts": [resolve_mount(str(v)) for v in (svc.get("volumes") or []) if isinstance(v, str)],
     "env": env,
 }
 json.dump({"cap_add": cap_add, "cap_drop": cap_drop}, open(declared_out, "w"))

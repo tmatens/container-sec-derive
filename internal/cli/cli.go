@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
@@ -502,7 +503,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("write sidecar: %w", err)
 			}
 		}
-		observe.EmitAdvisoryWarnings(s, stderr)
+		observe.EmitAdvisoryWarnings(s, stderr, *fixture == "", *container, *image)
 		if s.TraceHealth.DropRate >= exit.DropRateAbort {
 			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
@@ -598,7 +599,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				return fmt.Errorf("write sidecar: %w", err)
 			}
 		}
-		observe.EmitAdvisoryWarnings(s, stderr)
+		observe.EmitAdvisoryWarnings(s, stderr, *fixture == "", *container, *image)
 		if s.TraceHealth.DropRate >= exit.DropRateAbort {
 			return exit.CodedErrorf(exit.DropRateExcessive,
 				"trace_health drop rate %.4f >= %.2f; profile not trustworthy (events_recorded=%d events_dropped=%d)",
@@ -693,7 +694,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	observe.EmitAdvisoryWarnings(s, stderr)
+	observe.EmitAdvisoryWarnings(s, stderr, *fixture == "", *container, *image)
 
 	// Drop rate >= 10% is "artifact-with-caveat" per PLAN.md §Exit codes:
 	// caps have already been printed; the nonzero exit is what tells CI
@@ -723,6 +724,35 @@ func writeSidecar(s *sidecar.Sidecar, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return format.WriteJSON(f, s)
+	if err := format.WriteJSON(f, s); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	chownToInvokingUser(path)
+	return nil
+}
+
+// chownToInvokingUser hands a freshly-written output file back to the human who
+// ran csd under sudo. Live mode needs root (ig needs CAP_BPF/CAP_PERFMON), so
+// `sudo csd observe --out sidecar.json` creates the file root:root 0600 — and the
+// invoking user then can't read their own evidence (or feed it to jq / the
+// compose-lint contribution flow) without sudo (#209). When SUDO_UID/SUDO_GID are
+// set, chown to them; 0600 is preserved, only ownership moves. A non-sudo
+// invocation has no SUDO_UID and is left untouched. Best-effort by design: the
+// file is already written, so a chown failure must not fail the run — it just
+// leaves ownership as-is (no worse than before).
+func chownToInvokingUser(path string) {
+	uidStr, gidStr := os.Getenv("SUDO_UID"), os.Getenv("SUDO_GID")
+	if uidStr == "" || gidStr == "" {
+		return
+	}
+	uid, err1 := strconv.Atoi(uidStr)
+	gid, err2 := strconv.Atoi(gidStr)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	_ = os.Chown(path, uid, gid)
 }

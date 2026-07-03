@@ -148,13 +148,17 @@ func CheckIGVersion(igBin string, stderr io.Writer) error {
 		return nil
 	}
 	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
+	// A successful `ig version` that prints nothing usable is a broken or no-op
+	// binary (a real ig always prints its version). Don't fail open silently —
+	// the downstream effect is a zero-event, maximally-restrictive profile. Warn
+	// so it's visible; the observe path's zero-events guard is the backstop.
+	if len(fields) == 0 || fields[0] == "" {
+		if stderr != nil {
+			fmt.Fprintf(stderr, "csd: warning: %q version produced no parseable version string; is it a real ig binary?\n", igBin)
+		}
 		return nil
 	}
 	detected := fields[0]
-	if detected == "" {
-		return nil
-	}
 	if detected != PinnedIGVersion {
 		return exit.CodedErrorf(exit.SchemaMismatch,
 			"ig %s detected, PINNED_IG_VERSION=%s (tested window %s..%s); refusing to parse — see PLAN.md §IG version pinning",

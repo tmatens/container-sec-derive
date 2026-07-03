@@ -47,9 +47,24 @@ func SortedKeys[V any](m map[string]V) []string {
 // recorded on the sidecar but only useful if reviewers can see them
 // without reading the JSON. Both are non-fatal (the ≥10% drop abort
 // stays); silent stderr is the cheapest path to making them obvious.
-func EmitAdvisoryWarnings(s *sidecar.Sidecar, stderr io.Writer) {
+func EmitAdvisoryWarnings(s *sidecar.Sidecar, stderr io.Writer, live bool, container, image string) {
 	if stderr == nil {
 		return
+	}
+	// A LIVE run that recorded zero events yields a fully-formed but
+	// maximally-restrictive profile (cap_drop: ALL) at exit 0 — and a selector
+	// that matched no running container (a typo'd --container, a wrong --image,
+	// a window in which the target never ran, or a no-op/broken `ig`) is
+	// indistinguishable at the CLI surface from a container observed to
+	// genuinely need nothing. Zero events can be legitimate (an idle container),
+	// so this is a warning, not a failure; naming the selector lets an operator
+	// — or CI grepping stderr — tell the two apart. Fixture replay is skipped: a
+	// zero-event fixture is the caller's own test input, not a live miss.
+	if live && s.TraceHealth.EventsRecorded == 0 {
+		fmt.Fprintf(stderr,
+			"csd: warning: 0 events recorded for %s — the profile is the maximally-restrictive default (nothing was observed), not a derived minimum; confirm the selector matched a running container that exercised the workload\n",
+			selectorDesc(container, image),
+		)
 	}
 	if s.TraceHealth.DropRate > 0 && s.TraceHealth.DropRate < exit.DropRateAbort {
 		fmt.Fprintf(stderr,
@@ -70,6 +85,19 @@ func EmitAdvisoryWarnings(s *sidecar.Sidecar, stderr io.Writer) {
 	// user never acts on "drop privileged: true" without seeing the gap.
 	if s.PrivilegedDecomposition != nil && s.PrivilegedDecomposition.Partial {
 		fmt.Fprintf(stderr, "csd: warning: %s\n", s.PrivilegedDecomposition.SecurityOpt)
+	}
+}
+
+// selectorDesc names the target selector for a warning message: the explicit
+// --container / --image the user passed, or a generic fallback.
+func selectorDesc(container, image string) string {
+	switch {
+	case container != "":
+		return fmt.Sprintf("--container %q", container)
+	case image != "":
+		return fmt.Sprintf("--image %q", image)
+	default:
+		return "the target container"
 	}
 }
 

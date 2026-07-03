@@ -258,6 +258,8 @@ sudo ./csd observe \
 
 If the run cannot meet the bar (a smoke run, a noisy host), pass `--allow-exploratory` to emit the same document with `status: exploratory` and an `acceptance_contract_violations:` list instead — useful for sharing a draft, not for merging into the catalog.
 
+Real profiling results against digest-pinned images (netdata capabilities, postgres read-only filesystem, homepage) — including why `cap_add` needs both runtime observation *and* bisection — are recorded in [docs/field-results.md](docs/field-results.md).
+
 ## Exit codes
 
 CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit codes](PLAN.md); the in-tree source of truth is `exit_codes.go`.

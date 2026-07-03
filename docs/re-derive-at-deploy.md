@@ -44,6 +44,32 @@ would apply one of these to both services — over-granting three capabilities o
 the second, or (in the read-only case) shipping a set that breaks the first.
 Re-deriving against each service's own config is correct for both.
 
+## The deploy check: compare the minimum to what the service declares
+
+Deriving the minimum is only half of a gate — the actionable output is the diff
+against what the service *already declares*. After the drop-test, the bridge
+compares the derived minimum to the service's `cap_add`/`cap_drop` and emits a
+`deploy_check` block plus a one-line stderr verdict:
+
+```
+$ compose_derive.sh docker-compose.yml db     # db declares cap_add:[SYS_ADMIN, DAC_OVERRIDE, SETGID, SETUID]
+compose_derive: over_permissioned — over-permissioned: drop ['SYS_ADMIN'] (declared, not needed)
+```
+```json
+"deploy_check": {
+  "recommended": { "cap_drop": ["ALL"], "cap_add": ["DAC_OVERRIDE","SETGID","SETUID"] },
+  "declared":    { "cap_drop": ["ALL"], "cap_add": ["DAC_OVERRIDE","SETGID","SETUID","SYS_ADMIN"] },
+  "verdict": "over_permissioned", "drop": ["SYS_ADMIN"], "add": []
+}
+```
+
+Verdicts: **`matches`** (declared == minimum), **`over_permissioned`** (grants
+caps it doesn't need → `drop`), **`under_permissioned`** (missing caps the
+workload needs → `add`; this one would break at runtime), and **`not_minimized`**
+(no `cap_drop: ALL` — recommend dropping all and adding the minimum). The
+candidate set is the declared `cap_add` **unioned** with the Docker default set,
+so both over-grants and missing caps are detectable.
+
 ## The part re-derivation does *not* solve: the predicate
 
 Deriving against the real config removes the matching guesswork, but **not** the

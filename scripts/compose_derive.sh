@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Re-derive a service's minimum capabilities from its ACTUAL compose config.
+# Re-derive a service's minimum capabilities from its ACTUAL compose config, and
+# compare that minimum to what the service declares — a deploy-time check.
 #
 # This is the "re-derive at deploy" path: rather than loose-matching a generic
 # catalog entry to a service by image name — which is blind to the invocation and
 # so can be silently wrong (a service run with `user:` set needs none of the
 # startup caps a default-invocation profile lists) — derive the profile against
-# the exact way THIS service runs. It reads the service out of a compose file,
-# extracts its run config (image, user, command, network/pid mode, security_opt,
-# mounts, env, and the granted cap set), generates a drop-test spec, and runs it.
+# the exact way THIS service runs, then diff the derived minimum against the
+# service's declared cap_add/cap_drop to say what to drop and what's missing.
 #
 # The correctness predicate stays per-service (a container can be "healthy" and
 # wrong — the netdata trap): supply one with PREDICATE, or the built-in generic
@@ -16,7 +16,9 @@
 #   PREDICATE=testdata/drop-test/predicates/<svc>.sh \
 #     scripts/compose_derive.sh <compose.yml> <service>
 #
-# Emits the same evidence JSON as scripts/drop_test.sh (with run_config).
+# Emits the drop_test.sh evidence JSON (with run_config) plus a deploy_check
+# block {recommended, declared, verdict, drop, add}; prints a one-line verdict to
+# stderr.
 set -uo pipefail
 
 COMPOSE="${1:?usage: compose_derive.sh <compose.yml> <service>}"
@@ -27,10 +29,14 @@ PREDICATE="${PREDICATE:-testdata/drop-test/predicates/compose_generic.sh}"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # --- extract the service's run config into a drop-test spec -----------------
-"$PY" - "$COMPOSE" "$SERVICE" "$PREDICATE" > "$WORK/spec.yaml" <<'PYEOF'
-import sys, yaml
+# Candidates = the declared cap_add UNION the Docker default set, so the derived
+# minimum can reveal both over-grants (declared, not needed) and missing caps
+# (needed, not declared). Declared caps are written to declared.json for the
+# post-derivation comparison.
+"$PY" - "$COMPOSE" "$SERVICE" "$PREDICATE" "$WORK/declared.json" > "$WORK/spec.yaml" <<'PYEOF'
+import sys, json, yaml
 
-compose, service, predicate = sys.argv[1], sys.argv[2], sys.argv[3]
+compose, service, predicate, declared_out = sys.argv[1:5]
 doc = yaml.safe_load(open(compose)) or {}
 svc = (doc.get("services") or {}).get(service)
 if svc is None:
@@ -42,26 +48,21 @@ if not image:
 name, _, tag = image.partition(":")
 tag = tag or "latest"
 
-# environment: compose allows a list [K=V] or a map {K: V}; drop-test wants K=V.
 env = svc.get("environment") or []
 if isinstance(env, dict):
     env = [f"{k}={v}" for k, v in env.items()]
 
-# command / entrypoint may be a string or a list.
 def as_list(v):
-    if not v:
-        return []
-    return v if isinstance(v, list) else [v]
+    return [] if not v else (v if isinstance(v, list) else [v])
 
-# The granted cap set is what we validate: cap_add if the service declares one,
-# else the Docker default set (what an unconfigured container carries).
 DOCKER_DEFAULT_CAPS = [
     "CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW", "SETGID",
     "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE", "SYS_CHROOT", "KILL",
     "AUDIT_WRITE",
 ]
 cap_add = [str(c).upper() for c in (svc.get("cap_add") or [])]
-candidates = cap_add or DOCKER_DEFAULT_CAPS
+cap_drop = [str(c).upper() for c in (svc.get("cap_drop") or [])]
+candidates = sorted(set(cap_add) | set(DOCKER_DEFAULT_CAPS))
 
 run = {
     "user": str(svc.get("user", "") or ""),
@@ -73,14 +74,56 @@ run = {
     "mounts": [str(v) for v in (svc.get("volumes") or []) if isinstance(v, str)],
     "env": env,
 }
+json.dump({"cap_add": cap_add, "cap_drop": cap_drop}, open(declared_out, "w"))
 spec = {
     "image": name, "tag": tag, "dimension": "capabilities",
     "fixed": [], "candidates": candidates, "run": run, "predicate": predicate,
 }
 print(yaml.safe_dump(spec, sort_keys=False))
 PYEOF
-rc=$?
-[ $rc -eq 0 ] || { cat "$WORK/spec.yaml" >&2; exit "$rc"; }
+[ $? -eq 0 ] || { cat "$WORK/spec.yaml" >&2; exit 1; }
 
-echo "compose_derive: ${SERVICE} -> ${COMPOSE}; drop-testing its granted caps under its own invocation" >&2
-PY="$PY" bash "$REPO/scripts/drop_test.sh" "$WORK/spec.yaml"
+echo "compose_derive: ${SERVICE} -> ${COMPOSE}; drop-testing under its own invocation" >&2
+if ! PY="$PY" bash "$REPO/scripts/drop_test.sh" "$WORK/spec.yaml" > "$WORK/result.json" 2>"$WORK/dt.err"; then
+    tail -3 "$WORK/dt.err" >&2; exit 3
+fi
+
+# --- compare the derived minimum to what the service declares ---------------
+"$PY" - "$WORK/result.json" "$WORK/declared.json" <<'PYEOF'
+import sys, json
+result = json.load(open(sys.argv[1]))
+declared = json.load(open(sys.argv[2]))
+minimum = set(result.get("minimum") or [])
+cap_add = set(declared.get("cap_add") or [])
+drops_all = "ALL" in {c.upper() for c in declared.get("cap_drop") or []}
+
+recommended = {"cap_drop": ["ALL"], "cap_add": sorted(minimum)}
+if drops_all:
+    over = sorted(cap_add - minimum)      # granted but not needed -> drop
+    add = sorted(minimum - cap_add)       # needed but not granted -> would break
+    verdict = ("under_permissioned" if add
+               else "over_permissioned" if over
+               else "matches")
+else:
+    over = sorted(cap_add)                # everything, since we recommend cap_drop: ALL
+    add = sorted(minimum - cap_add)
+    verdict = "not_minimized"
+
+result["deploy_check"] = {
+    "recommended": recommended,
+    "declared": {"cap_drop": sorted(declared.get("cap_drop") or []),
+                 "cap_add": sorted(cap_add)},
+    "verdict": verdict,
+    "drop": over,
+    "add": add,
+}
+print(json.dumps(result, indent=2))
+
+msg = {
+    "matches": "declared cap_add matches the derived minimum",
+    "over_permissioned": f"over-permissioned: drop {over} (declared, not needed)",
+    "under_permissioned": f"UNDER-permissioned: missing {add} (needed — would break); also drop {over}",
+    "not_minimized": f"no cap_drop: ALL — recommend cap_drop:[ALL] + cap_add:{sorted(minimum)}",
+}[verdict]
+print(f"compose_derive: {verdict} — {msg}", file=sys.stderr)
+PYEOF

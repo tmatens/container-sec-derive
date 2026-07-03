@@ -84,6 +84,25 @@ running) is a floor, and its weakness is deliberate and documented; a real
 derivation should assert the intended posture — a request served, a non-root uid,
 a passing workload — which is per-service knowledge, supplied via `PREDICATE`.
 
+**And even a decent predicate can under-derive.** Run against a real homelab
+netdata (`cap_drop:[ALL]` + `cap_add:[SYS_PTRACE, SYS_ADMIN, DAC_OVERRIDE,
+SETUID, SETGID]`, `pid:host`, host mounts) with a predicate that asserts "ready +
+non-root uid + apps.plugin up", the deploy check returned:
+
+```
+compose_derive: over_permissioned — drop ['SYS_ADMIN', 'SYS_PTRACE'] (declared, not needed)
+```
+
+That verdict is **wrong**, and instructively so. `SYS_PTRACE` is what lets
+`apps.plugin` read *per-process* metrics (tens of thousands of events in a live
+run); `SYS_ADMIN` serves a collector. The predicate confirmed netdata was *up and
+non-root* without exercising per-process monitoring, so those two caps looked
+removable. The minimum is only ever valid for what the predicate exercises —
+**workload coverage bounds the answer**, and a readiness check is not full
+coverage. Re-deriving against the real config removes the *matching* guesswork
+but inherits the predicate's blind spots; a deploy check is only as trustworthy
+as the correctness bar behind it.
+
 ## Where it belongs
 
 This is a **deploy/promote-time** concern, not an authoring-time one: that's where

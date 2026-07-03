@@ -32,13 +32,13 @@ merely alive), reading the container name from `$DROP_TEST_CONTAINER`.
 
 - **`postgres-fs.yaml`** — filesystem. **Validated end-to-end**: dropping
   `/run/postgresql` makes postgres fail to start (socket dir), so it is required.
-- **`netdata-caps.yaml`** — capabilities. **Assisted** for now: the predicate
+- **`netdata-caps.yaml`** — capabilities. **Validated end-to-end.** The predicate
   asserts the daemon still drops to a non-root uid (the "healthy-while-root"
-  trap), but its readiness poll can be flaky on a host with accumulated
-  `pid:host` netdata state; run it on a clean host and review the result until
-  the predicate is hardened. The verified minimum
-  (`SYS_PTRACE, DAC_OVERRIDE, SYS_ADMIN, SETUID, SETGID`) is recorded in the
-  catalog and in `docs/field-results.md`.
+  trap): dropping `SETUID`/`SETGID` leaves it running as root (required),
+  `CHOWN`/`FOWNER` do not (removable). Verified minimum
+  `[DAC_OVERRIDE, SETGID, SETUID, SYS_ADMIN, SYS_PTRACE]`. Run as a host monitor
+  (`pid:host`, host `/proc`,`/sys`,`docker.sock` ro-mounts, host network, the
+  granted set present).
 
 ## Adding a spec
 

@@ -1,0 +1,25 @@
+# drop-test spec: postgres minimum Linux capabilities, default (root-then-drop)
+# invocation. Baseline is cap_drop:ALL + the full Docker default cap set on a
+# FRESH data dir (so initdb runs and the root->postgres privilege drop is
+# exercised). Each default is dropped in turn and the workload + privilege-drop
+# predicate re-verified. Startup caps (SETUID/SETGID for gosu) are invisible to
+# runtime observation — drop-test is the authoritative signal, same lesson as
+# netdata.
+#
+# Derived under the filesystem dimension's RECOMMENDED config (read_only:true +
+# tmpfs:[/run/postgresql]), because the profile is applied as a unit. That config
+# adds CHOWN to the minimum: the root-owned tmpfs socket dir must be chowned to
+# the postgres user at startup — a requirement invisible when caps are derived on
+# a writable rootfs. The combined profile is then verified as a whole.
+image: docker.io/library/postgres
+tag: "16"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  read_only: true
+  tmpfs: ["/run/postgresql"]
+  env: ["POSTGRES_PASSWORD=postgres"]
+predicate: testdata/drop-test/predicates/postgres-caps.sh

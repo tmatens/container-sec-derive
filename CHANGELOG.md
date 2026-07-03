@@ -94,6 +94,8 @@ the relevant entry.
   *per-PR*-tested runtime; rootless podman / containerd / cri-o unsupported.
   No new runtime dependencies (stdlib only).
 
+## [0.6.0] - 2026-06-18
+
 ### Added
 
 - **`--observe egress` DNS/hostname correlation (issue #159), fixture path.**

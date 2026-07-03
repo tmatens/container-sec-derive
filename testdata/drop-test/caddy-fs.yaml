@@ -1,0 +1,16 @@
+# drop-test spec: caddy read-only-filesystem tmpfs minimum, default file server.
+# caddy runs correctly under --read-only: its only writes are /data (TLS certs)
+# and /config (config autosave), and it serves the file server without either
+# (they log non-fatal errors). Both are drop-tested as tmpfs candidates and come
+# out NOT required — so the fs minimum is read_only:true, tmpfs:[]. The criteria
+# doc records that /data and /config belong on PERSISTENT VOLUMES (certs/config
+# must survive restarts — do not use tmpfs), which is what caddy's standard
+# compose does.
+image: docker.io/library/caddy
+tag: "2"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/data", "/config"]
+run: {}
+predicate: testdata/drop-test/predicates/caddy.sh

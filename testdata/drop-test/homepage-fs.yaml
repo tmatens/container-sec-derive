@@ -1,0 +1,18 @@
+# drop-test spec: homepage read-only-filesystem tmpfs minimum (dashboard).
+# homepage runs correctly under --read-only with /app/config writable (its
+# config, a persistent VOLUME in real deployments — supplied here via run.tmpfs
+# as a writable stand-in, NOT part of the derived tmpfs minimum). Its one runtime
+# tmpfs need is /app/.next/cache: Next.js image optimization mkdir's it on the
+# first /_next/image request and errors (unhandledRejection) when it can't. /tmp
+# is drop-tested and comes out NOT required. Minimum: read_only:true,
+# tmpfs:[/app/.next/cache].
+image: ghcr.io/gethomepage/homepage
+tag: v1.13.2
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/app/.next/cache", "/tmp"]
+run:
+  tmpfs: ["/app/config"]
+  env: ["HOMEPAGE_ALLOWED_HOSTS=*"]
+predicate: testdata/drop-test/predicates/homepage.sh

@@ -30,6 +30,11 @@
       "matchManagers": ["dockerfile"],
       "matchUpdateTypes": ["digest", "pin"],
       "automerge": true
+    },
+    {
+      "description": "Hold the csd-authored gadgets' inspektor-gadget SDK (wasmapi/go) at PinnedIGVersion. A gadget must be built against the same ig version it runs on; bumping the SDK ahead of the pinned ig binary (internal/ig/ig.go: PinnedIGVersion) causes build-vs-runtime ABI skew. It moves ONLY as part of a deliberate ig pin bump (new testdata/ig-versions/<v> fixtures + reference-image smoke), not via Renovate.",
+      "matchDepNames": ["github.com/inspektor-gadget/inspektor-gadget"],
+      "enabled": false
     }
   ]
 }

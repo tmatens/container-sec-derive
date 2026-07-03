@@ -1,0 +1,10 @@
+# drop-test spec: postgres read-only-filesystem tmpfs minimum.
+image: docker.io/library/postgres
+tag: "16"
+dimension: filesystem
+base_fs: read_only
+fixed: []                       # tmpfs always present (none)
+candidates: ["/run/postgresql"] # tmpfs paths to drop-test
+run:
+  env: ["POSTGRES_PASSWORD=postgres"]
+predicate: testdata/drop-test/predicates/postgres.sh

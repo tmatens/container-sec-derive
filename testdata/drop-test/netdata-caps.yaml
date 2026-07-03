@@ -1,0 +1,20 @@
+# drop-test spec: netdata cap_add minimum, run as a host monitor.
+image: docker.io/netdata/netdata
+tag: v2.10.3
+dimension: capabilities
+fixed: ["SYS_PTRACE", "DAC_OVERRIDE", "SYS_ADMIN"]   # observation-confirmed used; not drop-tested
+candidates: ["CHOWN", "FOWNER", "SETUID", "SETGID"]  # drop-test these
+run:
+  pid: host
+  network: host
+  security_opt: ["apparmor=unconfined"]
+  env: ["PGID=__DOCKER_GID__"]
+  mounts:
+    - "/proc:/host/proc:ro"
+    - "/sys:/host/sys:ro"
+    - "/etc/os-release:/host/etc/os-release:ro"
+    - "/var/log:/host/var/log:ro"
+    - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    - "/etc/passwd:/host/etc/passwd:ro"
+    - "/etc/group:/host/etc/group:ro"
+predicate: testdata/drop-test/predicates/netdata.sh

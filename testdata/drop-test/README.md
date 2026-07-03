@@ -69,6 +69,14 @@ merely alive), reading the container name from `$DROP_TEST_CONTAINER`.
   chowned to the postgres user, a requirement invisible when caps are derived on
   a writable rootfs. Predicate `predicates/postgres-caps.sh` asserts the workload
   passes **and** the server (PID 1) is non-root.
+- **`homepage-fs.yaml`** — filesystem. **Validated end-to-end.** homepage serves
+  under `--read-only` with `/app/config` writable (a persistent volume, supplied
+  via `run.tmpfs` as a stand-in — not part of the minimum). Its one tmpfs need is
+  `/app/.next/cache`: a bare dashboard `GET` serves without it, but Next.js image
+  optimization `mkdir`s it on the first `/_next/image` request and errors when it
+  can't — so `predicates/homepage.sh` triggers image optimization and checks the
+  log. `/tmp` drop-tests as not required → `read_only:true,
+  tmpfs:[/app/.next/cache]`.
 
 ## Adding a spec
 
@@ -85,6 +93,9 @@ values of its sibling dimensions** (not a permissive default, and not some extra
 "hardened" config — exactly the siblings' own recommendation, so the result is
 neither under- nor over-permissioned). The `run.read_only` + `run.tmpfs` fields
 carry the filesystem dimension's recommendation into a capability drop-test.
+(`run.tmpfs` doubles as a writable stand-in for a persistent **volume** the real
+deployment provides — e.g. homepage's `/app/config` — always applied, never
+counted in the derived tmpfs minimum.)
 
 postgres is the worked example: caps derived on a writable rootfs give
 `[DAC_OVERRIDE, SETGID, SETUID]`, but the profile also recommends

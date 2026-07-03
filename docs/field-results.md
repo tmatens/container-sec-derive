@@ -86,14 +86,19 @@ gadget at the pin — the known `security_opt` gap).
 `csd --observe fs` over a ≥300s window driving a representative SQL workload
 (connect / CREATE / INSERT / SELECT / DROP / reload):
 
-- 147+ write events, 0 dropped. Every write correlated to the postgres **data
-  volume** (`/var/lib/postgresql/data`), so nothing needs a rootfs write.
-- Recommendation: **`read_only: true`, `tmpfs: []`**.
+- 147+ write events, 0 dropped. Every observed write correlated to the postgres
+  **data volume** (`/var/lib/postgresql/data`), so nothing needs a rootfs write.
+- Observation recommendation: **`read_only: true`, `tmpfs: []`**.
 - Confidence **moderate**, digest-pinned, `duration_seconds: 310`.
 
-This is a genuine `status: validated` `--format compose-lint-profile` document
-that clears compose-lint's `scripts/validate_profiles.py` (once compose-lint CI
-appends `ci-smoke` — csd emits `[bpf-observation]` only, by design).
+**Correction (drop-test):** the observation-only `tmpfs: []` was **wrong**.
+postgres creates its socket dir `/run/postgresql` **once at startup**, which is
+attach-window-blind to runtime observation — under `read_only:true` with no
+tmpfs it fails: *"could not create lock file /var/run/postgresql/…: Read-only
+file system"*. The catalog profile is drop-test-derived: **`read_only: true`,
+`tmpfs: [/run/postgresql]`**. This is the canonical case for why drop-test, not
+observation, is authoritative for filesystem/startup requirements. The
+`--format compose-lint-profile` document clears `scripts/validate_profiles.py`.
 
 ---
 
@@ -109,8 +114,17 @@ correctly-hardened deployment**. Here csd's role is *verification*, not change:
 it confirms the minimal posture rather than proposing a reduction.
 
 Note: a clean read-only workload paradoxically grades **low** confidence in the
-fs rubric — zero writes is zero *signal*, indistinguishable from "missed the
-writes" by count alone. csd is honest about this rather than over-claiming.
+fs *observation* rubric — zero writes is zero *signal*, indistinguishable from
+"missed the writes" by count alone. csd is honest about this rather than
+over-claiming.
+
+**Follow-up (drop-test):** the catalog profile is now drop-test-derived at **high**
+confidence — `read_only: true`, `tmpfs: [/app/.next/cache]`. The subtlety
+observation glossed: a bare dashboard `GET` serves read-only, but Next.js **image
+optimization** (`/_next/image`, used for icons) `mkdir`s `/app/.next/cache` and
+errors when it isn't writable. The drop-test predicate exercises image
+optimization, so the requirement is confirmed rather than assumed; `/tmp` was
+drop-tested and is not required, and `/app/config` is a persistent volume.
 
 ---
 

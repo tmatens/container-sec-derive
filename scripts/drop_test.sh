@@ -86,14 +86,17 @@ run_and_test() {
   local so; for so in "${RUN_SECOPT[@]}"; do [ -n "$so" ] && args+=(--security-opt "$so"); done
   local dv; for dv in "${RUN_DEVICES[@]}"; do [ -n "$dv" ] && args+=(--device "$dv"); done
   local e; for e in "${RUN_ENV[@]}"; do [ -n "$e" ] && args+=(-e "${e/__DOCKER_GID__/$DOCKER_GID}"); done
-  # Fixed sibling-dimension context (applied for any dimension being tested):
-  # derive under the filesystem dimension's recommended read_only + tmpfs so the
-  # minimum is valid when the whole profile is applied together. The filesystem
-  # dimension supplies its own read_only/tmpfs below, so only apply these here
-  # for non-filesystem dimensions.
+  # run.tmpfs: fixed writable dirs the container needs to run that are NOT part of
+  # this dimension's derived output, so never counted in the tmpfs minimum. Two
+  # uses: a sibling dimension's recommended tmpfs (deriving caps under the fs
+  # read_only+tmpfs, so the minimum holds when the whole profile is applied), and
+  # a stand-in for a persistent VOLUME the real deployment provides (homepage's
+  # /app/config). Applied for every dimension.
+  local ft; for ft in "${RUN_TMPFS[@]}"; do [ -n "$ft" ] && args+=(--tmpfs "$ft"); done
+  # run.read_only derives a NON-fs dimension under the fs dimension's read_only
+  # recommendation; the fs dimension supplies its own --read-only via base_fs.
   if [ "$DIM" != filesystem ]; then
     [ "${F[RUN_READONLY]}" = true ] && args+=(--read-only)
-    local ft; for ft in "${RUN_TMPFS[@]}"; do [ -n "$ft" ] && args+=(--tmpfs "$ft"); done
   fi
   if [ "$DIM" = capabilities ]; then
     args+=(--cap-drop ALL); local c; for c in "$@"; do args+=(--cap-add "$c"); done

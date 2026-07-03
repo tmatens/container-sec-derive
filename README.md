@@ -1,6 +1,6 @@
 # container-sec-derive
 
-[![release](https://img.shields.io/badge/release-v0.6.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.6.0)
+[![release](https://img.shields.io/badge/release-v0.7.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.7.0)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![signed: cosign](https://img.shields.io/badge/signed-cosign%20key--based-orange?logo=sigstore&logoColor=white)](#verifying-release-artifacts)
@@ -32,7 +32,7 @@ Point `csd` at a running container, pick an observer, and after a recording wind
 
 Every observer emits to your choice of format (Compose, `docker run`, Kubernetes, OCI, JSON, …) and writes the same canonical JSON evidence sidecar.
 
-> **Status: v0.6.0 released**, actively developed. The current observer is `caps`/`fs`/`devices`/`privileged`/`capadd`/`egress`; the Docker-socket and host-network observers are still ahead (see [ROADMAP.md](ROADMAP.md)). Full per-release history in [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.7.0 released**, actively developed. The current observer is `caps`/`fs`/`devices`/`privileged`/`capadd`/`egress`; the Docker-socket and host-network observers are still ahead (see [ROADMAP.md](ROADMAP.md)). Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Audience
 
@@ -95,13 +95,13 @@ Not supported: kernels < 5.8, cgroup v1-only hosts, and non-Docker runtimes (Pod
 Released images are published to the GitHub Container Registry:
 
 - **Package:** [`ghcr.io/tmatens/container-sec-derive`](https://github.com/tmatens/container-sec-derive/pkgs/container/container-sec-derive)
-- **Tags:** `0.6.0` and `0.6` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
+- **Tags:** `0.7.0` and `0.7` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
 
 ```sh
 # The package is private (see the COI note below) — authenticate to GHCR first.
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
 
-docker pull ghcr.io/tmatens/container-sec-derive:0.6.0
+docker pull ghcr.io/tmatens/container-sec-derive:0.7.0
 ```
 
 The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts).
@@ -371,13 +371,13 @@ The container image ships on GitHub Container Registry as **`ghcr.io/tmatens/con
 cosign verify \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.6.0
+  ghcr.io/tmatens/container-sec-derive:0.7.0
 
 # Attestations (SBOM + OpenVEX)
 cosign verify-attestation --type spdxjson \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.6.0
+  ghcr.io/tmatens/container-sec-derive:0.7.0
 
 # Vendored ig provenance — IG version, upstream per-arch tarball digests, and
 # the cosign-verified pin (predicate sourced from ig-pin/)
@@ -385,10 +385,10 @@ cosign verify-attestation \
   --type https://github.com/tmatens/container-sec-derive/attestations/ig-provenance/v1 \
   --key cosign.pub \
   --insecure-ignore-tlog \
-  ghcr.io/tmatens/container-sec-derive:0.6.0
+  ghcr.io/tmatens/container-sec-derive:0.7.0
 ```
 
-> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.6.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
+> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.7.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
 
 ## License
 

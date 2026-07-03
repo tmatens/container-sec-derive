@@ -38,7 +38,7 @@ import (
 // under 1.5 save for the schema_version string; all prior sidecars likewise.
 const (
 	SchemaVersion = "1.5"
-	ToolVersion   = "0.6.0"
+	ToolVersion   = "0.7.0"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
 	Caveat = "BPF-observed profiles reflect only the paths the workload exercised. Not a correctness proof."

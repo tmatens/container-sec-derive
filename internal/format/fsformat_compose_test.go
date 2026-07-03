@@ -91,18 +91,20 @@ func TestWriteFSComposeLintProfile_Clean(t *testing.T) {
 	}
 	out := b.String()
 	for _, want := range []string{
-		"postgres:",
+		"image: docker.io/library/postgres",
+		"status: validated",
+		"  filesystem:\n",
 		"read_only: true",
 		"tmpfs: [/var/log/postgresql, /var/run/postgresql]",
 		"observer: fs",
-		"validated_image: postgres:16@sha256:abc",
+		"validated_image: docker.io/library/postgres@sha256:abc",
 		"validated_via: [bpf-observation]",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("clean profile missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "exploratory:") {
+	if strings.Contains(out, "status: exploratory") {
 		t.Errorf("clean profile should not be exploratory:\n%s", out)
 	}
 }
@@ -127,7 +129,7 @@ func TestWriteFSComposeLintProfile_ContractGate(t *testing.T) {
 		t.Fatalf("exploratory emit failed: %v", err)
 	}
 	out := b.String()
-	if !strings.Contains(out, "exploratory:") || !strings.Contains(out, "acceptance_contract_violations:") {
+	if !strings.Contains(out, "status: exploratory") || !strings.Contains(out, "acceptance_contract_violations:") {
 		t.Errorf("exploratory output missing annotation:\n%s", out)
 	}
 }

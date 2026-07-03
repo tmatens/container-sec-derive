@@ -26,63 +26,20 @@ import (
 func WriteDeviceComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := CheckDeviceComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
-		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
-			strings.Join(violations, "\n  - "))
+		return composeLintContractError(violations)
 	}
-
-	exploratory := len(violations) > 0
-	keyIndent := ""
-	bodyIndent := "  "
-	if exploratory {
-		if _, err := fmt.Fprintln(w, "exploratory:"); err != nil {
-			return err
-		}
-		keyIndent = "  "
-		bodyIndent = "    "
-	}
-
-	key := ComposeLintKey(s)
-	if _, err := fmt.Fprintf(w, "%s%s:\n", keyIndent, key); err != nil {
-		return err
-	}
-
 	rec := s.DeviceRecommendation
 	if rec == nil {
 		rec = &sidecar.DeviceRecommendation{}
 	}
-	// devices + derived_caps as flow-style sequences to match the caps/fs
-	// entries' compact shape; both are already sorted by the decision layer.
-	if _, err := fmt.Fprintf(w, "%sdevices: [%s]\n", bodyIndent, strings.Join(rec.Devices, ", ")); err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "%sderived_caps: [%s]\n", bodyIndent, strings.Join(rec.DerivedCaps, ", ")); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(w, "%sderivation:\n", bodyIndent)
-	fmt.Fprintf(w, "%s  tool: container-sec-derive\n", bodyIndent)
-	fmt.Fprintf(w, "%s  observer: devices\n", bodyIndent)
-	fmt.Fprintf(w, "%s  tool_version: %s\n", bodyIndent, s.ToolVersion)
-	fmt.Fprintf(w, "%s  schema_version: %q\n", bodyIndent, s.SchemaVersion)
-	fmt.Fprintf(w, "%s  duration_seconds: %d\n", bodyIndent, s.DurationSeconds)
-	fmt.Fprintf(w, "%s  workload: %s\n", bodyIndent, s.Workload)
-	fmt.Fprintf(w, "%s  confidence: %s\n", bodyIndent, s.Confidence.Level)
-
-	validatedImage := s.Image
-	if s.ImageDigest != "" {
-		validatedImage = s.Image + "@" + s.ImageDigest
-	}
-	fmt.Fprintf(w, "%svalidated_image: %s\n", bodyIndent, validatedImage)
-	fmt.Fprintf(w, "%svalidated_date: %s\n", bodyIndent, s.ObservedAt.UTC().Format("2006-01-02"))
-	fmt.Fprintf(w, "%svalidated_via: [bpf-observation]\n", bodyIndent)
-
-	if exploratory {
-		fmt.Fprintf(w, "%sacceptance_contract_violations:\n", bodyIndent)
-		for _, v := range violations {
-			fmt.Fprintf(w, "%s  - %s\n", bodyIndent, v)
-		}
-	}
-	return nil
+	return writeComposeLintAggregate(w, s, "devices", "devices", violations,
+		func(sw *stickyWriter, ind string) {
+			// devices + derived_caps as flow-style sequences to match the
+			// caps/fs entries' compact shape; both are already sorted by the
+			// decision layer.
+			sw.printf("%sdevices: [%s]\n", ind, strings.Join(rec.Devices, ", "))
+			sw.printf("%sderived_caps: [%s]\n", ind, strings.Join(rec.DerivedCaps, ", "))
+		})
 }
 
 // CheckDeviceComposeLintContract returns the device acceptance-contract

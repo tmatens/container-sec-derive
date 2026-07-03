@@ -151,12 +151,16 @@ func TestCapaddProfile_ContractGate(t *testing.T) {
 		t.Errorf("violation = %v, want granted-set mention", err)
 	}
 
-	// allow-exploratory emits anyway, under exploratory:.
+	// allow-exploratory emits anyway, with status: exploratory.
 	buf.Reset()
 	if err := WriteCapaddComposeLintProfile(&buf, s, true); err != nil {
 		t.Fatalf("exploratory emit: %v", err)
 	}
-	if !strings.Contains(buf.String(), "exploratory:") {
-		t.Errorf("exploratory output missing wrapper:\n%s", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "status: exploratory") {
+		t.Errorf("exploratory output missing status: exploratory:\n%s", out)
+	}
+	if !strings.Contains(out, "  cap_add_validation:\n") {
+		t.Errorf("exploratory output missing cap_add_validation dimension:\n%s", out)
 	}
 }

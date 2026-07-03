@@ -57,7 +57,7 @@ func TestRun_CapaddAllFormats(t *testing.T) {
 		{"k8s", nil, "drop: [ALL]"},
 		{"oci", nil, "recommended-cap-add"},
 		{"compose-patch", []string{"--compose-in", composeIn, "--service", "app"}, "@@"},
-		{"compose-lint-profile", []string{"--allow-exploratory"}, "exploratory:"},
+		{"compose-lint-profile", []string{"--allow-exploratory"}, "status: exploratory"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.format, func(t *testing.T) {

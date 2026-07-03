@@ -1,92 +1,143 @@
 package format
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
+	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
-// WriteComposeLintProfile emits a YAML entry for contribution to the
-// compose-lint catalog (PLAN.md §Contribution loop with compose-lint).
-// The formatter is the acceptance-contract enforcer: it refuses to emit
-// unless every term below is met. When allowExploratory is true, a
-// failing sidecar is still emitted under an `exploratory:` top-level
-// key with an `acceptance_contract_violations:` annotation, so the
-// receiving catalog's exploratory/ path can surface the gaps without
-// pretending the profile is validated.
+// The compose-lint-profile formatters emit one document per csd run, shaped to
+// the compose-lint catalog schema (profile.schema.json, Draft 2020-12). The
+// document is an aggregate-per-image: top-level schema_version/image/status and
+// a `dimensions:` map. Each csd run observes exactly one dimension, so csd emits
+// a single-dimension document; the full profile is the union of caps + fs +
+// devices + … under one `image`, unioned downstream by the catalog automation
+// (merge decision A -- see README §compose-lint profile contribution). This
+// keeps csd's per-run model intact (no `csd merge` subcommand) and matches the
+// automation consumer the trust model assumes (ADR-017 §7).
 //
-// Contract (PLAN.md §Contribution loop with compose-lint, Decisions 9):
-//   - schema_version set and within the current major (1.x)
-//   - image_digest present
-//   - workload file path set and readable at emit time
-//   - duration_seconds >= 300
-//   - confidence.level is high or moderate
-//   - coverage_warnings empty
-//   - trace_health.drop_rate < 1%
-//   - replica_cap_disagreement empty
-//
-// validated_via lists only `bpf-observation` here; the receiving-side
-// CI pipeline appends `ci-smoke` once the profile passes the smoke
-// gate, per PLAN.md's two-source convention. Emitting both from csd
-// would overclaim -- we didn't run that CI.
+// The formatter is also the acceptance-contract enforcer: it refuses to emit
+// unless every term of Check*ComposeLintContract is met. When allowExploratory
+// is true, a failing sidecar is still emitted with `status: exploratory` and a
+// top-level `acceptance_contract_violations:` list, so the receiving catalog's
+// exploratory/ path can surface the gaps without pretending the profile is
+// validated. validated_via lists only `bpf-observation`; the receiving-side CI
+// pipeline appends `ci-smoke` once the profile passes the smoke gate.
+
+// WriteComposeLintProfile emits the CL-0006 capabilities dimension: cap_drop:
+// [ALL] + the observed cap_add.
 func WriteComposeLintProfile(w io.Writer, s *sidecar.Sidecar, allowExploratory bool) error {
 	violations := CheckComposeLintContract(s)
 	if len(violations) > 0 && !allowExploratory {
-		return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
-			strings.Join(violations, "\n  - "))
+		return composeLintContractError(violations)
 	}
+	return writeComposeLintAggregate(w, s, "capabilities", "caps", violations,
+		func(sw *stickyWriter, ind string) {
+			sw.printf("%scap_drop: [ALL]\n", ind)
+			sw.printf("%scap_add: [%s]\n", ind, strings.Join(s.CapNames(), ", "))
+		})
+}
 
-	exploratory := len(violations) > 0
-	keyIndent := ""
-	bodyIndent := "  "
-	if exploratory {
-		if _, err := fmt.Fprintln(w, "exploratory:"); err != nil {
-			return err
-		}
-		keyIndent = "  "
-		bodyIndent = "    "
+// writeComposeLintAggregate emits the shared catalog document envelope --
+// schema_version/image/status, the optional acceptance_contract_violations
+// list, and the single `dimensions.<dimKey>:` entry whose body is written by
+// writeBody and whose derivation is written by writeComposeLintDerivation.
+// All five observer formatters funnel through here so the envelope is
+// single-sourced.
+func writeComposeLintAggregate(w io.Writer, s *sidecar.Sidecar, dimKey, observer string, violations []string, writeBody func(*stickyWriter, string)) error {
+	sw := &stickyWriter{w: w}
+	status := "validated"
+	if len(violations) > 0 {
+		status = "exploratory"
 	}
-
-	key := ComposeLintKey(s)
-	if _, err := fmt.Fprintf(w, "%s%s:\n", keyIndent, key); err != nil {
-		return err
-	}
-
-	// caps: flow-style single line because compose-lint's cap_profiles.yml
-	// uses that shape. Names are already sorted by the aggregator.
-	caps := s.CapNames()
-	if _, err := fmt.Fprintf(w, "%scaps: [%s]\n", bodyIndent, strings.Join(caps, ", ")); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(w, "%sderivation:\n", bodyIndent)
-	fmt.Fprintf(w, "%s  tool: container-sec-derive\n", bodyIndent)
-	fmt.Fprintf(w, "%s  tool_version: %s\n", bodyIndent, s.ToolVersion)
-	// schema_version is quoted because "1.0" is a YAML float otherwise and
-	// would round-trip as 1 through a naive YAML parser.
-	fmt.Fprintf(w, "%s  schema_version: %q\n", bodyIndent, s.SchemaVersion)
-	fmt.Fprintf(w, "%s  duration_seconds: %d\n", bodyIndent, s.DurationSeconds)
-	fmt.Fprintf(w, "%s  workload: %s\n", bodyIndent, s.Workload)
-	fmt.Fprintf(w, "%s  confidence: %s\n", bodyIndent, s.Confidence.Level)
-
-	validatedImage := s.Image
-	if s.ImageDigest != "" {
-		validatedImage = s.Image + "@" + s.ImageDigest
-	}
-	fmt.Fprintf(w, "%svalidated_image: %s\n", bodyIndent, validatedImage)
-	fmt.Fprintf(w, "%svalidated_date: %s\n", bodyIndent, s.ObservedAt.UTC().Format("2006-01-02"))
-	fmt.Fprintf(w, "%svalidated_via: [bpf-observation]\n", bodyIndent)
-
-	if exploratory {
-		fmt.Fprintf(w, "%sacceptance_contract_violations:\n", bodyIndent)
+	// schema_version is quoted so "1.0" stays a string, not a YAML float.
+	sw.printf("schema_version: \"1.0\"\n")
+	sw.printf("image: %s\n", ComposeLintImage(s))
+	sw.printf("status: %s\n", status)
+	if len(violations) > 0 {
+		sw.printf("acceptance_contract_violations:\n")
 		for _, v := range violations {
-			fmt.Fprintf(w, "%s  - %s\n", bodyIndent, v)
+			sw.printf("  - %s\n", v)
 		}
 	}
-	return nil
+	sw.printf("dimensions:\n")
+	sw.printf("  %s:\n", dimKey)
+	writeBody(sw, "    ")
+	writeComposeLintDerivation(sw, s, observer, "    ")
+	return sw.err
+}
+
+// writeComposeLintDerivation emits a dimension's `derivation:` block in a fixed
+// field order matching the catalog schema. validated_date and the version
+// strings are quoted so a naive YAML parser doesn't coerce them (a bare date
+// parses to a timestamp, a bare "1.5" to a float). workload_sha256 is quoted so
+// an all-numeric hash can't be read as an integer.
+func writeComposeLintDerivation(sw *stickyWriter, s *sidecar.Sidecar, observer, ind string) {
+	d := ind + "  "
+	sw.printf("%sderivation:\n", ind)
+	sw.printf("%stool: container-sec-derive\n", d)
+	sw.printf("%stool_version: %q\n", d, s.ToolVersion)
+	sw.printf("%ssidecar_schema_version: %q\n", d, s.SchemaVersion)
+	sw.printf("%sobserver: %s\n", d, observer)
+	sw.printf("%svalidated_image: %s\n", d, composeLintValidatedImage(s))
+	sw.printf("%svalidated_date: %q\n", d, s.ObservedAt.UTC().Format("2006-01-02"))
+	sw.printf("%sduration_seconds: %d\n", d, s.DurationSeconds)
+	sw.printf("%sconfidence: %s\n", d, s.Confidence.Level)
+	sw.printf("%sworkload: %s\n", d, s.Workload)
+	sw.printf("%sworkload_sha256: %q\n", d, composeLintWorkloadHash(s))
+	sw.printf("%svalidated_via: [bpf-observation]\n", d)
+	// observation_backend records how the kernel signal was captured. All
+	// current observers use built-in ig gadgets, so gadgets is empty; a
+	// csd-authored gadget must thread its image+digest here (schema requires
+	// {name,image,digest} per gadget) once the gadget-migration work lands.
+	sw.printf("%sobservation_backend:\n", d)
+	sw.printf("%s  ig_version: %s\n", d, ig.PinnedIGVersion)
+	sw.printf("%s  gadgets: []\n", d)
+}
+
+// stickyWriter accumulates the first write error so the aggregate/derivation
+// emitters can stay linear instead of threading an error through every Fprintf.
+type stickyWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (sw *stickyWriter) printf(format string, a ...any) {
+	if sw.err != nil {
+		return
+	}
+	_, sw.err = fmt.Fprintf(sw.w, format, a...)
+}
+
+// composeLintContractError is the shared refuse-path error: the contract was
+// not met and --allow-exploratory was not passed. The violations are listed in
+// the deterministic check order so the diagnostic is stable.
+func composeLintContractError(violations []string) error {
+	return fmt.Errorf("compose-lint-profile acceptance contract not met; pass --allow-exploratory to emit anyway:\n  - %s",
+		strings.Join(violations, "\n  - "))
+}
+
+// composeLintWorkloadHash returns the hex sha256 of the workload script, the
+// tamper-evident reproducibility anchor the catalog gate re-checks. Empty when
+// the workload is unset or unreadable -- an exploratory draft may legitimately
+// carry no hash (the missing/unreadable workload is itself a recorded
+// violation); a validated document always has a readable workload by contract.
+func composeLintWorkloadHash(s *sidecar.Sidecar) string {
+	if s.Workload == "" {
+		return ""
+	}
+	data, err := os.ReadFile(s.Workload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // ComposeLintMinDurationSeconds is PLAN.md's 5-minute floor for a
@@ -146,27 +197,70 @@ func CheckComposeLintContract(s *sidecar.Sidecar) []string {
 	return v
 }
 
-// ComposeLintKey derives the YAML top-level key from the image ref. The
-// compose-lint cap_profiles.yml convention is a short name ("postgres",
-// "caddy") rather than the full reference. Strip registry, namespace,
-// digest, and tag to land on that shape. Empty image ref falls back to
-// "unknown" -- the profile can still be edited by hand before landing
-// in a PR; refusing to emit here would hide the violation output.
-func ComposeLintKey(s *sidecar.Sidecar) string {
-	ref := s.Image
-	if ref == "" {
+// ComposeLintImage returns the catalog match key: the canonical repository
+// reference for the observed image, registry+namespace normalized to their
+// Docker defaults, with any tag and digest stripped. Mirrors compose-lint's
+// normalize_repository (src/compose_lint/profiles/refs.py) so csd's `image:`
+// field matches the same profile the loader keys on. Empty image ref falls back
+// to "unknown" -- the profile can still be edited by hand before landing in a
+// PR; refusing to emit here would hide the violation output.
+func ComposeLintImage(s *sidecar.Sidecar) string {
+	if s.Image == "" {
 		return "unknown"
 	}
+	return normalizeRepository(stripTagDigest(s.Image))
+}
+
+// composeLintValidatedImage returns the normalized name@digest the dimension
+// was derived against (schema requires a digest-pinned validated_image). No
+// digest yields a bare name -- but that is already an image_digest contract
+// violation, so it only occurs on the exploratory path.
+func composeLintValidatedImage(s *sidecar.Sidecar) string {
+	img := normalizeRepository(stripTagDigest(s.Image))
+	if s.ImageDigest != "" {
+		return img + "@" + s.ImageDigest
+	}
+	return img
+}
+
+// stripTagDigest removes a trailing @digest and a :tag from an image reference,
+// leaving registry/namespace/name. A tag is a ':' in the final path segment, so
+// a registry port (localhost:5000/foo) is left intact.
+func stripTagDigest(ref string) string {
 	if at := strings.Index(ref, "@"); at >= 0 {
 		ref = ref[:at]
 	}
-	if col := strings.LastIndex(ref, ":"); col >= 0 {
-		ref = ref[:col]
+	slash := strings.LastIndex(ref, "/")
+	if col := strings.LastIndex(ref[slash+1:], ":"); col >= 0 {
+		ref = ref[:slash+1+col]
 	}
-	parts := strings.Split(ref, "/")
-	out := parts[len(parts)-1]
-	if out == "" {
-		return "unknown"
+	return ref
+}
+
+// normalizeRepository expands a bare image name to its canonical
+// registry/namespace/name, mirroring compose-lint's normalize_repository:
+//
+//	postgres                   -> docker.io/library/postgres
+//	linuxserver/radarr         -> docker.io/linuxserver/radarr
+//	lscr.io/linuxserver/radarr -> lscr.io/linuxserver/radarr
+//	localhost:5000/foo         -> localhost:5000/foo
+//
+// The first segment is a registry when it contains '.' or ':' or is exactly
+// "localhost"; otherwise the ref is a docker.io ref and a single-name path gets
+// the implicit `library/` namespace.
+func normalizeRepository(name string) string {
+	if name == "" {
+		return name
 	}
-	return out
+	first, rest, hasSlash := strings.Cut(name, "/")
+	var registry, path string
+	if hasSlash && (strings.ContainsAny(first, ".:") || first == "localhost") {
+		registry, path = strings.ToLower(first), rest
+	} else {
+		registry, path = "docker.io", name
+	}
+	if registry == "docker.io" && !strings.Contains(path, "/") {
+		path = "library/" + path
+	}
+	return registry + "/" + path
 }

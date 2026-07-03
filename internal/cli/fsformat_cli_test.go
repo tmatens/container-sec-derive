@@ -79,7 +79,7 @@ func TestRun_ObserveFSComposePatchAndProfile(t *testing.T) {
 	if err := Run(prof, &out, &errBuf); err != nil {
 		t.Fatalf("exploratory profile run: %v (stderr: %s)", err, errBuf.String())
 	}
-	if !strings.Contains(out.String(), "read_only: true") || !strings.Contains(out.String(), "exploratory:") {
+	if !strings.Contains(out.String(), "read_only: true") || !strings.Contains(out.String(), "status: exploratory") {
 		t.Errorf("exploratory profile output unexpected:\n%s", out.String())
 	}
 }

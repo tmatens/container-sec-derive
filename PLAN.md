@@ -541,23 +541,34 @@ The tool is "v1 done" when every one of these is true. Checkboxes are binary; no
 
 ## Contribution loop with compose-lint
 
-The JSON evidence sidecar is directly translatable to a compose-lint profile entry. The `--format compose-lint-profile` formatter emits exactly this shape, ready to PR:
+The JSON evidence sidecar is directly translatable to a compose-lint catalog profile. The `--format compose-lint-profile` formatter emits exactly the catalog schema (`compose-lint` `profile.schema.json`, Draft 2020-12), ready to PR — an aggregate-per-image document keyed on the normalized `image:`, with each observer's output under its `dimensions.<name>` entry:
 
 ```yaml
-# compose-lint cap_profiles.yml entry derived from container-sec-derive
-postgres:
-  caps: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]
-  derivation:
-    tool: container-sec-derive
-    tool_version: 0.1.0
-    schema_version: "1.0"
-    duration_seconds: 600
-    workload: exercises/postgres.sh
-    confidence: moderate
-  validated_image: postgres:16@sha256:...
-  validated_date: 2026-04-19
-  validated_via: [bpf-observation, ci-smoke]
+schema_version: "1.0"                 # catalog schema version (NOT the sidecar's)
+image: docker.io/library/postgres     # normalized repo ref, a field not the key
+status: validated                     # or exploratory (below the bar)
+dimensions:
+  capabilities:                       # keyed by dimension, not observer verb
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    derivation:
+      tool: container-sec-derive
+      tool_version: "0.6.0"
+      sidecar_schema_version: "1.5"   # csd's own sidecar schema, per dimension
+      observer: caps
+      validated_image: docker.io/library/postgres@sha256:...
+      validated_date: "2026-04-19"
+      duration_seconds: 600
+      confidence: moderate
+      workload: profiles/workloads/postgres.sh
+      workload_sha256: <sha256 of the committed workload>
+      validated_via: [bpf-observation]   # compose-lint CI appends ci-smoke
+      observation_backend:
+        ig_version: v0.51.0
+        gadgets: []                      # {name,image,digest} for csd-authored gadgets
 ```
+
+**Merge model (decision A, csd#218 §Open decision).** Each `csd` run observes exactly one dimension, so the formatter emits a **single-dimension** document. A full profile is the union of caps + fs + devices + … under one `image`; the catalog automation unions the `dimensions` maps (shared `image`; `status: validated` only if every dimension clears its bar). csd ships no `csd merge` subcommand — decision A keeps the per-run model and matches the automation consumer the trust model assumes (compose-lint ADR-017 §7). The `observation_backend.gadgets` list is empty for the built-in-`ig` observers; a csd-authored gadget must thread its `{name, image, digest}` here once the gadget-migration work lands.
 
 **Acceptance contract (owned by this repo, honored by the formatter).** The formatter refuses to emit a profile entry unless:
 
@@ -570,13 +581,13 @@ postgres:
 - `trace_health.drop_rate` < 1%.
 - `replica_cap_disagreement` is empty. (For `--all-matching` runs, either the replicas agree or the user explicitly picks one.)
 
-A user who wants to contribute a `low`-confidence profile for exploratory review uses `--format compose-lint-profile --allow-exploratory`, which emits under an `exploratory:` top-level key and annotates every failed check. The receiving catalog decides whether to accept such entries in an `exploratory/` subdirectory; `csd`'s contract only guarantees the annotation.
+A user who wants to contribute a `low`-confidence profile for exploratory review uses `--format compose-lint-profile --allow-exploratory`, which emits the same document with `status: exploratory` and a top-level `acceptance_contract_violations:` list naming every failed check. The receiving catalog decides whether to accept such entries in its `catalog/exploratory/` subdirectory; `csd`'s contract only guarantees the annotation.
 
 **Re-validation on digest bump.** `csd observe` output is deterministic enough for sidecar-to-sidecar diff to drive re-validation:
 
 1. CI pins `image_digest` in the derived profile.
 2. On registry digest change, CI re-runs `csd observe` with the committed workload against the new digest.
-3. CI diffs the new sidecar's `capabilities[].name` list against the prior profile's `caps`.
+3. CI diffs the new sidecar's `capabilities[].name` list against the prior profile's `dimensions.capabilities.cap_add`.
 4. No diff → profile re-validated, `validated_date` and `validated_image` bumped.
 5. Diff → profile is invalidated; human review required; the diff becomes the PR body.
 

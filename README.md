@@ -245,7 +245,7 @@ Run-mode accepts the same target / fixture / duration / workload flags as `obser
 
 ## Contributing a profile to compose-lint
 
-The `compose-lint-profile` formatter emits a contribution-ready entry, but only if the run clears an acceptance contract: image digest pinned, workload provided and readable, `--duration` ≥ 300s, confidence ≥ moderate, no entrypoint coverage warnings, drop rate < 1%, no replica disagreement. Any miss returns `EX_USAGE` (64) so CI catches it.
+The `compose-lint-profile` formatter emits a contribution-ready document in compose-lint's catalog schema (`profile.schema.json`) — an aggregate-per-image doc with the observer's output under a `dimensions.<name>` entry (`caps → capabilities`, `fs → filesystem`, etc.). It emits only if the run clears an acceptance contract: image digest pinned, workload provided and readable, `--duration` ≥ 300s, confidence ≥ moderate, no entrypoint coverage warnings, drop rate < 1%, no replica disagreement. Any miss returns `EX_USAGE` (64) so CI catches it. Each run emits one dimension; the catalog automation unions per-observer runs into one profile per image (see [PLAN.md §Contribution loop](PLAN.md#contribution-loop-with-compose-lint)).
 
 ```sh
 sudo ./csd observe \
@@ -256,7 +256,7 @@ sudo ./csd observe \
   --out sidecar.json
 ```
 
-If the run cannot meet the bar (a smoke run, a noisy host), pass `--allow-exploratory` to emit under an `exploratory:` block instead — useful for sharing a draft, not for merging into the catalog.
+If the run cannot meet the bar (a smoke run, a noisy host), pass `--allow-exploratory` to emit the same document with `status: exploratory` and an `acceptance_contract_violations:` list instead — useful for sharing a draft, not for merging into the catalog.
 
 ## Exit codes
 

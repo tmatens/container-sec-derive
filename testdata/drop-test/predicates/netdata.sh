@@ -9,7 +9,10 @@ deadline=$((SECONDS+90))
 while (( SECONDS < deadline )); do
   st="$(docker inspect -f '{{.State.Status}}' "$C" 2>/dev/null)"
   [ "$st" != running ] && break
-  if curl -fsS --max-time 4 http://localhost:19999/api/v1/charts 2>/dev/null | grep -q '"apps\.'; then ready=1; break; fi
+  charts="$(curl -fsS --max-time 4 http://localhost:19999/api/v1/charts 2>/dev/null || true)"
+  # capture then grep — piping a large response into `grep -q` can SIGPIPE curl
+  # and, under pipefail, mark the pipeline failed despite a match.
+  if grep -q '"apps\.' <<<"$charts"; then ready=1; break; fi
   sleep 3
 done
 [ "$ready" = 1 ] || { echo "not ready (status=${st}): API/apps.plugin not up"; exit 1; }

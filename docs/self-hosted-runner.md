@@ -77,3 +77,23 @@ kernel + the hardware-device PASS/FAIL/INFO lines.
 A true multi-kernel *matrix* needs multiple runners/VMs on different kernels;
 with one host you get one kernel per run — still a second data point beyond the
 hosted runner. Spin the runner on different VM kernels over time to widen it.
+
+## Profile re-derivation (`derive-profiles.yml`, compose-lint#360 step 4)
+
+A second workflow targets the same `csd` runner: it keeps the external
+`container-security-profiles` catalog current. On a schedule (and on dispatch),
+`scripts/derive_profiles.sh` reads the catalog's `derivation/manifest.yaml` and,
+per entry `method`, re-derives against each image's **current** digest —
+`drop-test` entries via `scripts/drop_test.sh` (docker only), `bpf-observation`
+entries via `csd --observe` under sudo. When a digest has moved and the
+recommendation is unchanged it opens a catalog PR bumping `validated_image` +
+`validated_date`; a **changed** recommendation is never auto-applied — it opens a
+review issue instead.
+
+Extra prerequisite beyond the smoke suite above: a repo secret **`CATALOG_PAT`**
+— a fine-grained PAT scoped to `contents:write` + `pull-requests:write` on
+`tmatens/container-security-profiles` **only** (it clones the catalog and opens
+the PR/issue). No other secret is needed; git operations against `csd` itself use
+the workflow's `GITHUB_TOKEN`. Like the smoke workflow it triggers only on
+`schedule` + `workflow_dispatch` (never on PRs), so it always runs reviewed
+`main` code.

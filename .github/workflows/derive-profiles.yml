@@ -1,0 +1,87 @@
+name: derive-profiles
+# Re-derivation loop (compose-lint#360 step 4). On a schedule (and on demand),
+# re-derive the container-security-profiles catalog against each image's CURRENT
+# digest and, when the recommendation is unchanged, open a PR bumping the pinned
+# digest + validated_date. A changed recommendation is surfaced for review, never
+# auto-applied.
+#
+# One manifest-driven loop (scripts/derive_profiles.sh) dispatches per entry
+# `method`: drop-test entries run scripts/drop_test.sh (docker only); the
+# bpf-observation path runs csd under sudo (CAP_BPF/CAP_PERFMON + --pid=host + the
+# pinned ig). Both current catalog entries are drop-test.
+#
+# MUST run on the self-hosted BPF runner (docs/self-hosted-runner.md): the
+# observation path needs root + BPF, and drop-test restarts real containers.
+# Self-hosted runners bill no Actions minutes.
+#
+# Setup required before this can run:
+#   - a self-hosted runner labelled `csd` (docs/self-hosted-runner.md), with
+#     Go + docker + the pinned `ig` + passwordless sudo.
+#   - a repo secret CATALOG_PAT: a fine-grained PAT with contents:write +
+#     pull-requests:write on tmatens/container-security-profiles ONLY.
+on:
+  schedule:
+    - cron: "23 4 * * 1"   # Mondays 04:23 UTC (after the catalog staleness check)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "re-derive even when the pinned digest is current"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  derive:
+    runs-on: [self-hosted, csd]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+      - name: build csd
+        run: go build -o csd ./cmd/csd
+      - name: checkout catalog
+        env:
+          CATALOG_PAT: ${{ secrets.CATALOG_PAT }}
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${CATALOG_PAT}@github.com/tmatens/container-security-profiles.git" \
+            catalog
+      - name: re-derive
+        id: derive
+        run: |
+          CATALOG="$PWD/catalog" CSD="$PWD/csd" \
+            FORCE="${{ inputs.force && '1' || '0' }}" APPLY=1 \
+            bash scripts/derive_profiles.sh > derive.log 2>&1 && rc=0 || rc=$?
+          cat derive.log
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+      - name: open PR for re-validated profiles / issue for changes
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_PAT }}
+        run: |
+          cd catalog
+          if git diff --quiet; then
+            echo "no profile changes to propose"
+          else
+            branch="rederive/$(date -u +%Y%m%d-%H%M)"
+            git config user.name "csd-derive-bot"
+            git config user.email "csd-derive-bot@users.noreply.github.com"
+            git switch -C "$branch"
+            git commit -aqm "Re-validate profiles against current digests (automated)"
+            git push -u origin "$branch"
+            gh pr create --repo tmatens/container-security-profiles --base main --head "$branch" \
+              --title "Re-validate catalog profiles against current digests" \
+              --body "$(cat ../derive.log)"
+          fi
+          # A CHANGED recommendation (driver rc!=0) is a review signal, not a digest bump.
+          if [ "${{ steps.derive.outputs.rc }}" != "0" ]; then
+            title="Profile recommendation changed on re-derivation — review"
+            num=$(gh issue list --repo tmatens/container-security-profiles --state open \
+              --json number,title --jq '.[] | select(.title=="'"$title"'") | .number' | head -1)
+            if [ -n "$num" ]; then
+              gh issue comment "$num" --repo tmatens/container-security-profiles --body "$(cat ../derive.log)"
+            else
+              gh issue create --repo tmatens/container-security-profiles --title "$title" --body "$(cat ../derive.log)"
+            fi
+          fi

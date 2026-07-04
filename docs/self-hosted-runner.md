@@ -97,3 +97,51 @@ the PR/issue). No other secret is needed; git operations against `csd` itself us
 the workflow's `GITHUB_TOKEN`. Like the smoke workflow it triggers only on
 `schedule` + `workflow_dispatch` (never on PRs), so it always runs reviewed
 `main` code.
+
+## Matching the target's security posture (for MAC/BPF-class caps)
+
+A drop-test can prove a capability *needed* (removing it broke something) but
+**cannot prove one unneeded if the derive host never enforced the constraint**
+(see `docs/re-derive-at-deploy.md`). So for `SYS_ADMIN` / BPF- / MAC-adjacent
+capabilities to be trustworthy, the derive host must **match the deployment
+target's security posture**. Run it as a **Debian 13 VM on the homelab host**
+(`mini-server1`) — same hardware, isolated from production, and it matches by
+construction.
+
+### The spec to match (`mini-server1`, the deploy target)
+
+| axis | value | notes |
+|---|---|---|
+| OS / kernel | Debian 13 (trixie), `6.12.x+deb13`, amd64 | same family = same cap/BTF behavior |
+| `kernel.unprivileged_bpf_disabled` | `2` | BPF load needs `CAP_BPF`/`SYS_ADMIN` |
+| `kernel.perf_event_paranoid` | `3` | perf/BPF-perf needs `CAP_PERFMON` |
+| `kernel.kptr_restrict` | `1` | |
+| **AppArmor** | **enabled** | the delta an Arch/permissive host misses |
+| Docker | 29.x, overlayfs, systemd cgroup, cgroup v2, runc | default seccomp **and** apparmor applied to containers |
+
+**A stock Debian 13 install matches most of this out of the box** — AppArmor is
+enabled by default, the BPF sysctls are the Debian defaults, and Docker applies
+its default seccomp + apparmor profiles. The permissive case that under-detects
+is a host with AppArmor *off* (e.g. a default Arch box) or a non-matching kernel.
+
+### Verify a candidate derive host against the target
+
+```sh
+uname -r; uname -m
+for k in unprivileged_bpf_disabled perf_event_paranoid kptr_restrict; do
+  printf '%s=%s\n' "$k" "$(cat /proc/sys/kernel/$k)"
+done
+cat /sys/module/apparmor/parameters/enabled   # want: Y
+docker info --format '{{.SecurityOptions}}'    # want: apparmor + seccomp
+```
+
+Values must match the table (or the target host at derive time). If they don't,
+treat `SYS_ADMIN`/BPF/MAC-class results as conservatively kept, not removable.
+
+### Note on `apparmor:unconfined` services
+
+A service whose compose sets `security_opt: [apparmor:unconfined]` (e.g. netdata)
+opts *itself* out of AppArmor regardless of host, so for those the match narrows
+to the kernel BPF sysctls + the caps themselves — and the correctness predicate
+must still assert the BPF-backed feature (e.g. that `ebpf.plugin` charts carry
+data), or `SYS_ADMIN` reads as a false over-grant on coverage grounds alone.

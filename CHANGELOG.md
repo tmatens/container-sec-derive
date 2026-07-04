@@ -182,7 +182,7 @@ the relevant entry.
   `/data` owned by 1000, so a docker volume inherits it — same shape as mariadb).
   Derived with a fast `TYPE=VANILLA`/`FLAT` config since the caps are init/privdrop,
   independent of the server flavour. Correctness = the server answers `mc-monitor
-  status` as a non-root process. Feeds the published catalog profile.
+  status` as a non-root process. (The catalog profile was later reverted: `itzg/minecraft-server` is `:latest` by design and has no immutable tag to pin — the spec is retained for a future pinned re-derivation.)
 
 ### Changed
 

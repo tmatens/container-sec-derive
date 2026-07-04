@@ -6,11 +6,11 @@
 # CONTAIN the world (many entries), not merely exist.
 #
 # Why the content check matters: mc-backup runs as root and can always create the
-# archive FILE, but reading minecraft's uid-1000, mode-0750 /data as root needs
-# DAC_OVERRIDE. Without it, tar silently archives nothing and produces a 0-entry
-# empty tarball that still "exists" — a weak "file present" check would pass on a
-# broken backup (this is precisely how a real deployment can ship empty backups).
-# Counting entries is what actually gates the read capability.
+# archive FILE, but whether it can READ the shared /data depends on that data's
+# ownership/perms — if it can't, tar silently archives nothing and produces a
+# 0-entry empty tarball that still "exists". A weak "file present" check would pass
+# on that empty backup; counting entries is what actually verifies a real backup
+# (and gates whatever read capability the specific /data ownership requires).
 set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"; C="$DROP_TEST_CONTAINER"
 

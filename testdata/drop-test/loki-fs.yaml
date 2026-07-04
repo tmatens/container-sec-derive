@@ -1,0 +1,24 @@
+# drop-test spec: loki read-only-filesystem tmpfs minimum. loki runs correctly
+# under --read-only with /loki writable — that dir is its data store (chunks, WAL,
+# index/boltdb-shipper, rules), a PERSISTENT VOLUME in real deployments (must
+# survive restarts, so NOT tmpfs). loki runs as a non-root user (uid 10001), so the
+# /loki stand-in is given mode=1777 via run.tmpfs (a root-owned tmpfs would be
+# unwritable by 10001, the same reason the real named volume inherits the image's
+# 10001 ownership of /loki). It is never counted in the derived tmpfs minimum.
+#
+# /tmp is the one plausible ephemeral tmpfs and is the candidate; it comes out NOT
+# required (loki becomes ready, ingests, and serves a query with a read-only /tmp).
+# So the minimum is read_only:true, tmpfs:[].
+#
+# loki is DISTROLESS (no shell/curl), so correctness/loki.sh probes it from a
+# SIDECAR container sharing loki's network namespace (testdata/drop-test/
+# correctness/lib/sidecar.sh) rather than `docker exec`.
+image: docker.io/grafana/loki
+tag: "3.7.2"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  tmpfs: ["/loki:mode=1777"]
+correctness: testdata/drop-test/correctness/loki.sh

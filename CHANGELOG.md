@@ -128,6 +128,19 @@ the relevant entry.
   workload (runtime plugin install, the elasticsearch plugin, rendering/export), so
   the criteria doc records when to add `tmpfs:[/tmp]`. Feeds the published catalog
   profile.
+- **loki filesystem drop-test spec + correctness check
+  (`testdata/drop-test/loki-fs.yaml` + `correctness/loki.sh`) + a reusable
+  distroless sidecar-probe helper (`correctness/lib/sidecar.sh`).** Derives the
+  read-only-filesystem minimum for `docker.io/grafana/loki` (already `cap_drop:ALL`
+  + non-root): **read_only:true, tmpfs:[]**. Under a read-only rootfs with only its
+  `/loki` data dir (persistent: chunks/WAL/index/rules) writable, loki reaches
+  ready, ingests a pushed log, and serves it back on query — `/tmp` drop-tested as
+  **not required**. loki is **distroless** (no shell/curl), so `docker exec` can't
+  probe it; the correctness check uses the new `sidecar.sh` helper, which runs a
+  pinned multi-arch curl in a throwaway container sharing the target's network
+  namespace (`--network container:<target>`) — reusable by any future distroless
+  spec, works for any target network mode, and never touches the target's
+  filesystem (no fs-dimension confound). Feeds the published catalog profile.
 
 ### Changed
 

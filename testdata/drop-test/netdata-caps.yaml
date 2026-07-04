@@ -3,8 +3,14 @@ image: docker.io/netdata/netdata
 tag: v2.10.3
 dimension: capabilities
 health_port: 19999   # network: host → the harness refuses to run if :19999 is already held (foreign instance would pollute the drop-test)
-fixed: ["SYS_PTRACE", "DAC_OVERRIDE", "SYS_ADMIN"]   # observation-confirmed used; not drop-tested
-candidates: ["CHOWN", "FOWNER", "SETUID", "SETGID"]  # drop-test these
+# Everything granted is a candidate: the earlier fixed:[SYS_PTRACE,SYS_ADMIN]
+# ("observation-confirmed used") hid two over-grants. Observation saw the
+# syscalls fire, but on the matched host apps.plugin is setuid-root (so SYS_PTRACE
+# doesn't gate /proc reads) and the image ships no ebpf.plugin (so SYS_ADMIN gates
+# nothing) — only the drop-test, against a correctness check that asserts real
+# per-process monitoring, tells the truth.
+fixed: []
+candidates: ["SYS_PTRACE", "SYS_ADMIN", "DAC_OVERRIDE", "CHOWN", "FOWNER", "SETUID", "SETGID"]
 run:
   pid: host
   network: host

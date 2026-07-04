@@ -32,6 +32,18 @@ the relevant entry.
 
 ### Changed
 
+- **netdata caps: `SYS_PTRACE` + `SYS_ADMIN` moved to `candidates`, and the
+  correctness check strengthened to justify it.** They were `fixed`
+  ("observation-confirmed used"), which hid two over-grants: on the matched host,
+  `apps.plugin` is setuid-root (so `SYS_PTRACE` doesn't gate `/proc/<pid>/io|fd`
+  reads) and the image ships **no `ebpf.plugin`** (so `SYS_ADMIN` gates nothing —
+  the deploy's `ebpf=yes` is a no-op). The netdata correctness check now asserts
+  **per-process io/fd data for a non-root process group** (`app.netdata_*`, uid
+  201) and the non-root daemon uid — the metrics those caps would gate if they
+  gated anything — so the drop-test can tell the truth. Result on the matched
+  host: minimum `[DAC_OVERRIDE, SETUID, SETGID]` (`DAC_OVERRIDE` required —
+  container exits without it; `SYS_PTRACE`/`SYS_ADMIN`/`CHOWN`/`FOWNER`
+  removable), combination-verified. No tool/schema change.
 - **Renamed the drop-test `predicate` → `correctness` check.** The old name
   described the script's logical form (a true/false function), not its job:
   deciding whether the service still *works* after an element is removed — and,

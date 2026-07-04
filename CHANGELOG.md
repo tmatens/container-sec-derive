@@ -56,18 +56,22 @@ the relevant entry.
 
 ### Changed
 
-- **netdata caps: `SYS_PTRACE` + `SYS_ADMIN` moved to `candidates`, and the
-  correctness check strengthened to justify it.** They were `fixed`
-  ("observation-confirmed used"), which hid two over-grants: on the matched host,
-  `apps.plugin` is setuid-root (so `SYS_PTRACE` doesn't gate `/proc/<pid>/io|fd`
-  reads) and the image ships **no `ebpf.plugin`** (so `SYS_ADMIN` gates nothing —
-  the deploy's `ebpf=yes` is a no-op). The netdata correctness check now asserts
-  **per-process io/fd data for a non-root process group** (`app.netdata_*`, uid
-  201) and the non-root daemon uid — the metrics those caps would gate if they
-  gated anything — so the drop-test can tell the truth. Result on the matched
-  host: minimum `[DAC_OVERRIDE, SETUID, SETGID]` (`DAC_OVERRIDE` required —
-  container exits without it; `SYS_PTRACE`/`SYS_ADMIN`/`CHOWN`/`FOWNER`
-  removable), combination-verified. No tool/schema change.
+- **netdata caps re-derived to `[DAC_OVERRIDE, SETUID, SETGID, SYS_PTRACE]`
+  (drop only `SYS_ADMIN`), with the correctness check fixed to *detect*
+  `SYS_PTRACE`.** They were `fixed` ("observation-confirmed used"). An
+  intermediate pass wrongly dropped **both** `SYS_PTRACE` and `SYS_ADMIN` (5→3)
+  and REGRESSED production — `apps.plugin` collected zeros for every process's
+  per-process io/fd metrics while the health-check still read "healthy". Root
+  cause was a correctness-check bug, not a coverage limit: `apps.plugin` runs
+  real-uid = the netdata user (setuid gives euid 0, not real uid 0), so it needs
+  `CAP_SYS_PTRACE` to read **any** process's `/proc/<pid>/io|fd`; without it, it
+  doesn't error — it reports every per-process metric as **0**. The check asserted
+  "non-null" data, and `0` is non-null, so it passed on broken collection.
+  **Fix:** the check now requires a per-process `fds_open` to be **non-zero**
+  (`chart_nonzero`) — dropping `SYS_PTRACE` zeros it and the drop-test correctly
+  derives it required. `SYS_ADMIN` stays a candidate and derives removable (no
+  `ebpf.plugin`; `ebpf=yes` is a no-op). The `drop_test.sh` header now warns that
+  "collects data" must mean non-zero, not merely non-null. No tool/schema change.
 - **Renamed the drop-test `predicate` → `correctness` check.** The old name
   described the script's logical form (a true/false function), not its job:
   deciding whether the service still *works* after an element is removed — and,

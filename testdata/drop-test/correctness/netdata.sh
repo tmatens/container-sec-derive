@@ -17,14 +17,17 @@ set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"; C="$DROP_TEST_CONTAINER"
 
 API=http://localhost:19999
-# chart_has_data <chart-id> -> 0 if the chart's latest sample has a non-null
-# value on any dimension (0 counts as data — the point is it's being collected).
-chart_has_data() {
+# chart_nonzero <chart-id> -> 0 if the chart's latest sample has a NON-ZERO value
+# on any dimension. Non-zero, not merely non-null: apps.plugin that is denied
+# access to a process's /proc reports the metric as 0 (not null), so a non-null
+# check passes on broken collection. A live process always has open fds > 0, so a
+# zero fds_open means apps.plugin couldn't read it.
+chart_nonzero() {
   curl -fsS --max-time 4 "${API}/api/v1/data?chart=$1&after=-20&points=1&format=json" 2>/dev/null \
     | python3 -c 'import sys,json
 try:
  rows=json.load(sys.stdin).get("data",[])
- sys.exit(0 if [v for r in rows for v in r[1:] if v is not None] else 1)
+ sys.exit(0 if [v for r in rows for v in r[1:] if v is not None and v != 0] else 1)
 except Exception:
  sys.exit(1)'
 }
@@ -57,18 +60,21 @@ pid="$(docker inspect -f '{{.State.Pid}}' "$C")"
 uid="$(awk '/^Uid:/{print $2}' /proc/"$pid"/status 2>/dev/null)"
 [ "$uid" != 0 ] || { echo "daemon running as ROOT (privilege drop failed)"; exit 1; }
 
-# 4. per-process metrics collect for a NON-ROOT group (netdata, uid 201).
-# apps.plugin needs a few cycles after the charts appear to populate data, so
-# poll. app.netdata_fds_open is a stable non-null signal (a live process always
-# has open fds); reading it for a non-root process is the DAC_OVERRIDE/SYS_PTRACE
-# sensitive path. Fall back across a couple of non-root groups for robustness.
-ppdata=0
+# 4. per-process metrics are actually COLLECTED (non-zero), not just present.
+# apps.plugin runs real-uid = the netdata user (setuid gives euid 0, not real uid
+# 0), so it needs CAP_SYS_PTRACE to read ANY process's /proc/<pid>/io|fd. Without
+# it, it doesn't error — it reports EVERY per-process metric as 0. So require a
+# per-process fds_open to be NON-ZERO (a live process always has open fds > 0);
+# dropping SYS_PTRACE zeros this and fails the check. Poll a few well-known groups
+# (docker daemon is always up during the drop-test) since apps.plugin needs a few
+# cycles to populate, and any one non-zero proves the read path works.
+ppok=0
 for _ in 1 2 3 4 5 6 7 8; do
-  for ch in app.netdata_fds_open app.netdata_disk_logical_io app.polkitd_fds_open; do
-    if chart_has_data "$ch"; then ppdata=1; PPCH="$ch"; break 2; fi
+  for ch in app.dockerd_fds_open app.netdata_fds_open app.systemd-journald_fds_open app.containerd_fds_open; do
+    if chart_nonzero "$ch"; then ppok=1; PPCH="$ch"; break 2; fi
   done
   sleep 3
 done
-[ "$ppdata" = 1 ] || { echo "no per-process metrics for a non-root group (DAC_OVERRIDE/SYS_PTRACE gap): apps.plugin can't read non-root /proc/<pid>"; exit 1; }
+[ "$ppok" = 1 ] || { echo "per-process metrics all zero — apps.plugin can't read /proc/<pid>/fd (SYS_PTRACE gap)"; exit 1; }
 
-echo "correct: ready, daemon uid=${uid}, per-process metrics collecting for non-root group (${PPCH})"
+echo "correct: ready, daemon uid=${uid}, per-process metrics collecting non-zero (${PPCH})"

@@ -24,9 +24,9 @@ jobs:
       matrix:
         gadget: [advise_capabilities, advise_filesystem, advise_devices]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install ig
         run: |
-          IG_VERSION="$(awk -F'"' '/PinnedIGVersion[[:space:]]*=/{print $2; exit}' internal/ig/ig.go)"
+          IG_VERSION="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
           echo "Using ig ${IG_VERSION}"
           curl -sSL -o /tmp/ig.tar.gz \
             "https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-amd64-${IG_VERSION}.tar.gz"
@@ -54,7 +54,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Parse tag
         id: tag
         run: |
@@ -64,7 +64,7 @@ jobs:
           echo "version=${ref##*/v}" >> "$GITHUB_OUTPUT"
       - name: Install ig
         run: |
-          IG_VERSION="$(awk -F'"' '/PinnedIGVersion[[:space:]]*=/{print $2; exit}' internal/ig/ig.go)"
+          IG_VERSION="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
           curl -sSL -o /tmp/ig.tar.gz \
             "https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/ig-linux-amd64-${IG_VERSION}.tar.gz"
           sudo tar -C /usr/local/bin -xzf /tmp/ig.tar.gz ig

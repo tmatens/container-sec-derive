@@ -34,9 +34,11 @@ import (
 // is unaffected because produceObservation short-circuits to
 // aggregate() before CheckIGVersion runs.
 //
-// The Makefile and the release/image/integration workflows extract
-// PinnedIGVersion from this file by an awk match on the `PinnedIGVersion =`
-// line — keep the declaration on a single line so that extraction stays valid.
+// The Makefile and the release/image/integration workflows extract this version
+// by an awk match anchored to the start-of-line assignment below — keep the
+// declaration on a single line so that extraction stays valid. (The awk is
+// anchored precisely so a prose mention of the pattern in a comment like this one
+// can't match first and yield an empty version.)
 const (
 	PinnedIGVersion    = "v0.51.0"
 	MinIGVersion       = "v0.51.0"

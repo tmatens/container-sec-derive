@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -79,6 +79,13 @@ smoke-capadd: build
 
 smoke-egress: build
 	./scripts/smoke_egress.sh
+
+# apptier-immich runs the app-tier verify (docs/app-tier-verification.md): brings
+# up immich's released stack with the DERIVED DB hardening and drives its real API
+# with a committed fixture. Live only — needs docker + the docker compose v2 plugin
+# + a network pull (immich-server is ~3GB); on-demand, not a per-PR gate.
+apptier-immich:
+	./scripts/apptier_verify.sh testdata/apptier/immich/docker-compose.yml testdata/apptier/immich/verify.sh
 
 # smoke-podman exercises the --runtime podman path: ig attach/attribution under
 # podman + the podman inspect/history/mounts parse, via the synthetic exerciser.

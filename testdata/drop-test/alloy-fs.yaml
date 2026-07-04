@@ -1,0 +1,30 @@
+# drop-test spec: alloy (Grafana Alloy) read-only-filesystem tmpfs minimum. alloy
+# runs correctly under --read-only with its storage.path location writable. Under
+# the image DEFAULT invocation (`run /etc/alloy/config.alloy
+# --storage.path=/var/lib/alloy/data`) that location is /var/lib/alloy/data — its
+# WAL / component state, a PERSISTENT VOLUME in real deployments (NOT tmpfs).
+#
+# The writable stand-in is mounted at the PARENT /var/lib/alloy (not the exact
+# /var/lib/alloy/data): alloy creates the `data` subdir itself, so its parent must
+# be writable — a volume mounted at the exact storage.path fails to initialise under
+# read_only. alloy runs as the non-root alloy user (uid 473), so mode=1777 (a
+# root-owned tmpfs would be unwritable by 473; a real named volume is owned by 473).
+# The stand-in is never counted in the derived tmpfs minimum.
+#
+# /tmp is the candidate; it comes out NOT required under the default storage.path
+# (alloy reaches ready and runs its pipeline with a read-only /tmp). So the minimum
+# is read_only:true, tmpfs:[]. (A deployment overriding --storage.path=/tmp/alloy
+# would instead need tmpfs:[/tmp] — a command/run_config dependence, see criteria.)
+#
+# alloy is DISTROLESS (no shell/curl), so correctness/alloy.sh probes it from a
+# SIDECAR sharing its netns (testdata/drop-test/correctness/lib/sidecar.sh) — the
+# same reusable helper loki uses — not `docker exec`.
+image: docker.io/grafana/alloy
+tag: v1.16.2
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  tmpfs: ["/var/lib/alloy:mode=1777"]
+correctness: testdata/drop-test/correctness/alloy.sh

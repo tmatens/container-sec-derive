@@ -141,6 +141,18 @@ the relevant entry.
   namespace (`--network container:<target>`) — reusable by any future distroless
   spec, works for any target network mode, and never touches the target's
   filesystem (no fs-dimension confound). Feeds the published catalog profile.
+- **alloy filesystem drop-test spec + correctness check
+  (`testdata/drop-test/alloy-fs.yaml` + `correctness/alloy.sh`).** Derives the
+  read-only-filesystem minimum for `docker.io/grafana/alloy` (already `cap_drop:ALL`
+  + non-root uid 473): **read_only:true, tmpfs:[]** — the first **reuse** of the
+  `lib/sidecar.sh` distroless helper. Under a read-only rootfs with only its
+  storage.path location writable (image default `--storage.path=/var/lib/alloy/data`,
+  a persistent WAL/state dir), alloy reaches `/-/ready` and runs its pipeline (live
+  `alloy_*` metrics) — `/tmp` drop-tested as **not required** (a
+  `--storage.path=/tmp/alloy` override would instead need `tmpfs:[/tmp]`). The
+  writable stand-in mounts at the parent `/var/lib/alloy` (alloy creates the `data`
+  subdir itself; a volume at the exact storage.path fails under read_only) with
+  `mode=1777`. Feeds the published catalog profile.
 
 ### Changed
 

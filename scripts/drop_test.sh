@@ -66,6 +66,10 @@ line("CORRECTNESS", s["correctness"]); line("BASE_FS", s.get("base_fs", ""))
 # declare it so the harness can refuse to run when a foreign instance already
 # holds it (it would answer the correctness check and silently corrupt the drop-test).
 line("HEALTH_PORT", str(s.get("health_port", "") or ""))
+# no_pull: the image is already present locally (e.g. a compose `build:` image
+# compose_derive.sh built for us) and has no registry counterpart, so skip the
+# pull and take the digest from the local image id.
+line("NO_PULL", "true" if s.get("no_pull") else "")
 line("RUN_PID", run.get("pid", "")); line("RUN_NET", run.get("network", ""))
 line("RUN_USER", run.get("user", ""))
 line("RUN_ENTRYPOINT", run.get("entrypoint", ""))
@@ -120,8 +124,14 @@ IMAGE="${F[IMAGE]}"; TAG="${F[TAG]}"; DIM="${F[DIM]}"
 CORRECTNESS="${REPO}/${F[CORRECTNESS]}"
 DOCKER_GID="$(getent group docker | cut -d: -f3)"
 
-docker pull -q "${IMAGE}:${TAG}" >/dev/null 2>&1 || { echo "pull failed: ${IMAGE}:${TAG}" >&2; exit 2; }
-DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${TAG}" | sed -E 's/.*@//')"
+if [ "${F[NO_PULL]}" = true ]; then
+  docker image inspect "${IMAGE}:${TAG}" >/dev/null 2>&1 || { echo "no_pull set but ${IMAGE}:${TAG} is not present locally" >&2; exit 2; }
+else
+  docker pull -q "${IMAGE}:${TAG}" >/dev/null 2>&1 || { echo "pull failed: ${IMAGE}:${TAG}" >&2; exit 2; }
+fi
+# A locally-built image has no RepoDigests (never pushed/pulled) — fall back to the
+# image id, so the evidence still records a content identifier for what ran.
+DIGEST="$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' "${IMAGE}:${TAG}" | sed -E 's/.*@//')"
 
 # Numeric run-as uid[:gid], if the spec pins one (a compose `user:`). When set, a
 # bind-mounted DIRECTORY has to be owned by that uid for the run to be faithful:

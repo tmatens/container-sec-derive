@@ -30,8 +30,22 @@ services:
     service: homepage
     correctness: testdata/drop-test/correctness/homepage.sh
 
+  # Caddy builds a custom image (`build: .` — xcaddy + the cloudflare DNS plugin,
+  # then `COPY --from=builder /usr/bin/caddy`). compose_derive builds it and
+  # derives against that ACTUAL image, which matters here: the base caddy:2 binary
+  # carries the `cap_net_bind_service=ep` file capability (so dropping the cap
+  # makes even exec fail), but Docker's COPY strips file caps, so the deployed
+  # binary has none — and with the container's default `ip_unprivileged_port_start=0`
+  # it binds :80/:443 without the cap. Expected verdict: over_permissioned, drop
+  # [NET_BIND_SERVICE] (vestigial for this build; a base-image catalog match would
+  # wrongly call it required). Its `${CF_API_TOKEN}` etc. are replaced by a
+  # placeholder so the config loads without secrets on the derive host.
+  - name: caddy
+    forgejo_repo: dad/caddy_reverse_proxy
+    compose_path: docker-compose.yml
+    service: caddy
+    correctness: testdata/drop-test/correctness/caddy_deploy.sh
+
 # Deferred — documented so each gap is explicit, not silent:
-#   - caddy (dad/caddy_reverse_proxy): a custom `build:` image (FROM caddy:2) — no
-#     pullable tag, so deploy-check would have to build it first.
 #   - postgres: no standalone homelab service; it's an embedded dependency
 #     (e.g. immich's DB, a different image). Point a future entry at that service.

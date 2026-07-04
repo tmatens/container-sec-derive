@@ -34,10 +34,10 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # minimum can reveal both over-grants (declared, not needed) and missing caps
 # (needed, not declared). Declared caps are written to declared.json for the
 # post-derivation comparison.
-"$PY" - "$COMPOSE" "$SERVICE" "$CORRECTNESS" "$WORK/declared.json" > "$WORK/spec.yaml" <<'PYEOF'
-import os, sys, json, yaml
+"$PY" - "$COMPOSE" "$SERVICE" "$CORRECTNESS" "$WORK/declared.json" "$WORK/build.json" > "$WORK/spec.yaml" <<'PYEOF'
+import os, sys, json, re, yaml
 
-compose, service, correctness, declared_out = sys.argv[1:5]
+compose, service, correctness, declared_out, build_out = sys.argv[1:6]
 compose_dir = os.path.dirname(os.path.abspath(compose))
 
 def resolve_mount(v):
@@ -55,15 +55,49 @@ svc = (doc.get("services") or {}).get(service)
 if svc is None:
     sys.exit(f"compose_derive: service {service!r} not found in {compose}")
 
+# The image to derive against. A service can pull an `image:` or `build:` a custom
+# one (or both). When it builds, we build the ACTUAL deployed image and derive
+# against that — it can differ from any base tag in security-relevant ways (e.g.
+# a `COPY` that drops the base binary's file capabilities), which loose matching
+# would miss. compose_derive.sh (bash) does the build; here we just resolve the
+# context and hand back a local tag + no_pull.
 image = svc.get("image")
-if not image:
-    sys.exit(f"compose_derive: service {service!r} has no image:")
-name, _, tag = image.partition(":")
-tag = tag or "latest"
+build = svc.get("build")
+no_pull = False
+build_info = {}
+if build is not None:
+    no_pull = True
+    if isinstance(build, str):
+        ctx, dockerfile = os.path.normpath(os.path.join(compose_dir, build)), ""
+    else:
+        b = build or {}
+        ctx = os.path.normpath(os.path.join(compose_dir, str(b.get("context", "."))))
+        dockerfile = str(b.get("dockerfile", "") or "")
+    if image:
+        name, _, tag = image.partition(":"); tag = tag or "latest"
+    else:
+        name, tag = "csd-deploy-check-" + re.sub(r"[^a-z0-9_.-]", "-", service.lower()), "local"
+    build_info = {"context": ctx, "dockerfile": dockerfile, "image": f"{name}:{tag}"}
+elif image:
+    name, _, tag = image.partition(":"); tag = tag or "latest"
+else:
+    sys.exit(f"compose_derive: service {service!r} has neither image: nor build:")
+json.dump(build_info, open(build_out, "w"))
 
+# An env value that is an unresolved compose variable reference (${VAR}, $VAR) is a
+# secret/config the derive host deliberately does NOT have — replace it with a
+# synthetic placeholder so config that validates the field can still load (Caddy,
+# for one, refuses to start on a literal ${...}). Capability needs come from a
+# service's STRUCTURE (listeners, mounts, user), not a token's value, so a
+# placeholder doesn't change the derived minimum; a secret never touches the host.
+PLACEHOLDER = "csdPlaceholder" + "0" * 26  # 40 chars, format-plausible for token-like fields
+def sub_placeholders(s):
+    return re.sub(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*", PLACEHOLDER, s)
 env = svc.get("environment") or []
 if isinstance(env, dict):
     env = [f"{k}={v}" for k, v in env.items()]
+env = [f"{e.split('=',1)[0]}={sub_placeholders(e.split('=',1)[1])}" if "=" in e else e
+       for e in map(str, env)]
 
 def as_list(v):
     return [] if not v else (v if isinstance(v, list) else [v])
@@ -112,9 +146,26 @@ spec = {
     "image": name, "tag": tag, "dimension": "capabilities",
     "fixed": [], "candidates": candidates, "run": run, "correctness": correctness,
 }
+if no_pull:
+    spec["no_pull"] = True
 print(yaml.safe_dump(spec, sort_keys=False))
 PYEOF
 [ $? -eq 0 ] || { cat "$WORK/spec.yaml" >&2; exit 1; }
+
+# If the service builds its image (compose `build:`), build it now so drop_test
+# (no_pull) finds it locally, deriving against the ACTUAL deployed image.
+BUILD_CTX="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("context",""))' "$WORK/build.json" 2>/dev/null || true)"
+if [ -n "$BUILD_CTX" ]; then
+  BUILD_DF="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("dockerfile",""))' "$WORK/build.json")"
+  BUILD_IMG="$("$PY" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("image",""))' "$WORK/build.json")"
+  echo "compose_derive: ${SERVICE} builds a custom image; docker build ${BUILD_CTX} -> ${BUILD_IMG}" >&2
+  bargs=(build -t "$BUILD_IMG")
+  [ -n "$BUILD_DF" ] && bargs+=(-f "${BUILD_CTX}/${BUILD_DF}")
+  bargs+=("$BUILD_CTX")
+  if ! docker "${bargs[@]}" > "$WORK/build.log" 2>&1; then
+    tail -5 "$WORK/build.log" >&2; echo "compose_derive: docker build failed for ${SERVICE}" >&2; exit 3
+  fi
+fi
 
 echo "compose_derive: ${SERVICE} -> ${COMPOSE}; drop-testing under its own invocation" >&2
 if ! PY="$PY" bash "$REPO/scripts/drop_test.sh" "$WORK/spec.yaml" > "$WORK/result.json" 2>"$WORK/dt.err"; then

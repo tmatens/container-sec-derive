@@ -21,10 +21,22 @@ the relevant entry.
   the declared `cap_add`. **Report-only**: per-service verdicts
   (matches / not_minimized / over_permissioned / under_permissioned) land in the
   job summary; the job doesn't fail on a verdict (graduate to enforce by exiting
-  on the worst). First manifest covers **netdata** and **homepage** (both
-  validated end-to-end on the matched host); caddy (`build:` image) and postgres
-  (no standalone service) remain documented deferrals with their reasons. Needs a
-  read-only `FORGEJO_RO_TOKEN` repo secret.
+  on the worst). First manifest covers **netdata**, **homepage**, and **caddy**
+  (all validated end-to-end on the matched host); postgres (no standalone service)
+  remains a documented deferral. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.
+- **`compose_derive.sh` derives services that `build:` a custom image.** The
+  bridge builds the service's image and derives against that actual artifact
+  (drop_test gains a `no_pull` path + an image-id digest fallback). This matters:
+  the homelab **caddy**'s Dockerfile `COPY --from=builder /usr/bin/caddy`
+  **strips the base `caddy:2` binary's `cap_net_bind_service=ep` file
+  capability**, so the deployed binary needs no `NET_BIND_SERVICE` — it execs
+  without it and binds :80/:443 via the container's default
+  `ip_unprivileged_port_start=0`. Verdict `over_permissioned, drop
+  [NET_BIND_SERVICE]`, where a base-`caddy:2` catalog match would wrongly say
+  "required". Unresolved `${VAR}` env values (e.g. `${CF_API_TOKEN}`) are replaced
+  with a synthetic placeholder so config that validates the field still loads
+  without secrets on the derive host. `correctness/caddy_deploy.sh` asserts caddy
+  binds a privileged port (LISTEN), robust to the real reverse-proxy vhost config.
 
 ### Changed
 

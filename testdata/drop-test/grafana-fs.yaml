@@ -1,0 +1,30 @@
+# drop-test spec: grafana read-only-filesystem tmpfs minimum. grafana runs
+# correctly under --read-only with /var/lib/grafana writable — that dir is its data
+# store (sqlite DB + any installed plugins), a PERSISTENT VOLUME in real deployments
+# (it must survive restarts, so it is NOT tmpfs). It is supplied here via run.tmpfs
+# as a writable stand-in and never counted in the derived tmpfs minimum, the same
+# pattern as homepage's /app/config.
+#
+# /tmp is the one plausible ephemeral tmpfs, so it is the candidate. It comes out
+# NOT required: grafana's core (UI, dashboards, sqlite DB) + prometheus/Loki
+# datasource querying all work with a read-only /tmp. A writable /tmp is used only
+# by grafana's runtime plugin *installation*, the elasticsearch datasource plugin,
+# and image rendering / data export — not core function (see the criteria doc). So
+# the minimum is read_only:true, tmpfs:[].
+#
+# Confidence is moderate, not high: grafana's feature surface is large and this
+# workload cannot exercise all of it, so the criteria doc records the features that
+# DO need a writable /tmp (add tmpfs:[/tmp] for them — as the reference compose does
+# conservatively).
+image: docker.io/grafana/grafana
+tag: "13.0.2"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  tmpfs: ["/var/lib/grafana"]
+  env:
+    - GF_SECURITY_ADMIN_PASSWORD=csdprobe-pw-12345
+    - GF_ANALYTICS_REPORTING_ENABLED=false
+correctness: testdata/drop-test/correctness/grafana.sh

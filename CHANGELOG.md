@@ -13,6 +13,18 @@ the relevant entry.
 
 ### Added
 
+- **forgejo capabilities drop-test spec + correctness check
+  (`testdata/drop-test/forgejo-caps.yaml` + `correctness/forgejo_deploy.sh`).**
+  Derives the minimum capability set for `codeberg.org/forgejo/forgejo` (the
+  self-hosted Git forge) against its default s6-init invocation on a fresh `/data`
+  volume: **cap_drop:ALL + cap_add:[CHOWN, DAC_OVERRIDE, SETGID, SETUID,
+  SYS_CHROOT]** — trimming the full Docker default set 14→5. The image runs **two
+  root daemons** (`gitea web`, which chowns `/data` then `su-exec`-drops to the git
+  user, and `sshd`, whose per-connection privsep child chroots), so the correctness
+  check exercises the whole surface: web/API + a real DB-write/repo-create/git-push
+  over HTTP + an SSH connection reaching auth. **SYS_CHROOT is the coverage sharp
+  edge** — a web-only check reports 200 while git-over-SSH is silently dead. Feeds
+  the published catalog profile (`codeberg.org/forgejo/forgejo`, capabilities).
 - **Scheduled deploy-check job (`deploy-check.yml` + `scripts/deploy_check.sh` +
   `deploy-check/manifest.yaml`, csd#240).** On the self-hosted `csd` runner, per
   manifest entry, clones a homelab service's **live** compose from Forgejo and

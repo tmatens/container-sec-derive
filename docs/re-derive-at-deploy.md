@@ -57,10 +57,12 @@ operation not permitted`), so a drop-test of the base image reports
 so the *deployed* binary has none; combined with the container's default
 `ip_unprivileged_port_start=0` (any process may bind a low port), caddy binds
 :80/:443 without the cap. Deriving against the actual build yields minimum `[]` and
-a verdict of `over_permissioned — drop [NET_BIND_SERVICE]`. A catalog matched to
-`caddy:2` would wrongly call the cap required. (The cap is only vestigial while
-that sysctl stays 0; a hardened host that raises it to 1024 would need it again —
-a defense-in-depth nuance for the criteria doc, not the mechanical verdict.)
+a verdict of `over_permissioned — drop [NET_BIND_SERVICE]`. But that verdict is
+*bounded* by the runtime, not settled by it: caddy runs as **root**, so the granted
+cap still binds :80 when the container's `port_start` is tightened to 1024, and
+dropping it fails there (`bind: permission denied`) — both verified. The cap reads
+removable only because of the loose default sysctl; it is a defense-in-depth grant,
+not a clear over-permission (see "Custom images: a principle").
 
 A service whose config references secrets it doesn't have on the derive host — a
 `${CF_API_TOKEN}` in caddy's env — has those `${VAR}` values replaced by a
@@ -200,27 +202,28 @@ The caddy case (above) yields two rules for a locally-built (`build:`) image:
    belongs to **deploy-check** — a report-only verdict on *your own* deployment —
    never to the catalog, which targets public, pullable images.
 
-2. **"The capability is no longer required" is not automatically a security win —
-   read *why* it went away.** When a custom build makes a capability droppable, ask
-   what now provides the privilege. caddy is the cautionary case: the base
-   `caddy:2` binary carries a `cap_net_bind_service` **file capability**, which
-   scopes the low-port-bind privilege to *just that binary, just at exec*. The
-   `COPY --from=builder` silently strips it (Docker `COPY` doesn't preserve the
-   `security.capability` xattr), so the deployed binary binds :80/:443 only because
-   the container's default `ip_unprivileged_port_start=0` lets **every** process
-   bind privileged ports. The requirement didn't shrink — it moved from a
-   tightly-scoped file cap to a blanket, container-wide relaxation. Least privilege
-   got *worse*; the shorter `cap_add` list just hides it, and if the host ever
-   raised `port_start` to 1024 the capless binary would suddenly need the very
-   grant the deploy-check called removable. The narrowest posture keeps the file
-   capability (set it in the *final* build stage so `COPY` can't drop it): the bind
-   privilege then lives on one binary, `port_start` can stay at 1024, and no
-   `NET_BIND_SERVICE` grant is needed at all.
+2. **"The capability reads removable" is not the same as "safe to drop" — ask what
+   is actually providing the function.** caddy is the cautionary case. The
+   drop-test derives `NET_BIND_SERVICE` as removable, and for the *current* runtime
+   that's true — but only because the container's default
+   `ip_unprivileged_port_start=0` lets **every** process bind low ports. caddy runs
+   as **root**, so the granted `cap_add: [NET_BIND_SERVICE]` is its fallback: with
+   the grant it still binds :80 when `port_start` is tightened to 1024; without it,
+   that same host returns `bind: permission denied` (both verified). So the grant
+   isn't dead weight — it's cheap insurance against a hardening change, and the
+   *only* thing binding the port today is a blanket sysctl. Dropping it trades a
+   tiny attack-surface reduction for fragility. (The stripped file capability is a
+   **red herring** here: a root process gets the granted cap regardless, and a
+   file-cap binary would still need the cap in its *bounding set* to `exec` —
+   restoring it via `setcap` in the final stage buys nothing. It would only matter
+   for a *non-root* caddy, where a file cap can grant the bind without a broad
+   `cap_add`.)
 
-The general rule behind (2): **a smaller capability set is a security improvement
-only if the removed capability's function is *gone*, not *relocated to a broader
-control*.** The deploy-check reports the mechanical fact (a grant is redundant); the
-security reading requires knowing why.
+The general rule behind (2): **a capability reading "removable" can mean it is
+genuinely unused, or that a broader control is quietly covering for it** — drop it
+then and you're left with only the broad control. The deploy-check reports the
+mechanical fact (the grant is currently redundant); acting on it needs to know
+*what* makes it redundant and whether that's the posture you want to depend on.
 
 ## Where it belongs
 

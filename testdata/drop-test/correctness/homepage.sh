@@ -11,11 +11,13 @@ set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"
 C="$DROP_TEST_CONTAINER"
 
-# Readiness: the dashboard responds on :3000.
-deadline=$((SECONDS + 40))
+# Readiness: the dashboard responds on :3000. Homepage cold-start is ~45s
+# (the homelab deploy allows 120s), so give it generous margin — a too-tight
+# deadline makes the baseline flaky.
+deadline=$((SECONDS + 100))
 until docker exec "$C" wget -qO- http://localhost:3000/ >/dev/null 2>&1; do
   if (( SECONDS >= deadline )); then
-    echo "homepage did not become ready in 40s"
+    echo "homepage did not become ready in time"
     exit 1
   fi
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = "true" ] || { echo "homepage container exited"; exit 1; }

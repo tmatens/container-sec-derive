@@ -1,0 +1,28 @@
+# deploy-check manifest — the homelab services checked by deploy-check.yml.
+#
+# For each entry the job clones the service's LIVE compose from Forgejo and runs
+# scripts/compose_derive.sh against it: derive the capability minimum under the
+# service's OWN invocation (on the posture-matched runner) and diff it against
+# the declared cap_add. Report-only — verdicts land in the job summary; the job
+# does not fail on a verdict.
+#
+# `correctness` is a repo-relative correctness check (the per-service "still works
+# CORRECTLY" bar). A weak check under-derives, so only services with a real one
+# belong here. `compose_path` and `service` locate the service inside the repo.
+services:
+  - name: netdata
+    forgejo_repo: dad/netdata
+    compose_path: docker-compose.yml
+    service: netdata
+    correctness: testdata/drop-test/correctness/netdata.sh
+
+# Deferred — documented so each gap is explicit, not silent:
+#   - homepage (dad/home): runs `user: 1000` + `read_only: true` and binds
+#     `./config` (owned by uid 1000 on the deploy target). On the derive host the
+#     freshly-cloned `./config` is root-owned, so homepage-as-1000 can't use it and
+#     never becomes ready — an invocation-fidelity gap (bind-mount ownership under
+#     a non-root `user:`) that compose_derive must handle before this is truthful.
+#   - caddy (dad/caddy_reverse_proxy): a custom `build:` image (FROM caddy:2) — no
+#     pullable tag, so deploy-check would have to build it first.
+#   - postgres: no standalone homelab service; it's an embedded dependency
+#     (e.g. immich's DB, a different image). Point a future entry at that service.

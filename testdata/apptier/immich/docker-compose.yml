@@ -11,7 +11,7 @@ name: immich-apptier
 services:
   immich-server:
     container_name: immich-apptier-server
-    image: ghcr.io/immich-app/immich-server:v2.7.5
+    image: ghcr.io/immich-app/immich-server:v3.0.1
     environment:
       DB_HOSTNAME: database
       DB_USERNAME: postgres

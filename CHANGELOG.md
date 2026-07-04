@@ -87,6 +87,21 @@ the relevant entry.
   (the DB's privilege-drop breaks → immich never comes up). Live only (`make
   apptier-immich`; needs the `docker compose` v2 plugin + a network pull), not a
   per-PR gate.
+- **Home Assistant capabilities drop-test spec + correctness check
+  (`testdata/drop-test/home_assistant-caps.yaml` +
+  `correctness/home_assistant.sh`).** Derives the minimum for
+  `ghcr.io/home-assistant/home-assistant` against its default invocation:
+  **cap_drop:ALL + cap_add:[DAC_OVERRIDE]** — trimming the full Docker default set
+  **14→1** (the deployment sets no cap_drop; its compose comment: "tighten further
+  only after verifying HA still boots"). HA runs `python3 -m homeassistant` under
+  s6 **as root** — no privilege drop, no chown — so its only cap comes from *where*
+  it writes: root creating its DB/`.storage`/logs in a **non-root-owned `/config`**
+  bind needs DAC_OVERRIDE. Derived under a fresh non-root-owned `/config` (a
+  `${VAR}` mount, faithful to the `./config` bind); against a root-owned config HA
+  needs no caps. Correctness = reach the onboarding API + create the owner user (a
+  real config write). Scope is HA *core* — integration caps (NET_RAW ping, device
+  access, NET_ADMIN) aren't exercised by a base instance. Feeds the published
+  catalog profile.
 
 ### Changed
 

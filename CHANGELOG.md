@@ -21,13 +21,28 @@ the relevant entry.
   the declared `cap_add`. **Report-only**: per-service verdicts
   (matches / not_minimized / over_permissioned / under_permissioned) land in the
   job summary; the job doesn't fail on a verdict (graduate to enforce by exiting
-  on the worst). First manifest covers **netdata** (validated end-to-end on the
-  matched host); homepage (bind-mount ownership under `user:`+`read_only`), caddy
-  (`build:` image), and postgres (no standalone service) are documented deferrals
-  with their reasons. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.
+  on the worst). First manifest covers **netdata** and **homepage** (both
+  validated end-to-end on the matched host); caddy (`build:` image) and postgres
+  (no standalone service) remain documented deferrals with their reasons. Needs a
+  read-only `FORGEJO_RO_TOKEN` repo secret.
 
 ### Changed
 
+- **Drop-test reproduces a bind mount's ownership under a numeric `user:`.** When
+  a spec (or a real compose, via `compose_derive.sh`) pins a numeric run uid, a
+  bind-mounted directory must be owned by that uid for the run to be faithful: on
+  a real deployment the service runs *as* the mount's owner (e.g. homepage runs as
+  `1000:1000` and owns `./config`), so it needs no capability to use it. A fresh
+  git clone owns the source as the cloning user instead, so a container-as-1000
+  gets EACCES and never becomes ready. `drop_test.sh` now stages a private copy of
+  each such bind and chowns it to the run uid (via the service image as a
+  root-in-container helper — no host root, staying sudo-free). Reproducing the
+  *ownership* rather than loosening perms is deliberate: a world-writable mount
+  owned by the wrong uid would induce a spurious `FOWNER`/`CHOWN` requirement. This
+  is what lets **homepage** derive truthfully in deploy-check (verdict: matches —
+  as its own config owner it needs no caps). Its correctness check now asserts the
+  **dashboard serves 200**, not that `/api/healthcheck` reports "up" (which stays
+  "up" even while `/` 500s on an unwritable config — the netdata trap).
 - **`compose_derive.sh` skips bind mounts whose source is absent on the derive
   host.** A live compose can bind a target-host-specific file (`/usr/bin/msmtp`,
   a host config path) that can't be reproduced on the runner; these don't gate

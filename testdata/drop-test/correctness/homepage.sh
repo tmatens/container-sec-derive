@@ -11,9 +11,14 @@ set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"
 C="$DROP_TEST_CONTAINER"
 
-# Readiness: the dashboard responds on :3000. Homepage cold-start is ~45s
-# (the homelab deploy allows 120s), so give it generous margin — a too-tight
-# deadline makes the baseline flaky.
+# Readiness: the DASHBOARD (/) responds 200 on :3000 — not /api/healthcheck, which
+# is the netdata trap in disguise: it reports "up" even while / 500s. When config
+# isn't writable by the run uid, Homepage can't create config/logs and / 500s
+# (while the health endpoint still says up), so probing / is what makes the config
+# ownership requirement observable. A localhost GET is exempt from the
+# HOMEPAGE_ALLOWED_HOSTS Host-header ACL (loopback is always allowed), so no Host
+# header is needed. Homepage cold-start is ~45s (the homelab deploy allows 120s),
+# so give generous margin — a too-tight deadline makes the baseline flaky.
 deadline=$((SECONDS + 100))
 until docker exec "$C" wget -qO- http://localhost:3000/ >/dev/null 2>&1; do
   if (( SECONDS >= deadline )); then

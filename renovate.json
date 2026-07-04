@@ -35,6 +35,11 @@
       "description": "Hold the csd-authored gadgets' inspektor-gadget SDK (wasmapi/go) at PinnedIGVersion. A gadget must be built against the same ig version it runs on; bumping the SDK ahead of the pinned ig binary (internal/ig/ig.go: PinnedIGVersion) causes build-vs-runtime ABI skew. It moves ONLY as part of a deliberate ig pin bump (new testdata/ig-versions/<v> fixtures + reference-image smoke), not via Renovate.",
       "matchDepNames": ["github.com/inspektor-gadget/inspektor-gadget"],
       "enabled": false
+    },
+    {
+      "description": "The app-tier verification fixtures (testdata/apptier/**) pin a SPECIFIC deployment's images (immich-server v2.7.5 + its matched postgres/valkey) for a reproducible stack — the derived caps and test flow are version-matched, so an auto-bump (especially a major like immich v3) defeats the point. Pin them by hand alongside a real re-derivation.",
+      "matchFileNames": ["testdata/apptier/**"],
+      "enabled": false
     }
   ]
 }

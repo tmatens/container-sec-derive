@@ -60,13 +60,15 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
 - **The crux** (see `re-derive-at-deploy.md` → "The part re-derivation does *not*
   solve" and #240). One good correctness check = deep, per-service, version-specific
   reverse-engineering **plus** this matched host.
-- **netdata — DONE** (csd#249, catalog#10). The correctness check asserts non-root
-  uid **and** per-process io/fd data for a **non-root** process group
-  (`app.netdata_*`, uid 201). The original premise here was *wrong* and the matched
-  host proved it: this image ships **no `ebpf.plugin`** (so `SYS_ADMIN` gates
-  nothing — `ebpf=yes` is a no-op) and `apps.plugin` is setuid-root (so `SYS_PTRACE`
-  doesn't gate `/proc` reads). Honest minimum `[DAC_OVERRIDE, SETUID, SETGID]`;
-  live hardening proposed at `dad/netdata` #31.
+- **netdata — DONE** (csd#251, catalog#11; superseded the wrong 5→3 in
+  csd#249/catalog#10). Final minimum **`[DAC_OVERRIDE, SETUID, SETGID, SYS_PTRACE]`**
+  — drop **`SYS_ADMIN` only** (image ships no `ebpf.plugin`, so `ebpf=yes` is a
+  no-op). **`SYS_PTRACE` is REQUIRED:** `apps.plugin` runs real-uid = the netdata
+  user, so it needs it to read any process's `/proc/<pid>/io|fd`; without it every
+  per-process metric collects as **0 (not null)** — a "has data (non-null)" check
+  passed on all-zeros and a 5→3 attempt regressed production. The correctness check
+  now requires a per-process `fds_open` to be **non-zero**, so the drop-test detects
+  it. Deployed + verified at `dad/netdata` #32.
 - **Tier the library:** curated full-functionality correctness checks for the homelab
   set; the generic floor (`correctness/compose_generic.sh`) + a loud caveat for
   the long tail. Never *enforce* on a generic-tier result.

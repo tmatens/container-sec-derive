@@ -21,15 +21,17 @@ the relevant entry.
   end); only the TARGET is recreated per trial with the candidate dropped, and the
   correctness check drives the target's REAL, stack-backed function.
   `run.volumes_from: [<dep>]` shares a dep's volume with the target. A spec with no
-  `deps:` is a leaf and runs exactly as before. **First derivation
+  `deps:` is a leaf and runs exactly as before. **Worked example
   (`testdata/drop-test/mc-backup-caps.yaml` + `correctness/mc-backup.sh`):**
-  `docker.io/itzg/mc-backup` with `deps:[minecraft]` + `volumes_from:[minecraft]` →
-  **cap_drop:ALL + cap_add:[DAC_OVERRIDE]** (root reads minecraft's uid-1000 `/data`
-  to tar it; all 13 other Docker defaults removable). The correctness check counts
-  the backup's *entries*, not its existence — mc-backup runs as root and, without
-  DAC_OVERRIDE, writes a 0-entry empty tar of the unreadable `/data`, which surfaced
-  that the commonly-declared `cap_add:[SETUID,SETGID]` for this sidecar is wrong (no
-  privilege drop → silently empty backups). Feeds the published catalog profile.
+  `itzg/mc-backup` with `deps:[minecraft]` + `volumes_from:[minecraft]` — mc-backup
+  RCON-flushes the minecraft dep and tars its shared `/data`. The correctness check
+  counts the backup's *entries*, not its existence (mc-backup runs as root and can
+  create the archive file while archiving nothing), which is the load-bearing point:
+  a "file exists" check would pass on an empty backup. **The exact capability
+  result is image- and ownership-specific** — it depends on whether the shared
+  `/data` is readable by mc-backup's uid — so this spec is a model exercise, not a
+  published profile (a catalog profile must be derived against a specific pinned
+  image and its actual `/data` ownership).
 
 - **forgejo capabilities drop-test spec + correctness check
   (`testdata/drop-test/forgejo-caps.yaml` + `correctness/forgejo_deploy.sh`).**

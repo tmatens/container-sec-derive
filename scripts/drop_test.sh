@@ -43,6 +43,25 @@
 # context you derive UNDER — `run.read_only`/`run.tmpfs`/`run.user`/`run.mounts` —
 # IS legitimately held constant; that's expressed via `run.*`, not `fixed`.
 #
+# IN-STACK (dependent-tier) derivation — `deps:`. A target's capability minimum is
+# intrinsic to its OWN init/privilege-drop/bind syscalls (composition-independent),
+# but VERIFYING it needs the target to actually function — and a dependent tier
+# (mc-backup needs minecraft's RCON; an app needs its DB) cannot function in
+# isolation, so a standalone correctness check can't distinguish a real requirement
+# from a dependency-down failure. A `deps:` list brings the target's dependencies up
+# ONCE on a shared network (reachable by their `name`), holds them up across every
+# trial, and tears them down at the end; only the TARGET is recreated per trial with
+# the candidate dropped. The correctness check then drives the target's REAL,
+# stack-backed function. `run.volumes_from: [<dep>]` shares a dep's volume with the
+# target (e.g. a backup sidecar reading the app's data dir). A spec with no `deps:`
+# is a leaf and runs exactly as before.
+#   deps:
+#     - name: minecraft            # the hostname the target reaches it by
+#       image: itzg/minecraft-server
+#       tag: latest
+#       env: [EULA=TRUE, ...]
+#       ready: mc-monitor status --host localhost --port 25565   # exec'd in the dep
+#
 #   sudo? no — needs only docker; the correctness check may need more.
 #   PY=python3 scripts/drop_test.sh <spec.yaml>
 set -uo pipefail
@@ -53,6 +72,12 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 C="csd-drop-test-run"
 WORK="$(mktemp -d)"
 STAGED_ANY=""   # set when a fresh ephemeral volume was created (see run_and_test)
+# In-stack (dependent-tier) derivation state: a target that depends on other
+# services (a `deps:` list in the spec) needs them up to be exercised. They come up
+# ONCE on a shared network, stay up across all trials, and are torn down here. A
+# spec with no `deps:` sets neither and behaves exactly as before.
+DEP_NET=""
+declare -a DEP_NAMES=()
 cleanup() {
   docker rm -f -v "$C" >/dev/null 2>&1   # -v: also drop the container's anonymous volumes
   # A fresh ephemeral volume can be chowned to the container's user (e.g. postgres
@@ -62,6 +87,9 @@ cleanup() {
     docker run --rm --user 0:0 -v "$WORK:/w" --entrypoint chown "${IMAGE}:${TAG}" \
       -R "$(id -u):$(id -g)" /w >/dev/null 2>&1 || true
   fi
+  local dn
+  for dn in "${DEP_NAMES[@]:-}"; do [ -n "$dn" ] && docker rm -f -v "$dn" >/dev/null 2>&1; done
+  [ -n "$DEP_NET" ] && docker network rm "$DEP_NET" >/dev/null 2>&1
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -102,6 +130,22 @@ line("RUN_TMPFS", "\v".join(run.get("tmpfs", [])))
 # command may be a YAML list or a bare string (compose accepts both).
 cmd = run.get("command", [])
 line("CMD", "\v".join(cmd if isinstance(cmd, list) else [cmd]))
+# In-stack: share a dependency's volumes with the target (e.g. a backup sidecar
+# reading the app's data dir). Values are dep NAMEs (mapped to csd-dep-<name>).
+line("VOLUMES_FROM", "\v".join(run.get("volumes_from", [])))
+# Dependencies to bring up before the drop-test. Emit each field on its OWN key
+# (DEP_<i>_*), not one packed record: bash `read` treats \v as whitespace and would
+# collapse an empty field (e.g. no command override), shifting every later field.
+deps = s.get("deps", []) or []
+line("DEP_COUNT", str(len(deps)))
+for i, d in enumerate(deps):
+    dcmd = d.get("command", "")
+    if isinstance(dcmd, list): dcmd = " ".join(map(str, dcmd))
+    line(f"DEP_{i}_NAME", d["name"]); line(f"DEP_{i}_IMAGE", d["image"])
+    line(f"DEP_{i}_TAG", d.get("tag", "latest")); line(f"DEP_{i}_CMD", dcmd)
+    line(f"DEP_{i}_READY", d.get("ready", ""))
+    line(f"DEP_{i}_ENV", "\v".join(map(str, d.get("env", []))))
+line("DEP_READY_TIMEOUT", str(s.get("dep_ready_timeout", 180)))
 PYEOF
 )
 IFS=' ' read -ra FIXED <<<"${F[FIXED]}"
@@ -133,6 +177,9 @@ IFS=$'\v' read -ra RUN_SECOPT <<<"${F[SECOPT]}"
 IFS=$'\v' read -ra RUN_DEVICES <<<"${F[DEVICES]}"
 IFS=$'\v' read -ra RUN_TMPFS <<<"${F[RUN_TMPFS]}"
 IFS=$'\v' read -ra RUN_CMD <<<"${F[CMD]}"
+IFS=$'\v' read -ra RUN_VOLUMES_FROM <<<"${F[VOLUMES_FROM]}"
+# \v-joined dep alias names, for the evidence run_config.deps (see the emit below).
+DEPS_CSV=""; for (( _di=0; _di<${F[DEP_COUNT]:-0}; _di++ )); do DEPS_CSV+="${F[DEP_${_di}_NAME]}"$'\v'; done
 IMAGE="${F[IMAGE]}"; TAG="${F[TAG]}"; DIM="${F[DIM]}"
 CORRECTNESS="${REPO}/${F[CORRECTNESS]}"
 DOCKER_GID="$(getent group docker | cut -d: -f3)"
@@ -191,7 +238,14 @@ run_and_test() {
   docker rm -f -v "$C" >/dev/null 2>&1   # -v: also drop the container's anonymous volumes
   local args=(-d --name "$C")
   [ -n "${F[RUN_PID]}" ] && args+=(--pid "${F[RUN_PID]}")
-  [ -n "${F[RUN_NET]}" ] && args+=(--network "${F[RUN_NET]}")
+  # In-stack: the target joins the deps' shared network (so it resolves them by
+  # name), which overrides any run.network; a leaf uses run.network as before.
+  if [ -n "$DEP_NET" ]; then
+    args+=(--network "$DEP_NET")
+    local vf; for vf in "${RUN_VOLUMES_FROM[@]}"; do [ -n "$vf" ] && args+=(--volumes-from "csd-dep-$vf"); done
+  elif [ -n "${F[RUN_NET]}" ]; then
+    args+=(--network "${F[RUN_NET]}")
+  fi
   [ -n "${F[RUN_USER]}" ] && args+=(--user "${F[RUN_USER]}")
   [ -n "${F[RUN_ENTRYPOINT]}" ] && args+=(--entrypoint "${F[RUN_ENTRYPOINT]}")
   # Each candidate trial gets a fresh staging root, so a container writing into a
@@ -256,6 +310,39 @@ run_and_test() {
   OBS="$(grep -v '^[[:space:]]*$' "$WORK/pred.out" | tail -1)"
 }
 
+# bring_up_deps: start every `deps:` entry on a shared network (reachable by its
+# name), wait for its `ready` check, and leave them up for the whole run. Fails
+# loudly (exit 6) if a dep can't start or never becomes ready — so a
+# dependency-down state never masquerades as a target capability requirement.
+bring_up_deps() {
+  local n="${F[DEP_COUNT]:-0}"
+  [ "$n" != 0 ] || return 0
+  DEP_NET="csd-drop-net-$$"
+  docker network create "$DEP_NET" >/dev/null 2>&1 || { echo "could not create network $DEP_NET" >&2; exit 6; }
+  local i dname dimage dtag dcmd dready
+  for (( i=0; i<n; i++ )); do
+    dname="${F[DEP_${i}_NAME]}"; dimage="${F[DEP_${i}_IMAGE]}"; dtag="${F[DEP_${i}_TAG]}"
+    dcmd="${F[DEP_${i}_CMD]}"; dready="${F[DEP_${i}_READY]}"
+    local cname="csd-dep-$dname"
+    docker rm -f -v "$cname" >/dev/null 2>&1
+    local dargs=(-d --name "$cname" --network "$DEP_NET" --network-alias "$dname")
+    local -a evs=(); IFS=$'\v' read -ra evs <<<"${F[DEP_${i}_ENV]}"
+    local ev; for ev in "${evs[@]}"; do [ -n "$ev" ] && dargs+=(-e "$ev"); done
+    docker pull -q "$dimage:$dtag" >/dev/null 2>&1 || true
+    # shellcheck disable=SC2086  # dcmd is an optional whitespace-split command override
+    docker run "${dargs[@]}" "$dimage:$dtag" $dcmd >/dev/null 2>&1 || { echo "dep '$dname' failed to start" >&2; exit 6; }
+    DEP_NAMES+=("$cname")
+    if [ -n "$dready" ]; then
+      local dl=$((SECONDS + ${F[DEP_READY_TIMEOUT]}))
+      until docker exec "$cname" sh -c "$dready" >/dev/null 2>&1; do
+        (( SECONDS >= dl )) && { echo "dep '$dname' never became ready in ${F[DEP_READY_TIMEOUT]}s: $(docker logs "$cname" 2>&1 | tail -1)" >&2; exit 6; }
+        [ "$(docker inspect -f '{{.State.Running}}' "$cname" 2>/dev/null)" = true ] || { echo "dep '$dname' exited: $(docker logs "$cname" 2>&1 | tail -1)" >&2; exit 6; }
+        sleep 2
+      done
+    fi
+  done
+}
+
 # --- preflight: refuse to run if a foreign instance already holds the service
 # port. With network: host the port is host-wide, so a stale/leftover container
 # (or running this on a host that already serves the image) would answer the
@@ -266,6 +353,9 @@ if [ -n "${F[HEALTH_PORT]}" ] && (exec 3<>"/dev/tcp/127.0.0.1/${F[HEALTH_PORT]}"
   echo "port ${F[HEALTH_PORT]} is already in use before start — a foreign instance would pollute the drop-test; stop it and retry" >&2
   exit 4
 fi
+
+# --- bring up dependencies (in-stack derivation); no-op for a leaf spec
+bring_up_deps
 
 # --- baseline: full candidate set must be correct (else config isn't representative)
 run_and_test "${FIXED[@]}" "${CANDIDATES[@]}"
@@ -293,6 +383,7 @@ IMAGE="$IMAGE" TAG="$TAG" DIGEST="$DIGEST" DIM="$DIM" MINIMUM="$MINIMUM" \
   RUN_USER="${F[RUN_USER]}" RUN_PID="${F[RUN_PID]}" RUN_NET="${F[RUN_NET]}" \
   RUN_ENTRYPOINT="${F[RUN_ENTRYPOINT]}" RUN_CMD="${F[CMD]}" RUN_DEVICES="${F[DEVICES]}" \
   RUN_SECOPT="${F[SECOPT]}" RUN_MOUNTS="${F[MOUNTS]}" RUN_ENV="${F[ENV]}" \
+  RUN_DEPS="$DEPS_CSV" RUN_VOLUMES_FROM="${F[VOLUMES_FROM]}" \
   "$PY" - "$WORK/checks.tsv" <<'PYEOF'
 import os, sys, json
 checks = []
@@ -321,6 +412,14 @@ run_config = {
     "mounts": vsplit(os.environ.get("RUN_MOUNTS", "")),
     "env": [e.split("=", 1)[0] for e in vsplit(os.environ.get("RUN_ENV", ""))],
 }
+# In-stack context: the dependency services the minimum was derived alongside (the
+# target could not be exercised without them). Names only.
+deps = [x for x in os.environ.get("RUN_DEPS", "").split("\v") if x]
+if deps:
+    run_config["deps"] = deps
+    vf = [x for x in os.environ.get("RUN_VOLUMES_FROM", "").split("\v") if x]
+    if vf:
+        run_config["volumes_from"] = vf
 out = {
     "image": os.environ["IMAGE"], "tag": os.environ["TAG"],
     "digest": os.environ["DIGEST"], "dimension": os.environ["DIM"],

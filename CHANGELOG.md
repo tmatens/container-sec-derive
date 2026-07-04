@@ -13,6 +13,24 @@ the relevant entry.
 
 ### Added
 
+- **In-stack (dependent-tier) drop-test derivation (`deps:` + `run.volumes_from` in
+  `scripts/drop_test.sh`).** Derives the capability minimum for a service that
+  cannot function in isolation — a backup sidecar that needs the app's RCON, an app
+  that needs its DB. A `deps:` list brings the target's dependencies up ONCE on a
+  shared network (reachable by name, held up across every trial, torn down at the
+  end); only the TARGET is recreated per trial with the candidate dropped, and the
+  correctness check drives the target's REAL, stack-backed function.
+  `run.volumes_from: [<dep>]` shares a dep's volume with the target. A spec with no
+  `deps:` is a leaf and runs exactly as before. **First derivation
+  (`testdata/drop-test/mc-backup-caps.yaml` + `correctness/mc-backup.sh`):**
+  `docker.io/itzg/mc-backup` with `deps:[minecraft]` + `volumes_from:[minecraft]` →
+  **cap_drop:ALL + cap_add:[DAC_OVERRIDE]** (root reads minecraft's uid-1000 `/data`
+  to tar it; all 13 other Docker defaults removable). The correctness check counts
+  the backup's *entries*, not its existence — mc-backup runs as root and, without
+  DAC_OVERRIDE, writes a 0-entry empty tar of the unreadable `/data`, which surfaced
+  that the commonly-declared `cap_add:[SETUID,SETGID]` for this sidecar is wrong (no
+  privilege drop → silently empty backups). Feeds the published catalog profile.
+
 - **forgejo capabilities drop-test spec + correctness check
   (`testdata/drop-test/forgejo-caps.yaml` + `correctness/forgejo_deploy.sh`).**
   Derives the minimum capability set for `codeberg.org/forgejo/forgejo` (the

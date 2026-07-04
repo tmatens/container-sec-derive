@@ -1,0 +1,46 @@
+# drop-test spec: itzg/mc-backup minimum Linux capabilities — the first IN-STACK
+# (dependent-tier) derivation. mc-backup cannot be exercised in isolation: it
+# RCON-connects to a running minecraft server to flush the world (save-off /
+# save-on), then tars the SHARED /data volume into /backups. So minecraft is brought
+# up as a `deps:` entry (held up across every trial), the target shares minecraft's
+# /data via `run.volumes_from`, and the correctness check verifies a real backup
+# archive is produced — the leave-one-out then finds mc-backup's true minimum
+# against its real, stack-backed function.
+#
+# The caps are still mc-backup's OWN (composition-independent); the stack only makes
+# the correctness check valid. Baseline is cap_drop:ALL + the full Docker default
+# set; each default is dropped in turn.
+image: docker.io/itzg/mc-backup
+tag: latest
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+deps:
+  - name: minecraft
+    image: itzg/minecraft-server
+    tag: latest
+    env:
+      - EULA=TRUE
+      - TYPE=VANILLA
+      - VERSION=LATEST
+      - LEVEL_TYPE=FLAT
+      - GENERATE_STRUCTURES=false
+      - MEMORY=1G
+      - ONLINE_MODE=FALSE
+      - ENABLE_RCON=TRUE
+      - RCON_PASSWORD=csd-rcon-pw
+    ready: mc-monitor status --host localhost --port 25565
+run:
+  volumes_from: [minecraft]
+  env:
+    - INITIAL_DELAY=0
+    - BACKUP_INTERVAL=24h
+    - RCON_HOST=minecraft
+    - RCON_PORT=25575
+    - RCON_PASSWORD=csd-rcon-pw
+    - PRUNE_BACKUPS_DAYS=0
+    - BACKUP_METHOD=tar
+    - TAR_COMPRESS_METHOD=gzip
+correctness: testdata/drop-test/correctness/mc-backup.sh

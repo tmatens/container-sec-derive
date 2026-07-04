@@ -21,22 +21,38 @@ the relevant entry.
   the declared `cap_add`. **Report-only**: per-service verdicts
   (matches / not_minimized / over_permissioned / under_permissioned) land in the
   job summary; the job doesn't fail on a verdict (graduate to enforce by exiting
-  on the worst). First manifest covers **netdata**, **homepage**, and **caddy**
-  (all validated end-to-end on the matched host); postgres (no standalone service)
-  remains a documented deferral. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.
+  on the worst). First manifest covers **netdata**, **homepage**, **caddy**, and
+  **immich's postgres** (all validated end-to-end on the matched host). Needs a
+  read-only `FORGEJO_RO_TOKEN` repo secret.
 - **`compose_derive.sh` derives services that `build:` a custom image.** The
   bridge builds the service's image and derives against that actual artifact
   (drop_test gains a `no_pull` path + an image-id digest fallback). This matters:
   the homelab **caddy**'s Dockerfile `COPY --from=builder /usr/bin/caddy`
   **strips the base `caddy:2` binary's `cap_net_bind_service=ep` file
-  capability**, so the deployed binary needs no `NET_BIND_SERVICE` — it execs
-  without it and binds :80/:443 via the container's default
-  `ip_unprivileged_port_start=0`. Verdict `over_permissioned, drop
-  [NET_BIND_SERVICE]`, where a base-`caddy:2` catalog match would wrongly say
-  "required". Unresolved `${VAR}` env values (e.g. `${CF_API_TOKEN}`) are replaced
+  capability**, so the deployed binary execs without the cap and (under Docker's
+  default container `ip_unprivileged_port_start=0`) binds :80/:443 without it →
+  verdict `over_permissioned, drop [NET_BIND_SERVICE]`. That verdict is
+  runtime-posture-bounded, not a clear over-grant: caddy runs as root, so the
+  granted cap still binds :80 under a hardened `port_start=1024` (and dropping it
+  fails there) — the cap reads removable only because of the loose default sysctl
+  (see `docs/re-derive-at-deploy.md`). Unresolved `${VAR}` env values (e.g.
+  `${CF_API_TOKEN}`) are replaced
   with a synthetic placeholder so config that validates the field still loads
   without secrets on the derive host. `correctness/caddy_deploy.sh` asserts caddy
   binds a privileged port (LISTEN), robust to the real reverse-proxy vhost config.
+- **`compose_derive.sh` reproduces a first-boot data volume, and **immich's
+  postgres** joins the manifest.** A service's data-dir bind set from an
+  unresolved `${VAR}` (immich's `${DB_DATA_LOCATION}`) is absent on the derive
+  host; `drop_test.sh` now gives it a **fresh, foreign-owned dir per trial**, so a
+  service that chowns/chmods its data dir on first boot (postgres) exercises those
+  startup caps as it would on a real first deploy — instead of falling back to the
+  image's pre-owned dir and under-deriving `CHOWN`/`FOWNER`. immich's DB derives
+  minimum `[CHOWN, DAC_OVERRIDE, SETGID, SETUID]` → verdict `over_permissioned,
+  drop [FOWNER]` (a real, if minor, over-grant: FOWNER isn't exercised even on a
+  fresh foreign-owned data dir). `correctness/postgres_deploy.sh` reads the
+  service's `POSTGRES_*` credentials back from the container (they may be
+  placeholders for a `${VAR}` secret), runs the reference workload, and asserts a
+  non-root server uid.
 
 ### Changed
 

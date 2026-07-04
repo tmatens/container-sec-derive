@@ -51,7 +51,20 @@ SPEC="${1:?usage: drop_test.sh <spec.yaml>}"
 PY="${PY:-python3}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 C="csd-drop-test-run"
-WORK="$(mktemp -d)"; trap 'docker rm -f "$C" >/dev/null 2>&1; rm -rf "$WORK"' EXIT
+WORK="$(mktemp -d)"
+STAGED_ANY=""   # set when a fresh ephemeral volume was created (see run_and_test)
+cleanup() {
+  docker rm -f "$C" >/dev/null 2>&1
+  # A fresh ephemeral volume can be chowned to the container's user (e.g. postgres
+  # 999) during a run, leaving files under $WORK this host user can't remove.
+  # Reclaim them via a root-in-container helper before rm.
+  if [ -n "$STAGED_ANY" ] && [ -n "${IMAGE:-}" ]; then
+    docker run --rm --user 0:0 -v "$WORK:/w" --entrypoint chown "${IMAGE}:${TAG}" \
+      -R "$(id -u):$(id -g)" /w >/dev/null 2>&1 || true
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 # --- parse spec (TSV; arrays are space/newline-joined, safe for caps/paths) ----
 declare -A F
@@ -184,7 +197,23 @@ run_and_test() {
   # Each candidate trial gets a fresh staging root, so a container writing into a
   # staged bind (e.g. homepage's config/logs) can't leak state into the next trial.
   local stageroot="$WORK/stage.$STAGE_SEQ"; STAGE_SEQ=$((STAGE_SEQ + 1))
-  local m; for m in "${RUN_MOUNTS[@]}"; do [ -n "$m" ] && args+=(-v "$(prep_mount "$m" "$stageroot")"); done
+  local m vseq=0
+  for m in "${RUN_MOUNTS[@]}"; do
+    [ -n "$m" ] || continue
+    if [[ "${m%%:*}" == *'$'* ]]; then
+      # A mount whose source is an unresolved ${VAR}/$VAR is a host path absent
+      # here (a data dir set from .env). Give it a FRESH empty dir per trial, owned
+      # by this (non-container) user — so a service that chowns/chmods its data dir
+      # on first boot (postgres) exercises CHOWN/FOWNER as it would on a real first
+      # deploy, instead of falling back to the image's pre-owned dir and masking
+      # those startup caps. Fresh per trial so an initialized dir can't leak into
+      # the next iteration.
+      local tgt="${m#*:}" fv="$stageroot/freshvol.$vseq"; vseq=$((vseq + 1))
+      mkdir -p "$fv"; STAGED_ANY=1; args+=(-v "$fv:$tgt")
+    else
+      args+=(-v "$(prep_mount "$m" "$stageroot")")
+    fi
+  done
   local so; for so in "${RUN_SECOPT[@]}"; do [ -n "$so" ] && args+=(--security-opt "$so"); done
   local dv; for dv in "${RUN_DEVICES[@]}"; do [ -n "$dv" ] && args+=(--device "$dv"); done
   local e; for e in "${RUN_ENV[@]}"; do [ -n "$e" ] && args+=(-e "${e/__DOCKER_GID__/$DOCKER_GID}"); done

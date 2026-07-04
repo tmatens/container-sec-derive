@@ -46,6 +46,24 @@ services:
     service: caddy
     correctness: testdata/drop-test/correctness/caddy_deploy.sh
 
+  # Immich's embedded postgres (a custom pgvector/vectorchord image). The classic
+  # startup-cap case: the entrypoint starts as root, chowns + chmods a fresh data
+  # dir (CHOWN/FOWNER) and drops to the postgres user via gosu (SETUID/SETGID),
+  # reading/writing it as the postgres user thereafter (DAC_OVERRIDE). Its
+  # `${DB_DATA_LOCATION}` data-dir bind and `${DB_*}` credentials are absent on the
+  # derive host: drop_test gives the data mount a FRESH, foreign-owned dir per trial
+  # (reproducing a first-deploy data dir postgres must chown/chmod — the image's own
+  # dir is pre-owned by uid 999 and would MASK CHOWN/FOWNER), and the placeholder
+  # credentials are read back from the container by the correctness check, which
+  # runs the reference workload and asserts a non-root server uid. Derived minimum
+  # [CHOWN, DAC_OVERRIDE, SETGID, SETUID] → verdict over_permissioned, drop [FOWNER]
+  # (declared but not exercised even on a fresh foreign-owned data dir — a real,
+  # if minor, over-grant in immich's compose).
+  - name: immich-db
+    forgejo_repo: dad/immich
+    compose_path: docker-compose.yaml
+    service: database
+    correctness: testdata/drop-test/correctness/postgres_deploy.sh
+
 # Deferred — documented so each gap is explicit, not silent:
-#   - postgres: no standalone homelab service; it's an embedded dependency
-#     (e.g. immich's DB, a different image). Point a future entry at that service.
+#   (none — netdata, homepage, caddy, and immich-db cover the active services.)

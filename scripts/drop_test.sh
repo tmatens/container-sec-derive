@@ -5,7 +5,7 @@
 # This is csd's EXPERIMENT layer, complementary to its OBSERVATION layer (the ig
 # gadgets). It is not a gadget and uses no eBPF of its own: for each candidate it
 # launches the container WITHOUT that element, restarts, and runs a per-image
-# correctness predicate. Observation answers "was it exercised"; drop-test answers
+# correctness check. Observation answers "was it exercised"; drop-test answers
 # "is it required" — the only way to catch startup-time requirements (a root->user
 # privilege drop's SETUID/SETGID, a socket dir's tmpfs) that attach-window
 # observation is blind to.
@@ -28,9 +28,9 @@
 # "observation showed it used": observation sees a syscall fire, not that the cap
 # gated it — a setuid-root helper (e.g. netdata's apps.plugin) makes the syscall
 # as root regardless of the cap, so "observed used" can hide a real over-grant.
-# A candidate is only as trustworthy as the predicate's coverage of what it gates.
+# A candidate is only as trustworthy as the correctness check's coverage of what it gates.
 #
-#   sudo? no — needs only docker; the predicate may need more.
+#   sudo? no — needs only docker; the correctness check may need more.
 #   PY=python3 scripts/drop_test.sh <spec.yaml>
 set -uo pipefail
 
@@ -48,10 +48,10 @@ s = yaml.safe_load(open(sys.argv[1])) or {}
 run = s.get("run", {}) or {}
 def line(k, v): print(f"{k}\t{v}")
 line("IMAGE", s["image"]); line("TAG", s["tag"]); line("DIM", s["dimension"])
-line("PREDICATE", s["predicate"]); line("BASE_FS", s.get("base_fs", ""))
+line("CORRECTNESS", s["correctness"]); line("BASE_FS", s.get("base_fs", ""))
 # health_port: a host-networked service (network: host) pins a fixed host port;
 # declare it so the harness can refuse to run when a foreign instance already
-# holds it (it would answer the predicate and silently corrupt the drop-test).
+# holds it (it would answer the correctness check and silently corrupt the drop-test).
 line("HEALTH_PORT", str(s.get("health_port", "") or ""))
 line("RUN_PID", run.get("pid", "")); line("RUN_NET", run.get("network", ""))
 line("RUN_USER", run.get("user", ""))
@@ -83,13 +83,13 @@ IFS=$'\v' read -ra RUN_DEVICES <<<"${F[DEVICES]}"
 IFS=$'\v' read -ra RUN_TMPFS <<<"${F[RUN_TMPFS]}"
 IFS=$'\v' read -ra RUN_CMD <<<"${F[CMD]}"
 IMAGE="${F[IMAGE]}"; TAG="${F[TAG]}"; DIM="${F[DIM]}"
-PREDICATE="${REPO}/${F[PREDICATE]}"
+CORRECTNESS="${REPO}/${F[CORRECTNESS]}"
 DOCKER_GID="$(getent group docker | cut -d: -f3)"
 
 docker pull -q "${IMAGE}:${TAG}" >/dev/null 2>&1 || { echo "pull failed: ${IMAGE}:${TAG}" >&2; exit 2; }
 DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${TAG}" | sed -E 's/.*@//')"
 
-# run_and_test <active element...>  -> sets PASS=0/1, OBS=<last predicate line>
+# run_and_test <active element...>  -> sets PASS=0/1, OBS=<last correctness-check line>
 run_and_test() {
   docker rm -f "$C" >/dev/null 2>&1
   local args=(-d --name "$C")
@@ -124,7 +124,7 @@ run_and_test() {
   docker run "${args[@]}" "${IMAGE}:${TAG}" ${RUN_CMD[@]+"${RUN_CMD[@]}"} >/dev/null 2>&1
   # Assert the container actually came up before probing. Otherwise a start
   # failure (bad config; or, under --network host, the service failing to bind
-  # its already-taken port) surfaces only as an opaque predicate failure — and
+  # its already-taken port) surfaces only as an opaque correctness-check failure — and
   # for a candidate drop that would be misattributed to the removed element.
   local up="" i
   for i in 1 2 3 4 5 6; do
@@ -136,14 +136,14 @@ run_and_test() {
     PASS=0; OBS="container failed to start: $(docker logs "$C" 2>&1 | grep -v '^[[:space:]]*$' | tail -1)"
     return
   fi
-  DROP_TEST_CONTAINER="$C" bash "$PREDICATE" >"$WORK/pred.out" 2>&1 && PASS=1 || PASS=0
+  DROP_TEST_CONTAINER="$C" bash "$CORRECTNESS" >"$WORK/pred.out" 2>&1 && PASS=1 || PASS=0
   OBS="$(grep -v '^[[:space:]]*$' "$WORK/pred.out" | tail -1)"
 }
 
 # --- preflight: refuse to run if a foreign instance already holds the service
 # port. With network: host the port is host-wide, so a stale/leftover container
 # (or running this on a host that already serves the image) would answer the
-# predicate and silently grade the WRONG container. We only ever run a single
+# correctness check and silently grade the WRONG container. We only ever run a single
 # container ($C, rm'd each iteration), so before we start it the port must be free.
 if [ -n "${F[HEALTH_PORT]}" ] && (exec 3<>"/dev/tcp/127.0.0.1/${F[HEALTH_PORT]}") 2>/dev/null; then
   exec 3>&- 3<&-

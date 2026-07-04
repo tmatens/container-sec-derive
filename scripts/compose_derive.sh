@@ -9,11 +9,11 @@
 # the exact way THIS service runs, then diff the derived minimum against the
 # service's declared cap_add/cap_drop to say what to drop and what's missing.
 #
-# The correctness predicate stays per-service (a container can be "healthy" and
-# wrong — the netdata trap): supply one with PREDICATE, or the built-in generic
-# predicate checks the container stays running (weaker — see docs).
+# The correctness check stays per-service (a container can be "healthy" and
+# wrong — the netdata trap): supply one with CORRECTNESS, or the built-in generic
+# check verifies the container stays running (weaker — see docs).
 #
-#   PREDICATE=testdata/drop-test/predicates/<svc>.sh \
+#   CORRECTNESS=testdata/drop-test/correctness/<svc>.sh \
 #     scripts/compose_derive.sh <compose.yml> <service>
 #
 # Emits the drop_test.sh evidence JSON (with run_config) plus a deploy_check
@@ -26,7 +26,7 @@ COMPOSE="${1:?usage: compose_derive.sh <compose.yml> <service>}"
 SERVICE="${2:?usage: compose_derive.sh <compose.yml> <service>}"
 PY="${PY:-python3}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-PREDICATE="${PREDICATE:-testdata/drop-test/predicates/compose_generic.sh}"
+CORRECTNESS="${CORRECTNESS:-testdata/drop-test/correctness/compose_generic.sh}"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # --- extract the service's run config into a drop-test spec -----------------
@@ -34,10 +34,10 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # minimum can reveal both over-grants (declared, not needed) and missing caps
 # (needed, not declared). Declared caps are written to declared.json for the
 # post-derivation comparison.
-"$PY" - "$COMPOSE" "$SERVICE" "$PREDICATE" "$WORK/declared.json" > "$WORK/spec.yaml" <<'PYEOF'
+"$PY" - "$COMPOSE" "$SERVICE" "$CORRECTNESS" "$WORK/declared.json" > "$WORK/spec.yaml" <<'PYEOF'
 import os, sys, json, yaml
 
-compose, service, predicate, declared_out = sys.argv[1:5]
+compose, service, correctness, declared_out = sys.argv[1:5]
 compose_dir = os.path.dirname(os.path.abspath(compose))
 
 def resolve_mount(v):
@@ -90,7 +90,7 @@ run = {
 json.dump({"cap_add": cap_add, "cap_drop": cap_drop}, open(declared_out, "w"))
 spec = {
     "image": name, "tag": tag, "dimension": "capabilities",
-    "fixed": [], "candidates": candidates, "run": run, "predicate": predicate,
+    "fixed": [], "candidates": candidates, "run": run, "correctness": correctness,
 }
 print(yaml.safe_dump(spec, sort_keys=False))
 PYEOF

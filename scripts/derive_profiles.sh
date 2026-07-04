@@ -4,7 +4,7 @@
 # One manifest-driven loop, dispatching per the manifest entry's `method`:
 #
 #   method: drop-test       -> scripts/drop_test.sh (the EXPERIMENT layer):
-#       drop-a-candidate / restart / run a correctness predicate. Covers the full
+#       drop-a-candidate / restart / run a correctness check. Covers the full
 #       container lifetime, so it derives the minimum that startup-only behavior
 #       makes invisible to runtime observation (a socket dir's tmpfs, a
 #       root->user privilege drop's SETUID/SETGID). No eBPF, needs only docker.
@@ -21,7 +21,7 @@
 #   CHANGED     — recommendation differs; left for human review (never auto-applied).
 #
 # A drop-test entry is matched to its csd spec (testdata/drop-test/*.yaml) by
-# image + dimension — no filename coupling, and the spec (candidates, predicate,
+# image + dimension — no filename coupling, and the spec (candidates, correctness check,
 # representative run config) stays authoritative in csd.
 #
 # Runs on the self-hosted BPF runner. The drop-test path needs only docker; the

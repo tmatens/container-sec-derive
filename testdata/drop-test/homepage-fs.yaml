@@ -15,4 +15,4 @@ candidates: ["/app/.next/cache", "/tmp"]
 run:
   tmpfs: ["/app/config"]
   env: ["HOMEPAGE_ALLOWED_HOSTS=*"]
-predicate: testdata/drop-test/predicates/homepage.sh
+correctness: testdata/drop-test/correctness/homepage.sh

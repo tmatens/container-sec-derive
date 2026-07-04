@@ -53,6 +53,20 @@ the relevant entry.
   service's `POSTGRES_*` credentials back from the container (they may be
   placeholders for a `${VAR}` secret), runs the reference workload, and asserts a
   non-root server uid.
+- **App-tier verification (`scripts/apptier_verify.sh` + `docs/app-tier-verification.md`).**
+  The second correctness tier for a multi-container service: the drop-test loop
+  derives each container's caps in isolation (caps are composition-independent),
+  and this brings up the *whole* stack with the hardening applied and confirms the
+  service does its real job. The worked example (`testdata/apptier/immich/`) runs
+  immich's **released** stack (server `v2.7.5` + valkey + the custom postgres) with
+  the **derived** DB hardening (declared set minus `FOWNER`) and drives immich's
+  real REST API — admin sign-up → login → upload a committed fixture → read back →
+  search — reusing the upstream project's *fixtures + API* rather than its
+  CI-coupled e2e suite ("pull the pieces we need"). Validated on the BPF host: the
+  derived hardening PASSES and an over-hardening (drop `SETUID`) correctly FAILS
+  (the DB's privilege-drop breaks → immich never comes up). Live only (`make
+  apptier-immich`; needs the `docker compose` v2 plugin + a network pull), not a
+  per-PR gate.
 
 ### Changed
 

@@ -102,6 +102,19 @@ the relevant entry.
   real config write). Scope is HA *core* — integration caps (NET_RAW ping, device
   access, NET_ADMIN) aren't exercised by a base instance. Feeds the published
   catalog profile.
+- **mariadb capabilities drop-test spec + correctness check
+  (`testdata/drop-test/mariadb-caps.yaml` + `correctness/mariadb.sh`).** Derives the
+  minimum for `docker.io/library/mariadb` against its default (root-then-drop)
+  invocation: **cap_drop:ALL + cap_add:[SETGID, SETUID]** — trimming the full Docker
+  default set **14→2**. The entrypoint re-execs itself as the mysql user via `gosu`
+  (SETUID/SETGID); dropping either fails with `failed switching to 'mysql'`. The
+  instructive contrast with postgres: **CHOWN and DAC_OVERRIDE are not required by
+  default** — the image ships `/var/lib/mysql` owned by mysql, so a docker-managed
+  volume inherits it and the entrypoint's `find`-chown is a no-op (and it re-execs
+  as mysql early, so writes are as the owner). A foreign-owned bind mount adds
+  **CHOWN** only; running as the mysql uid on a pre-owned datadir shrinks it to `[]`.
+  Correctness = a query round-trip + a non-root (uid 999) `mariadbd`. Feeds the
+  published catalog profile.
 
 ### Changed
 

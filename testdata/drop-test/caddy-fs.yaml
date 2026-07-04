@@ -13,4 +13,4 @@ base_fs: read_only
 fixed: []
 candidates: ["/data", "/config"]
 run: {}
-predicate: testdata/drop-test/predicates/caddy.sh
+correctness: testdata/drop-test/correctness/caddy.sh

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Generic deploy-time predicate: the container is still running a few seconds
+# Generic deploy-time correctness check: the container is still running a few seconds
 # after start (didn't crash-loop on a missing capability).
 #
 # This is deliberately WEAK, and the weakness is the point to understand: "still
 # running" is not "correct." A container can stay up while doing the wrong thing
 # — netdata drops SETUID/SETGID and keeps running, but as ROOT. Deriving against
 # a service's real invocation removes the *matching* guesswork, but the
-# correctness bar is still per-service: prefer a predicate that asserts the
+# correctness bar is still per-service: prefer a correctness check that asserts the
 # intended posture (a request served, a non-root uid, a passing workload). Supply
-# one via PREDICATE; this default is the floor when none is given.
+# one via CORRECTNESS; this default is the floor when none is given.
 set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"
 C="$DROP_TEST_CONTAINER"

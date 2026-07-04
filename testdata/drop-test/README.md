@@ -4,7 +4,7 @@
 and verifying the container breaks without it*. It is csd's **experiment** layer,
 complementary to the **observation** layer (the ig gadgets) — and, unlike a
 gadget, it is not eBPF: it drives the container runtime and runs an
-application-level correctness predicate.
+application-level correctness check.
 
 - **Observation** (`caps`/`fs`/… → `bpf-observation`) answers *"what did it
   exercise?"* — blind to startup-only requirements (a root→user privilege drop's
@@ -34,15 +34,16 @@ PY=python3 scripts/drop_test.sh testdata/drop-test/<spec>.yaml   # -> evidence J
 
 A **spec** names the image/tag, the dimension (`capabilities` | `filesystem`),
 the representative run config, the `fixed` set (always granted, not tested), the
-`candidates` to drop-test, and a `predicate` script. The **predicate** is the
-per-image correctness check — it returns 0 iff the container is *correct* (not
-merely alive), reading the container name from `$DROP_TEST_CONTAINER`.
+`candidates` to drop-test, and a `correctness` check script. The **correctness
+check** is the per-image test of whether the service actually works — it returns
+0 iff the container is *correct* (not merely alive), reading the container name
+from `$DROP_TEST_CONTAINER`.
 
 ## Specs
 
 - **`postgres-fs.yaml`** — filesystem. **Validated end-to-end**: dropping
   `/run/postgresql` makes postgres fail to start (socket dir), so it is required.
-- **`netdata-caps.yaml`** — capabilities. **Validated end-to-end.** The predicate
+- **`netdata-caps.yaml`** — capabilities. **Validated end-to-end.** The correctness check
   asserts the daemon still drops to a non-root uid (the "healthy-while-root"
   trap): dropping `SETUID`/`SETGID` leaves it running as root (required),
   `CHOWN`/`FOWNER` do not (removable). Verified minimum
@@ -57,7 +58,7 @@ merely alive), reading the container name from `$DROP_TEST_CONTAINER`.
   `--read-only`; `/data` (certs) and `/config` (autosave) drop-test as
   not-required-as-tmpfs → `read_only:true, tmpfs:[]` (those paths belong on
   persistent volumes, not tmpfs — the honest contrast to postgres's ephemeral
-  socket dir). Shared predicate `predicates/caddy.sh` (serves a `GET` on `:80`,
+  socket dir). Shared correctness check `correctness/caddy.sh` (serves a `GET` on `:80`,
   via `docker exec` so no host ports are published).
 - **`postgres-caps.yaml`** — capabilities. **Validated end-to-end.** Baseline
   `cap_drop:ALL` + the Docker default set on a fresh data dir (so initdb + the
@@ -67,20 +68,20 @@ merely alive), reading the container name from `$DROP_TEST_CONTAINER`.
   recommendation (`read_only:true` + `tmpfs:[/run/postgresql]`, via `run.read_only`
   + `run.tmpfs`): that adds **CHOWN** — the root-owned tmpfs socket dir must be
   chowned to the postgres user, a requirement invisible when caps are derived on
-  a writable rootfs. Predicate `predicates/postgres-caps.sh` asserts the workload
+  a writable rootfs. Correctness check `correctness/postgres-caps.sh` asserts the workload
   passes **and** the server (PID 1) is non-root.
 - **`homepage-fs.yaml`** — filesystem. **Validated end-to-end.** homepage serves
   under `--read-only` with `/app/config` writable (a persistent volume, supplied
   via `run.tmpfs` as a stand-in — not part of the minimum). Its one tmpfs need is
   `/app/.next/cache`: a bare dashboard `GET` serves without it, but Next.js image
   optimization `mkdir`s it on the first `/_next/image` request and errors when it
-  can't — so `predicates/homepage.sh` triggers image optimization and checks the
+  can't — so `correctness/homepage.sh` triggers image optimization and checks the
   log. `/tmp` drop-tests as not required → `read_only:true,
   tmpfs:[/app/.next/cache]`.
 
 ## Adding a spec
 
-Copy an existing spec, set the image + candidates, and write a predicate that
+Copy an existing spec, set the image + candidates, and write a correctness check that
 checks *correctness* (the intended user, a working request, a passing workload)
 — not just liveness. A container can be "healthy" and wrong.
 

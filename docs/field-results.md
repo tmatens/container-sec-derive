@@ -122,7 +122,7 @@ over-claiming.
 confidence — `read_only: true`, `tmpfs: [/app/.next/cache]`. The subtlety
 observation glossed: a bare dashboard `GET` serves read-only, but Next.js **image
 optimization** (`/_next/image`, used for icons) `mkdir`s `/app/.next/cache` and
-errors when it isn't writable. The drop-test predicate exercises image
+errors when it isn't writable. The drop-test correctness check exercises image
 optimization, so the requirement is confirmed rather than assumed; `/tmp` was
 drop-tested and is not required, and `/app/config` is a persistent volume.
 

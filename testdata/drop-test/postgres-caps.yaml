@@ -2,7 +2,7 @@
 # invocation. Baseline is cap_drop:ALL + the full Docker default cap set on a
 # FRESH data dir (so initdb runs and the root->postgres privilege drop is
 # exercised). Each default is dropped in turn and the workload + privilege-drop
-# predicate re-verified. Startup caps (SETUID/SETGID for gosu) are invisible to
+# correctness check re-verified. Startup caps (SETUID/SETGID for gosu) are invisible to
 # runtime observation — drop-test is the authoritative signal, same lesson as
 # netdata.
 #
@@ -22,4 +22,4 @@ run:
   read_only: true
   tmpfs: ["/run/postgresql"]
   env: ["POSTGRES_PASSWORD=postgres"]
-predicate: testdata/drop-test/predicates/postgres-caps.sh
+correctness: testdata/drop-test/correctness/postgres-caps.sh

@@ -46,24 +46,24 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
   running `scripts/compose_derive.sh` over committed compose files, reporting the
   `deploy_check` verdict per service, failing on `under_permissioned`.
 - **Do:** author `deploy-check.yml` + a manifest of `{compose_path, service,
-  predicate}` for the services in scope. **Report-only first** (job summary),
+  correctness check}` for the services in scope. **Report-only first** (job summary),
   graduate to enforce.
 - **Open decisions (#240):** which compose files / repos (the homelab services
   live in `dad/*` on Forgejo — decide how the GH runner reaches them); the
-  per-service predicate library; report-vs-enforce.
+  per-service correctness check library; report-vs-enforce.
 
-### 3. Grow the predicate library (start: netdata)
+### 3. Grow the correctness check library (start: netdata)
 - **The crux** (see `re-derive-at-deploy.md` → "The part re-derivation does *not*
-  solve" and #240). One good predicate = deep, per-service, version-specific
+  solve" and #240). One good correctness check = deep, per-service, version-specific
   reverse-engineering **plus** this matched host.
 - **netdata first** (scouting on #240): assert non-root uid **and** per-process
   metrics present (the `app.apps_plugin_*` charts carry data → proves
   `SYS_PTRACE`) **and** `ebpf.plugin` charts carry data (→ `SYS_ADMIN`, finally
   testable here because the matched host has `unprivileged_bpf_disabled=2` +
   AppArmor). netdata's own `apparmor:unconfined` narrows its match to the kernel
-  BPF sysctls + this predicate.
-- **Tier the library:** curated full-functionality predicates for the homelab
-  set; the generic floor (`predicates/compose_generic.sh`) + a loud caveat for
+  BPF sysctls + this correctness check.
+- **Tier the library:** curated full-functionality correctness checks for the homelab
+  set; the generic floor (`correctness/compose_generic.sh`) + a loud caveat for
   the long tail. Never *enforce* on a generic-tier result.
 
 ## State of play (done, this session)
@@ -76,16 +76,16 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
 - **Consumption:** compose-lint enrichment made honest — per-service hints, a
   "can't see your runtime" caveat, **experimental-flagged + off by default**.
 - **Fragility fully characterized** across its three axes: the **invocation**
-  (`run_config`), **workload coverage** (the predicate), and the **derive
+  (`run_config`), **workload coverage** (the correctness check), and the **derive
   environment** (host posture). All documented, none merely asserted.
 
 ## Map — where everything lives
 
 | topic | where |
 |---|---|
-| the model, deploy check, 3 axes, predicate + env caveats | `docs/re-derive-at-deploy.md` |
+| the model, deploy check, 3 axes, correctness check + env caveats | `docs/re-derive-at-deploy.md` |
 | runner setup + the matched-host spec | `docs/self-hosted-runner.md` |
-| scheduled deploy-check job design + netdata predicate scouting | csd#240 |
+| scheduled deploy-check job design + netdata correctness check scouting | csd#240 |
 | config→capability study (the ~25 compose vars that change a profile) | csd#236 |
 | rendered per-image catalog page (the honest reference a hint links to) | container-security-profiles#6 |
 | the tools | `scripts/compose_derive.sh`, `scripts/derive_profiles.sh`, `scripts/drop_test.sh`, `.github/workflows/derive-profiles.yml` |

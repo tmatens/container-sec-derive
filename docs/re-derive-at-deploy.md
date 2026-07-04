@@ -22,7 +22,7 @@ and the granted cap set (its `cap_add`, or the Docker default set) — generates
 drop-test spec, and runs it:
 
 ```sh
-PREDICATE=testdata/drop-test/predicates/<svc>.sh \
+CORRECTNESS=testdata/drop-test/correctness/<svc>.sh \
   scripts/compose_derive.sh docker-compose.yml <service>
 ```
 
@@ -74,19 +74,19 @@ The **exit code is the gate signal** — `0` matches, `10` not-minimized, `11`
 over-permissioned, `12` under-permissioned — so a job can `fail >= 12` and warn
 on the rest, or pick its own threshold.
 
-## The part re-derivation does *not* solve: the predicate
+## The part re-derivation does *not* solve: the correctness check
 
 Deriving against the real config removes the matching guesswork, but **not** the
 need for a per-service correctness bar. "The container is still running" is not
 "the container is correct" — netdata drops `SETUID`/`SETGID`, stays up, and runs
-as **root**. The built-in `predicates/compose_generic.sh` (container stays
+as **root**. The built-in `correctness/compose_generic.sh` (container stays
 running) is a floor, and its weakness is deliberate and documented; a real
 derivation should assert the intended posture — a request served, a non-root uid,
-a passing workload — which is per-service knowledge, supplied via `PREDICATE`.
+a passing workload — which is per-service knowledge, supplied via `CORRECTNESS`.
 
-**And even a decent predicate can under-derive.** Run against a real homelab
+**And even a decent correctness check can under-derive.** Run against a real homelab
 netdata (`cap_drop:[ALL]` + `cap_add:[SYS_PTRACE, SYS_ADMIN, DAC_OVERRIDE,
-SETUID, SETGID]`, `pid:host`, host mounts) with a predicate that asserts "ready +
+SETUID, SETGID]`, `pid:host`, host mounts) with a correctness check that asserts "ready +
 non-root uid + apps.plugin up", the deploy check returned:
 
 ```
@@ -95,12 +95,12 @@ compose_derive: over_permissioned — drop ['SYS_ADMIN', 'SYS_PTRACE'] (declared
 
 That verdict is **wrong**, and instructively so. `SYS_PTRACE` is what lets
 `apps.plugin` read *per-process* metrics (tens of thousands of events in a live
-run); `SYS_ADMIN` serves a collector. The predicate confirmed netdata was *up and
+run); `SYS_ADMIN` serves a collector. The correctness check confirmed netdata was *up and
 non-root* without exercising per-process monitoring, so those two caps looked
-removable. The minimum is only ever valid for what the predicate exercises —
+removable. The minimum is only ever valid for what the correctness check exercises —
 **workload coverage bounds the answer**, and a readiness check is not full
 coverage. Re-deriving against the real config removes the *matching* guesswork
-but inherits the predicate's blind spots; a deploy check is only as trustworthy
+but inherits the correctness check's blind spots; a deploy check is only as trustworthy
 as the correctness bar behind it.
 
 ## The derive environment must match the target
@@ -148,4 +148,4 @@ it, not within it.
 
 Prototype, **capabilities dimension**. Follow-ups: the filesystem dimension
 (derive `read_only`/`tmpfs` from the service), a small library of per-service
-correctness predicates, and the deploy-pipeline integration itself.
+correctness checks, and the deploy-pipeline integration itself.

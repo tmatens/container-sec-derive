@@ -3,7 +3,7 @@
 # optimization cache. A bare dashboard GET serves even under --read-only, so the
 # cache requirement only surfaces when image optimization runs: any /_next/image
 # request makes Next.js mkdir /app/.next/cache first, which fails
-# (unhandledRejection: ENOENT mkdir) when that path isn't writable. The predicate
+# (unhandledRejection: ENOENT mkdir) when that path isn't writable. The correctness check
 # fires an image request and asserts the container log is clean of the cache /
 # read-only-fs write error. Uses docker exec (the image ships wget) — no host
 # ports published.

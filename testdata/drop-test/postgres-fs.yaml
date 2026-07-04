@@ -7,4 +7,4 @@ fixed: []                       # tmpfs always present (none)
 candidates: ["/run/postgresql"] # tmpfs paths to drop-test
 run:
   env: ["POSTGRES_PASSWORD=postgres"]
-predicate: testdata/drop-test/predicates/postgres.sh
+correctness: testdata/drop-test/correctness/postgres.sh

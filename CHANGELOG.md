@@ -16,22 +16,32 @@ the relevant entry.
 - **Drop-test no longer silently grades the wrong container (port pollution).**
   A `network: host` spec (netdata) pins the service to a fixed host port, so a
   stale/leftover container — or running the drop-test on a host that already
-  serves that image — leaves a *foreign* instance answering the predicate's
+  serves that image — leaves a *foreign* instance answering the correctness check's
   `localhost:19999` queries. `drop_test.sh` removed only its own container name,
   never checked the port was free, and never verified the responder's identity,
-  so the predicate could read the wrong instance and pass (or fail) against it —
+  so the correctness check could read the wrong instance and pass (or fail) against it —
   corrupting the derived minimum with no error. Three guards, none change a clean
   derivation's result: (1) an optional `health_port` in the spec makes the
   harness **refuse to start** (exit 4) when that port is already held before it
   launches its own single container; (2) the harness now asserts the container
   actually reached `Running` after `docker run`, surfacing a start failure as an
-  explicit `observed` reason instead of an opaque predicate failure; (3) the
-  netdata predicate adds an **identity check** — the machine guid the API reports
+  explicit `observed` reason instead of an opaque correctness-check failure; (3) the
+  netdata correctness check adds an **identity check** — the machine guid the API reports
   (`/api/v1/info` `uid`) must equal the container's own guid file, so a foreign
   netdata answering `:19999` is caught rather than trusted.
 
 ### Changed
 
+- **Renamed the drop-test `predicate` → `correctness` check.** The old name
+  described the script's logical form (a true/false function), not its job:
+  deciding whether the service still *works* after an element is removed — and,
+  crucially, being *stronger* than a liveness/"healthy" check (the netdata trap:
+  a container runs healthy as root when the privilege drop fails). Renamed the
+  spec field (`predicate:` → `correctness:`), the `testdata/drop-test/predicates/`
+  directory (→ `correctness/`), the `$PREDICATE` env var of `compose_derive.sh`
+  (→ `$CORRECTNESS`), and the docs. Unrelated uses of "predicate" are untouched:
+  the SLSA/in-toto provenance predicate, the bisect oracle, the observer's
+  event-filter, and the smoke scripts' pass-condition.
 - **Drop-test methodology: `candidate` vs `fixed` clarified in the `drop_test.sh`
   header.** The honest default is that *everything the container is granted is a
   `candidate`* (drop-tested for necessity); `fixed` is justified only when an

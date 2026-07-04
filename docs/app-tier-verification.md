@@ -68,20 +68,26 @@ init/privilege-drop, exercised by *any* real ingest→store→retrieve. The suit
 exhaustive functional breadth would matter for a hardened application tier, but
 immich-server already runs `cap_drop: ALL` with no adds.
 
-## Worked example: immich's postgres
+## Worked example: immich's leaf containers
 
 `testdata/apptier/immich/` is the released stack (immich-server `v2.7.5` + valkey +
-the custom postgres) with the **derived** DB hardening applied — `cap_drop: ALL`
-plus `[CHOWN, DAC_OVERRIDE, SETUID, SETGID]`, i.e. the declared set **minus
-FOWNER** (the deploy-check verdict for that image). `verify.sh` drives the API:
-admin sign-up → login → upload the fixture → read it back → metadata search.
+the custom postgres) with **both leaf containers hardened to their derived
+minimums** — the postgres `cap_add` is the declared set **minus FOWNER**
+(`[CHOWN, DAC_OVERRIDE, SETUID, SETGID]`), and redis's is the declared set **minus
+CHOWN** (`[SETUID, SETGID]`). Those are the two deploy-check verdicts:
+`over_permissioned, drop [FOWNER]` for the DB and `drop [CHOWN]` for redis (each a
+real over-grant — the DB's data dir and redis's `/data` are pre-owned by uid 999,
+so the FOWNER-chmod / CHOWN-chown never fire). The app tiers (immich-server, ML,
+tailscale) already run `cap_drop: ALL` with no adds — nothing to derive.
+`verify.sh` drives the API: admin sign-up → login → upload the fixture → read it
+back → metadata search.
 
 Verified on the BPF box (2026-07-04):
 
-| DB hardening | DB | immich app-tier |
+| hardening | stack | immich app-tier |
 |---|---|---|
-| `drop FOWNER` (derived minimum) | healthy | **PASS** — all five API steps succeed |
-| `drop SETUID` (over-hardened) | unhealthy (`failed switching to "postgres"`) | **FAIL** — server never starts |
+| DB `drop FOWNER` + redis `drop CHOWN` (both derived minimums) | healthy | **PASS** — all five API steps succeed |
+| DB over-hardened (`drop SETUID`) | DB unhealthy (`failed switching to "postgres"`) | **FAIL** — server never starts |
 
 So the app-tier check both **confirms** the derived hardening (FOWNER really is
 removable, against immich's real usage — not just the drop-test's narrow workload)

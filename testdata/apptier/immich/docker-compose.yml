@@ -32,9 +32,9 @@ services:
   redis:
     container_name: immich-apptier-redis
     image: docker.io/valkey/valkey:9@sha256:3b55fbaa0cd93cf0d9d961f405e4dfcc70efe325e2d84da207a0a8e6d8fde4f9
-    # redis's declared hardening (cap_drop ALL + a small cap_add for the startup drop).
+    # redis's csd DERIVED minimum: [SETUID, SETGID] for the setpriv privilege-drop.
     cap_drop: [ALL]
-    cap_add: [CHOWN, SETUID, SETGID]
+    cap_add: [SETUID, SETGID]   # declared CHOWN dropped — no data volume, nothing to chown
     security_opt: ["no-new-privileges:true"]
     healthcheck: {test: redis-cli ping || exit 1}
 

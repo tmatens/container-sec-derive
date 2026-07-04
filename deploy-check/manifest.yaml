@@ -68,5 +68,18 @@ services:
     service: database
     correctness: testdata/drop-test/correctness/postgres_deploy.sh
 
+  # Immich's redis (valkey) — the other leaf. The entrypoint drops root → the
+  # valkey user (uid 999) via `setpriv` (needs SETUID/SETGID) and, on a foreign
+  # data dir, would chown it (CHOWN). immich's redis declares no volume, so it uses
+  # the image's own pre-owned /data — no chown happens and CHOWN is unused. Derived
+  # minimum [SETUID, SETGID] → verdict over_permissioned, drop [CHOWN]. The
+  # correctness check does a PING + SET/GET round-trip and asserts a non-root uid.
+  - name: immich-redis
+    forgejo_repo: dad/immich
+    compose_path: docker-compose.yaml
+    service: redis
+    correctness: testdata/drop-test/correctness/redis_deploy.sh
+
 # Deferred — documented so each gap is explicit, not silent:
-#   (none — netdata, homepage, caddy, and immich-db cover the active services.)
+#   The immich app tiers (server, machine-learning, tailscale sidecar) already run
+#   cap_drop: ALL with no cap_add — nothing to derive.

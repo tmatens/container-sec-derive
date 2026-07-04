@@ -116,14 +116,20 @@ candidates = sorted(set(cap_add) | set(DOCKER_DEFAULT_CAPS))
 # /home/user/svc/config). Such mounts don't gate capabilities, so skip them with
 # a caveat rather than fail — and if one were actually load-bearing, the baseline
 # correctness check fails and the run reports that (never a wrong minimum). Named
-# volumes (a bare name, no `/`) are docker-managed and kept (created empty).
+# volumes (a bare name, no `/`) are docker-managed and kept (created empty). A
+# source with an unresolved ${VAR}/$VAR (e.g. immich's ${DB_DATA_LOCATION} data
+# dir, absent from .env on the derive host) is KEPT: drop_test.sh turns it into a
+# fresh, foreign-owned ephemeral dir per trial, so a service that chowns/chmods its
+# data dir on first boot (postgres) exercises those startup caps as it would on a
+# real first deploy — instead of falling back to the image's pre-owned dir and
+# under-deriving CHOWN/FOWNER.
 mounts, skipped = [], []
 for v in (svc.get("volumes") or []):
     if not isinstance(v, str):
         continue
     rv = resolve_mount(str(v))
     src = rv.split(":")[0]
-    if "/" not in src or os.path.exists(src):
+    if "$" in src or "/" not in src or os.path.exists(src):
         mounts.append(rv)
     else:
         skipped.append(rv)

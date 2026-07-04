@@ -103,6 +103,30 @@ coverage. Re-deriving against the real config removes the *matching* guesswork
 but inherits the predicate's blind spots; a deploy check is only as trustworthy
 as the correctness bar behind it.
 
+## The derive environment must match the target
+
+A capability is "required" only if removing it *breaks something* — so if the
+**derivation host** lets the operation through anyway, the drop-test calls the cap
+removable even when a stricter target would need it. Two knobs:
+
+- **Host kernel posture** — e.g. `kernel.unprivileged_bpf_disabled`, kernel
+  lockdown. A host that permits unprivileged eBPF lets a container load eBPF
+  *without* `SYS_ADMIN`/`CAP_BPF`; a hardened host does not.
+- **The container's applied MAC/seccomp** — running the test container
+  `apparmor:unconfined` (or with seccomp off) removes a constraint the target
+  enforces.
+
+`netdata`'s `SYS_ADMIN` is the worked case: `ebpf.plugin` (enabled in its config)
+loaded *with or without* the cap on a permissive derive host — root, ambient BPF,
+`apparmor:unconfined` — so the drop-test couldn't prove it required, and reported
+it as an over-grant. A locked-down prod host would need it. **To derive
+`SYS_ADMIN` / BPF- / MAC-adjacent capabilities trustworthily, the derive host must
+match the target's security baseline** (kernel settings, default seccomp/apparmor).
+This is a third axis of *context bounds validity*, alongside the invocation and
+workload coverage. On a mismatched host, treat such caps as conservatively kept,
+not removable — the drop-test can prove a cap *needed* (removing it broke
+something) but cannot prove one *unneeded* if the environment never enforced it.
+
 ## Where it belongs
 
 This is a **deploy/promote-time** concern, not an authoring-time one: that's where

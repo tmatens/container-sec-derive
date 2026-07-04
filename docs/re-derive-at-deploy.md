@@ -44,6 +44,30 @@ would apply one of these to both services — over-granting three capabilities o
 the second, or (in the read-only case) shipping a set that breaks the first.
 Re-deriving against each service's own config is correct for both.
 
+## Proof: a custom build changes the minimum (caddy)
+
+The bridge builds a service's `build:` image and derives against *that* — because
+the built image can differ from any base tag in a security-relevant way. The
+homelab caddy is the case in point. Its Dockerfile is `xcaddy build …` in a
+builder stage then `COPY --from=builder /usr/bin/caddy`. The base `caddy:2` binary
+carries the file capability `cap_net_bind_service=ep` — with it, dropping the cap
+from the container's bounding set makes even `execve` fail (`exec /usr/bin/caddy:
+operation not permitted`), so a drop-test of the base image reports
+`NET_BIND_SERVICE` **required**. But **Docker's `COPY` strips file capabilities**,
+so the *deployed* binary has none; combined with the container's default
+`ip_unprivileged_port_start=0` (any process may bind a low port), caddy binds
+:80/:443 without the cap. Deriving against the actual build yields minimum `[]` and
+a verdict of `over_permissioned — drop [NET_BIND_SERVICE]`. A catalog matched to
+`caddy:2` would wrongly call the cap required. (The cap is only vestigial while
+that sysctl stays 0; a hardened host that raises it to 1024 would need it again —
+a defense-in-depth nuance for the criteria doc, not the mechanical verdict.)
+
+A service whose config references secrets it doesn't have on the derive host — a
+`${CF_API_TOKEN}` in caddy's env — has those `${VAR}` values replaced by a
+synthetic placeholder so the config still loads (Caddy refuses to start on a
+literal `${…}`); no real secret ever touches the derive host, and capability needs
+come from structure, not a token's value.
+
 ## The deploy check: compare the minimum to what the service declares
 
 Deriving the minimum is only half of a gate — the actionable output is the diff
@@ -184,6 +208,8 @@ it, not within it.
 
 ## Status
 
-Prototype, **capabilities dimension**. Follow-ups: the filesystem dimension
-(derive `read_only`/`tmpfs` from the service), a small library of per-service
+Prototype, **capabilities dimension**. Handles a pulled `image:` or a `build:`
+image (built locally, derived against the actual artifact), with unresolved
+`${VAR}` env replaced by a placeholder. Follow-ups: the filesystem dimension
+(derive `read_only`/`tmpfs` from the service), a growing library of per-service
 correctness checks, and the deploy-pipeline integration itself.

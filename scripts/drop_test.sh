@@ -54,7 +54,7 @@ C="csd-drop-test-run"
 WORK="$(mktemp -d)"
 STAGED_ANY=""   # set when a fresh ephemeral volume was created (see run_and_test)
 cleanup() {
-  docker rm -f "$C" >/dev/null 2>&1
+  docker rm -f -v "$C" >/dev/null 2>&1   # -v: also drop the container's anonymous volumes
   # A fresh ephemeral volume can be chowned to the container's user (e.g. postgres
   # 999) during a run, leaving files under $WORK this host user can't remove.
   # Reclaim them via a root-in-container helper before rm.
@@ -188,7 +188,7 @@ prep_mount() {
 
 # run_and_test <active element...>  -> sets PASS=0/1, OBS=<last correctness-check line>
 run_and_test() {
-  docker rm -f "$C" >/dev/null 2>&1
+  docker rm -f -v "$C" >/dev/null 2>&1   # -v: also drop the container's anonymous volumes
   local args=(-d --name "$C")
   [ -n "${F[RUN_PID]}" ] && args+=(--pid "${F[RUN_PID]}")
   [ -n "${F[RUN_NET]}" ] && args+=(--network "${F[RUN_NET]}")

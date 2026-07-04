@@ -115,6 +115,19 @@ the relevant entry.
   **CHOWN** only; running as the mysql uid on a pre-owned datadir shrinks it to `[]`.
   Correctness = a query round-trip + a non-root (uid 999) `mariadbd`. Feeds the
   published catalog profile.
+- **grafana filesystem drop-test spec + correctness check
+  (`testdata/drop-test/grafana-fs.yaml` + `correctness/grafana.sh`).** Derives the
+  read-only-filesystem minimum for `docker.io/grafana/grafana` (grafana already runs
+  `cap_drop:ALL`, so the value is the filesystem dimension): **read_only:true,
+  tmpfs:[]**. Under a read-only rootfs with only the `/var/lib/grafana` data volume
+  (persistent: sqlite DB + plugins) writable, grafana serves, reads/writes its DB,
+  and runs backend datasource plugins (prometheus/Loki) — `/tmp` drop-tested as
+  **not required** for that. Correctness exercises real function (health db-ok +
+  dashboard write/read-back + a backend datasource plugin running), not liveness.
+  Confidence **moderate**: a writable `/tmp` is used by features outside this
+  workload (runtime plugin install, the elasticsearch plugin, rendering/export), so
+  the criteria doc records when to add `tmpfs:[/tmp]`. Feeds the published catalog
+  profile.
 
 ### Changed
 

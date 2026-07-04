@@ -28,7 +28,9 @@
 # "observation showed it used": observation sees a syscall fire, not that the cap
 # gated it — a setuid-root helper (e.g. netdata's apps.plugin) makes the syscall
 # as root regardless of the cap, so "observed used" can hide a real over-grant.
-# A candidate is only as trustworthy as the correctness check's coverage of what it gates.
+# A candidate is only as trustworthy as the correctness check's coverage of what
+# it gates — and "collects data" must mean NON-ZERO, not merely non-null: a
+# collector denied access can report 0 (see the netdata correctness check).
 #
 #   sudo? no — needs only docker; the correctness check may need more.
 #   PY=python3 scripts/drop_test.sh <spec.yaml>

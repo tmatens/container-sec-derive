@@ -3,12 +3,14 @@ image: docker.io/netdata/netdata
 tag: v2.10.3
 dimension: capabilities
 health_port: 19999   # network: host → the harness refuses to run if :19999 is already held (foreign instance would pollute the drop-test)
-# Everything granted is a candidate: the earlier fixed:[SYS_PTRACE,SYS_ADMIN]
-# ("observation-confirmed used") hid two over-grants. Observation saw the
-# syscalls fire, but on the matched host apps.plugin is setuid-root (so SYS_PTRACE
-# doesn't gate /proc reads) and the image ships no ebpf.plugin (so SYS_ADMIN gates
-# nothing) — only the drop-test, against a correctness check that asserts real
-# per-process monitoring, tells the truth.
+# Everything granted is a candidate — including SYS_PTRACE, which the drop-test
+# DOES detect once the correctness check reads the right signal. apps.plugin runs
+# real-uid = the netdata user (setuid gives it euid 0, not real uid 0), so reading
+# ANY process's /proc/<pid>/io|fd needs CAP_SYS_PTRACE. Without it apps.plugin
+# doesn't error out — it collects EVERY per-process metric as ZERO. So the
+# correctness check must require a per-process fds_open to be NON-ZERO (not merely
+# non-null): dropping SYS_PTRACE zeros it and the check fails. SYS_ADMIN also stays
+# a candidate and derives removable (no ebpf.plugin; ebpf=yes is a no-op).
 fixed: []
 candidates: ["SYS_PTRACE", "SYS_ADMIN", "DAC_OVERRIDE", "CHOWN", "FOWNER", "SETUID", "SETGID"]
 run:

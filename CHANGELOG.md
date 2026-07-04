@@ -11,6 +11,30 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Added
+
+- **Scheduled deploy-check job (`deploy-check.yml` + `scripts/deploy_check.sh` +
+  `deploy-check/manifest.yaml`, csd#240).** On the self-hosted `csd` runner, per
+  manifest entry, clones a homelab service's **live** compose from Forgejo and
+  runs `compose_derive.sh` against it — deriving the capability minimum under the
+  real deployed invocation (on the posture-matched host) and diffing it against
+  the declared `cap_add`. **Report-only**: per-service verdicts
+  (matches / not_minimized / over_permissioned / under_permissioned) land in the
+  job summary; the job doesn't fail on a verdict (graduate to enforce by exiting
+  on the worst). First manifest covers **netdata** (validated end-to-end on the
+  matched host); homepage (bind-mount ownership under `user:`+`read_only`), caddy
+  (`build:` image), and postgres (no standalone service) are documented deferrals
+  with their reasons. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.
+
+### Changed
+
+- **`compose_derive.sh` skips bind mounts whose source is absent on the derive
+  host.** A live compose can bind a target-host-specific file (`/usr/bin/msmtp`,
+  a host config path) that can't be reproduced on the runner; these don't gate
+  capabilities, so they're skipped with a caveat rather than failing the run. If
+  one were actually load-bearing, the baseline correctness check fails and the run
+  reports that — never a wrong minimum. Named volumes are kept (docker-managed).
+
 ### Fixed
 
 - **Drop-test no longer silently grades the wrong container (port pollution).**

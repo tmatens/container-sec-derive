@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# deploy-check driver (csd#240). Reads deploy-check/manifest.yaml and, per
+# service, clones its LIVE compose from Forgejo and runs compose_derive.sh against
+# it — deriving the capability minimum under the service's own invocation (on the
+# posture-matched runner) and diffing it against the declared cap_add.
+#
+# REPORT-ONLY: prints a per-service verdict table (Markdown, for a job summary)
+# and always exits 0. under_permissioned (a needed cap is missing → would break)
+# is flagged loudest, but does not fail the job at this stage — graduate to
+# enforce by having the caller exit non-zero on it.
+#
+# Clone transport:
+#   FORGEJO_SSH=1                -> git clone forgejo:<repo>.git   (SSH key; local)
+#   else FORGEJO_RO_TOKEN=<tok>  -> HTTPS with an Authorization header (CI)
+#     FORGEJO_BASE default https://git.matens.xyz
+#
+#   PY=python3 bash scripts/deploy_check.sh   [> summary.md]
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+PY="${PY:-python3}"
+MANIFEST="${MANIFEST:-$REPO/deploy-check/manifest.yaml}"
+FORGEJO_BASE="${FORGEJO_BASE:-https://git.matens.xyz}"
+WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+[ -f "$MANIFEST" ] || { echo "no manifest at $MANIFEST" >&2; exit 2; }
+
+clone_repo() { # <forgejo_repo> <dest>
+  local repo="$1" dest="$2"
+  if [ -n "${FORGEJO_SSH:-}" ]; then
+    git clone --depth 1 -q "forgejo:${repo}.git" "$dest"
+  else
+    : "${FORGEJO_RO_TOKEN:?set FORGEJO_RO_TOKEN or FORGEJO_SSH=1}"
+    git -c "http.extraHeader=Authorization: token ${FORGEJO_RO_TOKEN}" \
+      clone --depth 1 -q "${FORGEJO_BASE}/${repo}.git" "$dest"
+  fi
+}
+
+# read the manifest into TSV: name<TAB>repo<TAB>compose_path<TAB>service<TAB>correctness
+mapfile -t ENTRIES < <("$PY" - "$MANIFEST" <<'PYEOF'
+import sys, yaml
+m = yaml.safe_load(open(sys.argv[1])) or {}
+for s in (m.get("services") or []):
+    print("\t".join(str(s.get(k, "")) for k in
+          ("name", "forgejo_repo", "compose_path", "service", "correctness")))
+PYEOF
+)
+
+printf '## deploy-check — %s\n\n' "$(TZ=UTC printf '%(%Y-%m-%d %H:%M UTC)T' -1 2>/dev/null || echo now)"
+printf '| service | verdict | drop | add | detail |\n|---|---|---|---|---|\n'
+
+worst=0   # track the most severe outcome for the caller's log line
+for line in "${ENTRIES[@]}"; do
+  IFS=$'\t' read -r name repo cpath service correctness <<<"$line"
+  [ -n "$name" ] || continue
+  cdir="$WORK/$name"
+  if ! clone_repo "$repo" "$cdir" 2>"$WORK/clone.err"; then
+    printf '| %s | ⚠️ clone-failed | | | %s |\n' "$name" "$(tail -1 "$WORK/clone.err" | tr '|' '/')"
+    worst=1; continue
+  fi
+  CORRECTNESS="$correctness" PY="$PY" \
+    bash "$REPO/scripts/compose_derive.sh" "$cdir/$cpath" "$service" \
+    >"$WORK/out.json" 2>"$WORK/derive.err"; rc=$?
+  case "$rc" in
+    0)  v="✅ matches";            sev=0 ;;
+    10) v="🟠 not_minimized";      sev=1 ;;
+    11) v="🟡 over_permissioned";  sev=1 ;;
+    12) v="🔴 under_permissioned"; sev=2 ;;
+    *)  v="⚠️ derive-error";       sev=1 ;;
+  esac
+  [ "$sev" -gt "$worst" ] && worst="$sev"
+  if [ "$rc" = 0 ] || [ "$rc" -ge 10 ]; then
+    drop="$("$PY" -c 'import json,sys; d=json.load(open(sys.argv[1]))["deploy_check"]; print(" ".join(d["drop"]) or "—")' "$WORK/out.json" 2>/dev/null || echo '—')"
+    add="$("$PY" -c 'import json,sys; d=json.load(open(sys.argv[1]))["deploy_check"]; print(" ".join(d["add"]) or "—")' "$WORK/out.json" 2>/dev/null || echo '—')"
+    detail="$(grep '^compose_derive: ' "$WORK/derive.err" | tail -1 | sed 's/^compose_derive: //; s/|/\//g')"
+  else
+    drop='—'; add='—'; detail="$(tail -1 "$WORK/derive.err" | tr '|' '/')"
+  fi
+  printf '| %s | %s | %s | %s | %s |\n' "$name" "$v" "$drop" "$add" "${detail:-—}"
+done
+
+echo
+case "$worst" in
+  0) echo "deploy-check: all services match their derived minimum" >&2 ;;
+  1) echo "deploy-check: some services are not minimized / over-permissioned (advisory)" >&2 ;;
+  2) echo "deploy-check: UNDER-permissioned service(s) found — a needed cap is missing" >&2 ;;
+esac
+# report-only: always succeed. (Enforce by: exit "$worst".)
+exit 0

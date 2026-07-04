@@ -41,27 +41,32 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
   then it runs on schedule.
 - **Proves:** the loop end-to-end on the matched host.
 
-### 2. Build the scheduled deploy-check job
-- Design: **csd#240**. A scheduled/on-demand job (mirror `derive-profiles.yml`)
-  running `scripts/compose_derive.sh` over committed compose files, reporting the
-  `deploy_check` verdict per service, failing on `under_permissioned`.
-- **Do:** author `deploy-check.yml` + a manifest of `{compose_path, service,
-  correctness check}` for the services in scope. **Report-only first** (job summary),
-  graduate to enforce.
-- **Open decisions (#240):** which compose files / repos (the homelab services
-  live in `dad/*` on Forgejo — decide how the GH runner reaches them); the
-  per-service correctness check library; report-vs-enforce.
+### 2. Build the scheduled deploy-check job — **BUILT**
+- `deploy-check.yml` + `scripts/deploy_check.sh` + `deploy-check/manifest.yaml`
+  (csd#240): on the `csd` runner, per manifest entry, clone the service's **live**
+  `dad/*` compose from Forgejo and run `compose_derive.sh` against it → per-service
+  `deploy_check` verdict in the job summary. **Report-only** (does not fail on a
+  verdict; graduate to enforce by exiting on the worst).
+- **Decisions settled:** the runner reads the live composes over HTTPS with a
+  **read-only `FORGEJO_RO_TOKEN`** repo secret (a vendored copy would drift — the
+  point is the *real* deployment). First scope = **netdata** (validated on the
+  matched host). Deferred with documented reasons: **homepage** (binds `./config`
+  owned by uid 1000 under `user:`+`read_only` — the cloned dir is root-owned on the
+  derive host, an invocation-fidelity gap compose_derive must handle), **caddy**
+  (`build:` image), **postgres** (no standalone service — embedded in immich's DB).
+- **Remaining to activate:** add the `FORGEJO_RO_TOKEN` secret, then dispatch.
 
 ### 3. Grow the correctness check library (start: netdata)
 - **The crux** (see `re-derive-at-deploy.md` → "The part re-derivation does *not*
   solve" and #240). One good correctness check = deep, per-service, version-specific
   reverse-engineering **plus** this matched host.
-- **netdata first** (scouting on #240): assert non-root uid **and** per-process
-  metrics present (the `app.apps_plugin_*` charts carry data → proves
-  `SYS_PTRACE`) **and** `ebpf.plugin` charts carry data (→ `SYS_ADMIN`, finally
-  testable here because the matched host has `unprivileged_bpf_disabled=2` +
-  AppArmor). netdata's own `apparmor:unconfined` narrows its match to the kernel
-  BPF sysctls + this correctness check.
+- **netdata — DONE** (csd#249, catalog#10). The correctness check asserts non-root
+  uid **and** per-process io/fd data for a **non-root** process group
+  (`app.netdata_*`, uid 201). The original premise here was *wrong* and the matched
+  host proved it: this image ships **no `ebpf.plugin`** (so `SYS_ADMIN` gates
+  nothing — `ebpf=yes` is a no-op) and `apps.plugin` is setuid-root (so `SYS_PTRACE`
+  doesn't gate `/proc` reads). Honest minimum `[DAC_OVERRIDE, SETUID, SETGID]`;
+  live hardening proposed at `dad/netdata` #31.
 - **Tier the library:** curated full-functionality correctness checks for the homelab
   set; the generic floor (`correctness/compose_generic.sh`) + a loud caveat for
   the long tail. Never *enforce* on a generic-tier result.

@@ -1,0 +1,38 @@
+name: deploy-check
+# Scheduled/on-demand deploy-time capability check (csd#240). Per manifest entry
+# (deploy-check/manifest.yaml), clone the service's LIVE compose from Forgejo and
+# run scripts/compose_derive.sh against it — deriving the capability minimum under
+# the REAL deployed invocation (on the posture-matched runner) and diffing it
+# against the declared cap_add. REPORT-ONLY: verdicts land in the job summary; the
+# job does not fail on a verdict (graduate to enforce later).
+#
+# MUST run on the self-hosted `csd` runner: the drop-test restarts real
+# containers, and the caps minimum for SYS_ADMIN/BPF-class caps is only truthful
+# on a host matching the deploy target's posture (docs/self-hosted-runner.md).
+#
+# Setup required before this can run:
+#   - the self-hosted `csd` runner (docs/self-hosted-runner.md): docker + the
+#     runner user in the docker group. (No Go/ig needed — compose_derive is
+#     docker + python only.)
+#   - a repo secret FORGEJO_RO_TOKEN: a READ-ONLY Forgejo token that can read the
+#     in-scope dad/* service repos on git.matens.xyz.
+on:
+  schedule:
+    - cron: "43 4 * * 1"   # Mondays 04:43 UTC (after derive-profiles at 04:23)
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  deploy-check:
+    runs-on: [self-hosted, csd]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: deploy-check (report-only)
+        env:
+          FORGEJO_RO_TOKEN: ${{ secrets.FORGEJO_RO_TOKEN }}
+        run: |
+          PY=python3 bash scripts/deploy_check.sh > summary.md 2> verdict.log || true
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "----- verdict -----"
+          cat verdict.log
+          cat summary.md

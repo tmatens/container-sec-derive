@@ -77,6 +77,26 @@ cap_add = [str(c).upper() for c in (svc.get("cap_add") or [])]
 cap_drop = [str(c).upper() for c in (svc.get("cap_drop") or [])]
 candidates = sorted(set(cap_add) | set(DOCKER_DEFAULT_CAPS))
 
+# A bind mount whose source doesn't exist on THIS derive host can't be
+# reproduced (a target-host-specific config/binary like /usr/bin/msmtp or
+# /home/user/svc/config). Such mounts don't gate capabilities, so skip them with
+# a caveat rather than fail — and if one were actually load-bearing, the baseline
+# correctness check fails and the run reports that (never a wrong minimum). Named
+# volumes (a bare name, no `/`) are docker-managed and kept (created empty).
+mounts, skipped = [], []
+for v in (svc.get("volumes") or []):
+    if not isinstance(v, str):
+        continue
+    rv = resolve_mount(str(v))
+    src = rv.split(":")[0]
+    if "/" not in src or os.path.exists(src):
+        mounts.append(rv)
+    else:
+        skipped.append(rv)
+if skipped:
+    print(f"compose_derive: skipped {len(skipped)} bind mount(s) with no source on "
+          f"this derive host (not cap-relevant): {skipped}", file=sys.stderr)
+
 run = {
     "user": str(svc.get("user", "") or ""),
     "command": as_list(svc.get("command")),
@@ -84,7 +104,7 @@ run = {
     "network": str(svc.get("network_mode", "") or ""),
     "pid": str(svc.get("pid", "") or ""),
     "security_opt": [str(s) for s in (svc.get("security_opt") or [])],
-    "mounts": [resolve_mount(str(v)) for v in (svc.get("volumes") or []) if isinstance(v, str)],
+    "mounts": mounts,
     "env": env,
 }
 json.dump({"cap_add": cap_add, "cap_drop": cap_drop}, open(declared_out, "w"))

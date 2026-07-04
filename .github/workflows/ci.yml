@@ -61,3 +61,8 @@ jobs:
       # the dispatch-only ground-truth bisection.
       - name: bisect-caps minimizer self-test
         run: ./scripts/bisect_caps_selftest.sh
+      # Hermetic guard test: drop_test.sh rejects a non-empty `fixed` (every
+      # granted element must be a drop-tested candidate). Runs before any docker
+      # work, so it belongs in the fast gate.
+      - name: drop-test fixed-guard self-test
+        run: ./scripts/drop_test_selftest.sh

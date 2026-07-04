@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman closed-loop missrate release-prep build test vet bisect-selftest image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -122,6 +122,12 @@ vet:
 # real container-driven `make ground-truth-*`.
 bisect-selftest:
 	./scripts/bisect_caps_selftest.sh
+
+# drop-test-selftest asserts drop_test.sh rejects a non-empty `fixed` (every
+# granted element must be a drop-tested candidate). The guard runs before any
+# docker work, so this is hermetic and belongs in the fast CI gate.
+drop-test-selftest:
+	./scripts/drop_test_selftest.sh
 
 # verify-ig-pin re-runs cosign verification against the committed
 # ig-pin/ artifacts. This is a self-consistency check (the committed

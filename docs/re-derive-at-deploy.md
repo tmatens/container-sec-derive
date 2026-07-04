@@ -103,6 +103,21 @@ coverage. Re-deriving against the real config removes the *matching* guesswork
 but inherits the correctness check's blind spots; a deploy check is only as trustworthy
 as the correctness bar behind it.
 
+**The tempting escape hatch — and why it's closed.** When a cap looks removable
+but you *believe* it's needed, the tempting move is to mark it `fixed` in the
+drop-test spec: always granted, always emitted in the minimum, never tested. The
+tool **rejects a non-empty `fixed`** (exit 5), because it hides the exact failure
+you're looking at: a cap you can't prove needed is the correctness check telling
+you it can't see the breakage — `fixed` just silences that signal, and would have
+shipped netdata's genuinely-removable `SYS_ADMIN` forever. There are two honest
+responses instead: **(1) strengthen the correctness check** so the cap becomes a
+testable candidate (for netdata's `SYS_PTRACE`, assert a per-process metric is
+*non-zero* — a denied `apps.plugin` reports 0, not null); **(2)** if it genuinely
+can't be exercised in the window, record it as a **criteria-doc caveat + low
+confidence**, not an untested entry laundered into a "derived" minimum. (This is
+the caps/paths `fixed` list — distinct from the invocation and sibling-dimension
+context in `run.*`, which *is* legitimately held constant.)
+
 ## The derive environment must match the target
 
 A capability is "required" only if removing it *breaks something* — so if the

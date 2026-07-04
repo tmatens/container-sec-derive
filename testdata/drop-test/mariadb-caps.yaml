@@ -1,0 +1,32 @@
+# drop-test spec: mariadb minimum Linux capabilities, default (root-then-drop)
+# invocation. Baseline is cap_drop:ALL + the full Docker default cap set on a FRESH
+# data dir. The image declares /var/lib/mysql as a VOLUME, so each trial gets a
+# fresh, root-owned anonymous volume — reproducing a first deploy, so the
+# entrypoint's datadir chown and the root->mysql privilege drop both run.
+#
+# The mariadb entrypoint starts as root, `find`-chowns /var/lib/mysql to the mysql
+# user (CHOWN), initializes the DB (DAC_OVERRIDE for the writes), and re-execs the
+# server as the mysql user via gosu (SETUID/SETGID) — the same startup-cap shape as
+# postgres, invisible to attach-window runtime observation.
+#
+# This is the DEFAULT root invocation (the common case for the public image). Run
+# with `user:` set to the mysql uid against a pre-owned datadir — as a hardened
+# deployment does — the entrypoint skips the drop and the datadir fix, and the
+# minimum shrinks to []. See the catalog criteria doc.
+#
+# Derived on a writable rootfs (no sibling filesystem dimension yet); an fs profile
+# for mariadb is future work.
+image: docker.io/library/mariadb
+tag: "11.4"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env:
+    - MARIADB_ROOT_PASSWORD=csdprobe-pw-12345
+    - MARIADB_DATABASE=probe
+    - MARIADB_USER=csd
+    - MARIADB_PASSWORD=csdprobe-pw-12345
+correctness: testdata/drop-test/correctness/mariadb.sh

@@ -28,6 +28,18 @@ the relevant entry.
 
 ### Changed
 
+- **Drop-test rejects a non-empty `fixed` (exit 5).** Every granted element must
+  be a drop-tested `candidate`. Under leave-one-out a truly-required element is
+  always provable as a candidate, so `fixed` never buys test validity — it only
+  means "granted, emitted in the minimum, but never tested," and it hides both an
+  over-grant (netdata's `SYS_ADMIN` was removable) and a too-weak correctness
+  check. When the drop-test can't prove an element needed, the honest fixes are to
+  **strengthen the correctness check** (make it a testable candidate) or, for a
+  genuine workload-coverage gap, a **criteria-doc caveat + low confidence** — not
+  an untested minimum entry. Distinct from `run.*` (`read_only`/`tmpfs`/`user`/
+  `mounts`), the invocation/sibling-dimension context that *is* held constant.
+  Every existing spec already uses `fixed: []`, so nothing changes but the guard;
+  hermetic self-test (`make drop-test-selftest`, in the CI gate).
 - **Drop-test reproduces a bind mount's ownership under a numeric `user:`.** When
   a spec (or a real compose, via `compose_derive.sh`) pins a numeric run uid, a
   bind-mounted directory must be owned by that uid for the run to be faithful: on

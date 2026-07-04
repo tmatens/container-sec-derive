@@ -14,23 +14,34 @@
 #   {image, tag, digest, dimension, minimum:[...],
 #    run_config:{user,command,entrypoint,network,pid,devices,security_opt,mounts,env},
 #    checks:[{removed,required,observed}]}
-# where `minimum` = the fixed set + every candidate found required, and
+# where `minimum` = every candidate found required (a non-empty `fixed` is
+# rejected — see below), and
 # `run_config` is the invocation the minimum was derived under — the orthogonal
 # run context a consumer diffs a target service against (a divergent `user:` or
 # mount can change the minimum, so the profile is only valid for this context).
 #
-# candidate vs fixed — the honest default is that EVERYTHING the container is
-# granted is a `candidate` (drop-tested for necessity). `fixed` is justified ONLY
-# when an element is a precondition for validly testing the others — i.e. the
-# baseline won't function without it, so it's held constant so each candidate is
-# tested against a working workload (same reason a non-fs dimension is derived
-# under the fs dimension's recommended values). `fixed` is NOT justified by
-# "observation showed it used": observation sees a syscall fire, not that the cap
-# gated it — a setuid-root helper (e.g. netdata's apps.plugin) makes the syscall
-# as root regardless of the cap, so "observed used" can hide a real over-grant.
-# A candidate is only as trustworthy as the correctness check's coverage of what
-# it gates — and "collects data" must mean NON-ZERO, not merely non-null: a
-# collector denied access can report 0 (see the netdata correctness check).
+# candidate vs fixed — EVERYTHING the container is granted is a `candidate`
+# (drop-tested for necessity). A non-empty `fixed` is REJECTED (exit 5): under
+# leave-one-out a truly-required element is always provable as a candidate (it is
+# present during every other element's trial; its own trial removes it and breaks
+# correctness), so `fixed` never buys test validity — it only means "granted,
+# emitted in the minimum, but NEVER tested." We have found no case that couldn't be
+# handled honestly instead, and `fixed` hides two failures at once: an over-grant
+# (netdata's SYS_ADMIN was removable) AND a too-weak correctness check (a candidate
+# you can't prove needed is the check telling you it can't see the breakage —
+# `fixed` silences that). The two honest valves when the drop-test can't prove an
+# element needed:
+#   1. STRENGTHEN THE CORRECTNESS CHECK so it becomes a testable candidate. "Observed
+#      used" is not a reason to keep a cap: observation sees a syscall fire, not that
+#      the cap gated it (a setuid-root helper like netdata's apps.plugin makes the
+#      syscall as root regardless). "Collects data" must mean NON-ZERO, not merely
+#      non-null: a denied collector reports 0 (see the netdata correctness check).
+#   2. If it genuinely can't be exercised in the observation window (workload
+#      coverage), that's a CRITERIA-DOC caveat + low confidence, NOT an untested
+#      entry laundered into the derived minimum.
+# NOTE: this is the caps/paths `fixed` LIST. The invocation + sibling-dimension
+# context you derive UNDER — `run.read_only`/`run.tmpfs`/`run.user`/`run.mounts` —
+# IS legitimately held constant; that's expressed via `run.*`, not `fixed`.
 #
 #   sudo? no — needs only docker; the correctness check may need more.
 #   PY=python3 scripts/drop_test.sh <spec.yaml>
@@ -78,6 +89,27 @@ PYEOF
 )
 IFS=' ' read -ra FIXED <<<"${F[FIXED]}"
 IFS=' ' read -ra CANDIDATES <<<"${F[CANDIDATES]}"
+
+# Reject a non-empty `fixed` (see the header): every granted element must be a
+# drop-tested `candidate`. A `fixed` element is granted and emitted in the minimum
+# but never tested — an assertion masquerading as a derivation. Fail fast (before
+# any docker work) so the spec author is pushed to the honest valve: a stronger
+# correctness check (making it a testable candidate), or — for a genuine
+# workload-coverage gap — a criteria-doc caveat + low confidence.
+_fixed_nonempty=""
+for _f in "${FIXED[@]}"; do [ -n "$_f" ] && _fixed_nonempty=1; done
+if [ -n "$_fixed_nonempty" ]; then
+  {
+    echo "drop_test: spec has a non-empty 'fixed' [${FIXED[*]}] — not allowed."
+    echo "  Every granted element must be a 'candidate' (drop-tested for necessity);"
+    echo "  a 'fixed' element is emitted in the minimum but never tested. If the"
+    echo "  drop-test can't prove one needed, strengthen the correctness check so it"
+    echo "  becomes a testable candidate; if it truly can't be exercised in the"
+    echo "  observation window, record it as a criteria-doc caveat + low confidence,"
+    echo "  not a fixed (untested) minimum entry."
+  } >&2
+  exit 5
+fi
 IFS=$'\v' read -ra RUN_ENV <<<"${F[ENV]}"
 IFS=$'\v' read -ra RUN_MOUNTS <<<"${F[MOUNTS]}"
 IFS=$'\v' read -ra RUN_SECOPT <<<"${F[SECOPT]}"

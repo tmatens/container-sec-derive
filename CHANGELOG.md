@@ -153,8 +153,30 @@ the relevant entry.
   writable stand-in mounts at the parent `/var/lib/alloy` (alloy creates the `data`
   subdir itself; a volume at the exact storage.path fails under read_only) with
   `mode=1777`. Feeds the published catalog profile.
+- **minecraft capabilities drop-test spec + correctness check
+  (`testdata/drop-test/minecraft-caps.yaml` + `correctness/minecraft.sh`).** Derives
+  the minimum for `docker.io/itzg/minecraft-server`: **cap_drop:ALL + cap_add:[SETGID,
+  SETUID]** — trimming the full Docker default set **14→2** and validating the
+  commonly-declared set as already optimal. The entrypoint gosu-drops root→the
+  minecraft user (uid 1000); CHOWN/DAC_OVERRIDE are not needed (the image ships
+  `/data` owned by 1000, so a docker volume inherits it — same shape as mariadb).
+  Derived with a fast `TYPE=VANILLA`/`FLAT` config since the caps are init/privdrop,
+  independent of the server flavour. Correctness = the server answers `mc-monitor
+  status` as a non-root process. Feeds the published catalog profile.
 
 ### Changed
+
+- **`drop_test.sh` removes each trial's anonymous volumes (`docker rm -f -v`).** An
+  image that declares a `VOLUME` (postgres, mariadb, minecraft, …) gets a fresh
+  anonymous volume per `docker run`; the cleanup previously used `docker rm -f`
+  (no `-v`), so those volumes leaked and accumulated across a run. For a heavy image
+  like minecraft (a server jar + generated world per trial) this **exhausted disk
+  mid-run and produced spurious "required" verdicts** — a container that can no
+  longer write its data dir or download reads as a capability failure (observed: a
+  `MKNOD`-dropped trial "failed to download", a `NET_RAW`-dropped trial "unable to
+  write eula"). `-v` drops only the container's anonymous volumes (never named or
+  bind mounts), so it is safe for every spec and preserves per-trial fresh-volume
+  fidelity.
 
 - **Drop-test rejects a non-empty `fixed` (exit 5).** Every granted element must
   be a drop-tested `candidate`. Under leave-one-out a truly-required element is

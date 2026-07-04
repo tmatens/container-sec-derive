@@ -1,0 +1,30 @@
+# drop-test spec: minecraft (itzg/minecraft-server) minimum Linux capabilities.
+# Baseline is cap_drop:ALL + the full Docker default cap set on a FRESH data volume.
+# The image declares /data as a VOLUME and ships it owned by the minecraft user
+# (uid 1000), so each trial's fresh anonymous volume inherits that ownership — the
+# entrypoint's root->minecraft gosu drop runs but no datadir chown is needed (the
+# same shape as mariadb). SETUID/SETGID (the gosu drop) are startup caps, invisible
+# to attach-window runtime observation.
+#
+# Derived with a FAST config (TYPE=VANILLA, FLAT world, no structures) because the
+# capability minimum is set by the entrypoint's init + privilege drop, which is
+# independent of the server flavour — the same minimum applies to a PURPUR/PAPER
+# deployment (that only changes the server jar, not the root->minecraft drop). This
+# validates the common declared cap_add:[SETUID, SETGID].
+image: docker.io/itzg/minecraft-server
+tag: latest
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env:
+    - EULA=TRUE
+    - TYPE=VANILLA
+    - VERSION=LATEST
+    - LEVEL_TYPE=FLAT
+    - GENERATE_STRUCTURES=false
+    - MEMORY=1G
+    - ONLINE_MODE=FALSE
+correctness: testdata/drop-test/correctness/minecraft.sh

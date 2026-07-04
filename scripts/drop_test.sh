@@ -19,6 +19,17 @@
 # run context a consumer diffs a target service against (a divergent `user:` or
 # mount can change the minimum, so the profile is only valid for this context).
 #
+# candidate vs fixed — the honest default is that EVERYTHING the container is
+# granted is a `candidate` (drop-tested for necessity). `fixed` is justified ONLY
+# when an element is a precondition for validly testing the others — i.e. the
+# baseline won't function without it, so it's held constant so each candidate is
+# tested against a working workload (same reason a non-fs dimension is derived
+# under the fs dimension's recommended values). `fixed` is NOT justified by
+# "observation showed it used": observation sees a syscall fire, not that the cap
+# gated it — a setuid-root helper (e.g. netdata's apps.plugin) makes the syscall
+# as root regardless of the cap, so "observed used" can hide a real over-grant.
+# A candidate is only as trustworthy as the predicate's coverage of what it gates.
+#
 #   sudo? no — needs only docker; the predicate may need more.
 #   PY=python3 scripts/drop_test.sh <spec.yaml>
 set -uo pipefail
@@ -38,6 +49,10 @@ run = s.get("run", {}) or {}
 def line(k, v): print(f"{k}\t{v}")
 line("IMAGE", s["image"]); line("TAG", s["tag"]); line("DIM", s["dimension"])
 line("PREDICATE", s["predicate"]); line("BASE_FS", s.get("base_fs", ""))
+# health_port: a host-networked service (network: host) pins a fixed host port;
+# declare it so the harness can refuse to run when a foreign instance already
+# holds it (it would answer the predicate and silently corrupt the drop-test).
+line("HEALTH_PORT", str(s.get("health_port", "") or ""))
 line("RUN_PID", run.get("pid", "")); line("RUN_NET", run.get("network", ""))
 line("RUN_USER", run.get("user", ""))
 line("RUN_ENTRYPOINT", run.get("entrypoint", ""))
@@ -107,9 +122,34 @@ run_and_test() {
   [ -n "${DROP_TEST_DEBUG:-}" ] && printf 'DEBUG docker run %s %s %s\n' "${args[*]}" "${IMAGE}:${TAG}" "${RUN_CMD[*]}" >&2
   # RUN_CMD (the spec's command override) is positional, so it follows the image.
   docker run "${args[@]}" "${IMAGE}:${TAG}" ${RUN_CMD[@]+"${RUN_CMD[@]}"} >/dev/null 2>&1
+  # Assert the container actually came up before probing. Otherwise a start
+  # failure (bad config; or, under --network host, the service failing to bind
+  # its already-taken port) surfaces only as an opaque predicate failure — and
+  # for a candidate drop that would be misattributed to the removed element.
+  local up="" i
+  for i in 1 2 3 4 5 6; do
+    up="$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null || echo false)"
+    [ "$up" = true ] && break
+    sleep 0.5
+  done
+  if [ "$up" != true ]; then
+    PASS=0; OBS="container failed to start: $(docker logs "$C" 2>&1 | grep -v '^[[:space:]]*$' | tail -1)"
+    return
+  fi
   DROP_TEST_CONTAINER="$C" bash "$PREDICATE" >"$WORK/pred.out" 2>&1 && PASS=1 || PASS=0
   OBS="$(grep -v '^[[:space:]]*$' "$WORK/pred.out" | tail -1)"
 }
+
+# --- preflight: refuse to run if a foreign instance already holds the service
+# port. With network: host the port is host-wide, so a stale/leftover container
+# (or running this on a host that already serves the image) would answer the
+# predicate and silently grade the WRONG container. We only ever run a single
+# container ($C, rm'd each iteration), so before we start it the port must be free.
+if [ -n "${F[HEALTH_PORT]}" ] && (exec 3<>"/dev/tcp/127.0.0.1/${F[HEALTH_PORT]}") 2>/dev/null; then
+  exec 3>&- 3<&-
+  echo "port ${F[HEALTH_PORT]} is already in use before start — a foreign instance would pollute the drop-test; stop it and retry" >&2
+  exit 4
+fi
 
 # --- baseline: full candidate set must be correct (else config isn't representative)
 run_and_test "${FIXED[@]}" "${CANDIDATES[@]}"

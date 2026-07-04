@@ -35,10 +35,13 @@ services:
   # derives against that ACTUAL image, which matters here: the base caddy:2 binary
   # carries the `cap_net_bind_service=ep` file capability (so dropping the cap
   # makes even exec fail), but Docker's COPY strips file caps, so the deployed
-  # binary has none — and with the container's default `ip_unprivileged_port_start=0`
-  # it binds :80/:443 without the cap. Expected verdict: over_permissioned, drop
-  # [NET_BIND_SERVICE] (vestigial for this build; a base-image catalog match would
-  # wrongly call it required). Its `${CF_API_TOKEN}` etc. are replaced by a
+  # binary has none — so it execs fine, and with the container's default
+  # `ip_unprivileged_port_start=0` it binds :80/:443 without the cap. Verdict:
+  # over_permissioned, drop [NET_BIND_SERVICE] — but this is runtime-posture-bounded:
+  # caddy runs as root, so the granted cap still binds :80 under a hardened
+  # port_start=1024 (and dropping it fails there). The cap reads removable only
+  # because of the loose default sysctl — defense-in-depth, not a clear over-grant
+  # (see docs/re-derive-at-deploy.md). Its `${CF_API_TOKEN}` etc. are replaced by a
   # placeholder so the config loads without secrets on the derive host.
   - name: caddy
     forgejo_repo: dad/caddy_reverse_proxy

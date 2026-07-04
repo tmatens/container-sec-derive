@@ -91,6 +91,46 @@ DOCKER_GID="$(getent group docker | cut -d: -f3)"
 docker pull -q "${IMAGE}:${TAG}" >/dev/null 2>&1 || { echo "pull failed: ${IMAGE}:${TAG}" >&2; exit 2; }
 DIGEST="$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}:${TAG}" | sed -E 's/.*@//')"
 
+# Numeric run-as uid[:gid], if the spec pins one (a compose `user:`). When set, a
+# bind-mounted DIRECTORY has to be owned by that uid for the run to be faithful:
+# on a real deployment the service runs AS the mount's owner (e.g. homepage runs
+# as 1000:1000 and owns ./config), so it never needs DAC_OVERRIDE/FOWNER to use
+# it. A fresh git clone owns ./config as the CLONING user instead, so a
+# container-as-1000 gets EACCES and never becomes ready. The fix is to reproduce
+# the OWNERSHIP, not loosen perms: making the mount world-writable would leave it
+# owned by the wrong uid and so induce a spurious FOWNER/CHOWN requirement (the
+# derived minimum is wrong either way). So stage a throwaway copy and chown it to
+# the run uid — using the service image itself as a root-in-container helper, so
+# no host root is needed and drop_test stays sudo-free.
+RUN_UID=""
+case "${F[RUN_USER]}" in
+  '' | *[!0-9:]* ) : ;;             # unset, or a user NAME (can't map to a uid here)
+  * ) RUN_UID="${F[RUN_USER]}" ;;   # numeric uid or uid:gid
+esac
+STAGE_SEQ=0
+
+# prep_mount <src:tgt[:opts]> <stageroot>  -> echoes the -v value docker should use.
+# For a bind-mounted directory under a numeric run uid, stages a private copy and
+# chowns it to that uid so the run is faithful; everything else (named volumes,
+# file binds, or no run uid) passes through untouched. The copy is chmod o+rwX'd
+# as well so the (differently-owned) host user can still clean up $WORK on exit;
+# that bit is invisible to the container, which uses the mount as its owner.
+prep_mount() {
+  local spec="$1" stageroot="$2"
+  local src="${spec%%:*}" rest="${spec#*:}"     # rest = tgt[:opts]
+  if [ -z "$RUN_UID" ] || [[ "$src" != */* ]] || [ ! -d "$src" ]; then
+    printf '%s' "$spec"; return
+  fi
+  local dst="$stageroot/$(printf '%s' "$src" | tr '/' '_')"
+  mkdir -p "$stageroot"
+  cp -a "$src" "$dst" 2>/dev/null || { printf '%s' "$spec"; return; }
+  if ! docker run --rm --user 0:0 --entrypoint sh -v "$dst:/csd-mnt" "${IMAGE}:${TAG}" \
+        -c "chown -R ${RUN_UID} /csd-mnt && chmod -R o+rwX /csd-mnt" >/dev/null 2>&1; then
+    echo "drop_test: could not chown staged bind ${src} to uid ${RUN_UID} (image lacks sh/chown?); using it un-owned" >&2
+  fi
+  printf '%s' "$dst:$rest"
+}
+
 # run_and_test <active element...>  -> sets PASS=0/1, OBS=<last correctness-check line>
 run_and_test() {
   docker rm -f "$C" >/dev/null 2>&1
@@ -99,7 +139,10 @@ run_and_test() {
   [ -n "${F[RUN_NET]}" ] && args+=(--network "${F[RUN_NET]}")
   [ -n "${F[RUN_USER]}" ] && args+=(--user "${F[RUN_USER]}")
   [ -n "${F[RUN_ENTRYPOINT]}" ] && args+=(--entrypoint "${F[RUN_ENTRYPOINT]}")
-  local m; for m in "${RUN_MOUNTS[@]}"; do [ -n "$m" ] && args+=(-v "$m"); done
+  # Each candidate trial gets a fresh staging root, so a container writing into a
+  # staged bind (e.g. homepage's config/logs) can't leak state into the next trial.
+  local stageroot="$WORK/stage.$STAGE_SEQ"; STAGE_SEQ=$((STAGE_SEQ + 1))
+  local m; for m in "${RUN_MOUNTS[@]}"; do [ -n "$m" ] && args+=(-v "$(prep_mount "$m" "$stageroot")"); done
   local so; for so in "${RUN_SECOPT[@]}"; do [ -n "$so" ] && args+=(--security-opt "$so"); done
   local dv; for dv in "${RUN_DEVICES[@]}"; do [ -n "$dv" ] && args+=(--device "$dv"); done
   local e; for e in "${RUN_ENV[@]}"; do [ -n "$e" ] && args+=(-e "${e/__DOCKER_GID__/$DOCKER_GID}"); done

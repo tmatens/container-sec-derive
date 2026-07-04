@@ -127,6 +127,29 @@ workload coverage. On a mismatched host, treat such caps as conservatively kept,
 not removable — the drop-test can prove a cap *needed* (removing it broke
 something) but cannot prove one *unneeded* if the environment never enforced it.
 
+## Reproducing the invocation faithfully: bind-mount ownership
+
+Matching the host posture isn't enough; the *invocation's own preconditions* have
+to hold too. The sharp case is a bind mount under a numeric `user:`. A service
+that runs as `user: "1000:1000"` and binds `./config` does so because, on the
+deploy target, `./config` is **owned by uid 1000** — so the process reads and
+writes its own files and needs no capability for them. A fresh `git clone` on the
+derive host owns that directory as the *cloning* user instead. Run the container
+as 1000 against it and every write is EACCES: homepage, for one, can't create
+`config/logs`, so its dashboard 500s (while `/api/healthcheck` still reports "up" —
+the same "healthy but wrong" trap netdata sprang). The baseline never becomes
+correct and nothing can be derived.
+
+The fix is to **reproduce the ownership**, not to loosen permissions.
+`drop_test.sh`, when a spec pins a numeric run uid, stages a private copy of each
+bind-mounted directory and `chown`s it to that uid (using the service image itself
+as a root-in-container helper, so no host root is needed). Matching ownership is
+what removes the capability need — exactly as on the target. Making the mount
+world-writable instead would leave it owned by the *wrong* uid, and a process
+touching files it doesn't own can trip `FOWNER`/`CHOWN`: the derived minimum would
+then be wrong in the other direction. Ownership is the load-bearing property, so
+ownership is what gets reproduced.
+
 ## Where it belongs
 
 This is a **deploy/promote-time** concern, not an authoring-time one: that's where

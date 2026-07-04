@@ -189,6 +189,39 @@ touching files it doesn't own can trip `FOWNER`/`CHOWN`: the derived minimum wou
 then be wrong in the other direction. Ownership is the load-bearing property, so
 ownership is what gets reproduced.
 
+## Custom images: a principle
+
+The caddy case (above) yields two rules for a locally-built (`build:`) image:
+
+1. **A custom image never becomes a published catalog profile.** A catalog profile
+   is digest-pinned and meant to be pulled and reused by anyone running that image;
+   a profile for a build only you can produce is neither pullable nor reproducible
+   by others, so it can't be verified or shared. Deriving against a custom image
+   belongs to **deploy-check** — a report-only verdict on *your own* deployment —
+   never to the catalog, which targets public, pullable images.
+
+2. **"The capability is no longer required" is not automatically a security win —
+   read *why* it went away.** When a custom build makes a capability droppable, ask
+   what now provides the privilege. caddy is the cautionary case: the base
+   `caddy:2` binary carries a `cap_net_bind_service` **file capability**, which
+   scopes the low-port-bind privilege to *just that binary, just at exec*. The
+   `COPY --from=builder` silently strips it (Docker `COPY` doesn't preserve the
+   `security.capability` xattr), so the deployed binary binds :80/:443 only because
+   the container's default `ip_unprivileged_port_start=0` lets **every** process
+   bind privileged ports. The requirement didn't shrink — it moved from a
+   tightly-scoped file cap to a blanket, container-wide relaxation. Least privilege
+   got *worse*; the shorter `cap_add` list just hides it, and if the host ever
+   raised `port_start` to 1024 the capless binary would suddenly need the very
+   grant the deploy-check called removable. The narrowest posture keeps the file
+   capability (set it in the *final* build stage so `COPY` can't drop it): the bind
+   privilege then lives on one binary, `port_start` can stay at 1024, and no
+   `NET_BIND_SERVICE` grant is needed at all.
+
+The general rule behind (2): **a smaller capability set is a security improvement
+only if the removed capability's function is *gone*, not *relocated to a broader
+control*.** The deploy-check reports the mechanical fact (a grant is redundant); the
+security reading requires knowing why.
+
 ## Where it belongs
 
 This is a **deploy/promote-time** concern, not an authoring-time one: that's where

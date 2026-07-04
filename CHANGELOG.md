@@ -22,8 +22,8 @@ the relevant entry.
   (matches / not_minimized / over_permissioned / under_permissioned) land in the
   job summary; the job doesn't fail on a verdict (graduate to enforce by exiting
   on the worst). First manifest covers **netdata**, **homepage**, **caddy**, and
-  **immich's postgres** (all validated end-to-end on the matched host). Needs a
-  read-only `FORGEJO_RO_TOKEN` repo secret.
+  immich's **postgres** and **redis (valkey)** — all validated end-to-end on the
+  matched host. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.
 - **`compose_derive.sh` derives services that `build:` a custom image.** The
   bridge builds the service's image and derives against that actual artifact
   (drop_test gains a `no_pull` path + an image-id digest fallback). This matters:
@@ -53,6 +53,14 @@ the relevant entry.
   service's `POSTGRES_*` credentials back from the container (they may be
   placeholders for a `${VAR}` secret), runs the reference workload, and asserts a
   non-root server uid.
+- **immich's redis (valkey) joins deploy-check + the app-tier stack.** The other
+  leaf: valkey drops root → uid 999 via `setpriv` (needs `SETUID`/`SETGID`) and
+  would chown a foreign data dir (`CHOWN`), but immich declares no volume for it,
+  so `CHOWN` is unused → derived minimum `[SETUID, SETGID]`, verdict
+  `over_permissioned, drop [CHOWN]`. `correctness/redis_deploy.sh` does a PING +
+  SET/GET round-trip and asserts a non-root uid. The app-tier stack now hardens
+  **both** leaves (DB drop FOWNER + redis drop CHOWN); immich still ingests +
+  serves under both (re-verified).
 - **App-tier verification (`scripts/apptier_verify.sh` + `docs/app-tier-verification.md`).**
   The second correctness tier for a multi-container service: the drop-test loop
   derives each container's caps in isolation (caps are composition-independent),

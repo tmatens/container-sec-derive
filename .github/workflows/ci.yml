@@ -43,6 +43,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Formatting is a hard gate: gofmt is deterministic and the tree is already
+      # clean, so an unformatted file is always a mistake to reject at PR time
+      # rather than let drift accumulate. (Deeper linting — errcheck/staticcheck
+      # via golangci-lint — is a planned follow-up on #292; it needs a one-time
+      # clean-baseline run before it can gate.)
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean; run 'gofmt -w':"
+            echo "$unformatted"
+            exit 1
+          fi
       - name: go vet
         run: go vet ./...
       - name: go test

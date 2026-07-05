@@ -11,6 +11,14 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Flag-parse errors print once, and `-h`/`--help` exits cleanly (#291).** A bad
+  flag previously emitted the message twice (the `flag` package's bare line plus a
+  usage dump, then `main`'s `csd: ` prefixed line); it now shows the single
+  `csd: <err>` line at `EX_USAGE`. `-h`/`--help` now prints usage to stdout and
+  exits `0` instead of the `csd: flag: help requested` line at `EX_USAGE`.
+
 ### Security
 
 - **Sanitize DNS-derived hostnames before they enter the egress enforcement

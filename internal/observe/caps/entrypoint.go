@@ -32,13 +32,6 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
-// crossCheckStatusOK is the sentinel crossCheckStatus value used by
-// ApplyEntrypointCrossCheck when the inspection (live or fixture)
-// succeeded -- regardless of whether any signals actually fired.
-// Anything else non-empty is a short human-readable reason the check
-// could not run and gets surfaced as an "unavailable" factor.
-const crossCheckStatusOK = "ok"
-
 // entrypointInspection is the static image metadata that feeds the
 // cross-check. Populated by inspectEntrypoint (live docker) or by
 // loadInspectionFixture (tests). Image is informational and used in

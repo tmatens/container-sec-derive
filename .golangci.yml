@@ -1,0 +1,30 @@
+# golangci-lint gate for csd (#292). Enables the standard set — errcheck,
+# govet, ineffassign, staticcheck, unused — on a root-equivalent binary where
+# an unchecked error or a dead branch is worth catching at PR time. gofmt is a
+# separate hard gate in ci.yml. Deeper security linters (e.g. gosec) are a
+# possible follow-up; this lands the error-handling/correctness baseline.
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Diagnostic writes to stderr/sink and Close on a read-only fixture file
+      # are fire-and-forget by design — a write/close error there is not
+      # actionable, and the meaningful output writes go through stickyWriter,
+      # which already tracks its error. Excluding these keeps errcheck's signal
+      # on the errors that matter.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+  exclusions:
+    rules:
+      # QF1002 ("could use a tagged switch") is a stylistic quick-fix, not a
+      # correctness check; the flagged switches live in load-bearing confidence
+      # and formatter code where the boolean-case form reads fine. Filter just
+      # this message — every other staticcheck (SA* correctness included) stays.
+      - linters:
+          - staticcheck
+        text: "QF1002"

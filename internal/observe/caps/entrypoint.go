@@ -140,7 +140,7 @@ func inspectEntrypoint(ctx context.Context, image, runtimeBin string) (entrypoin
 		return insp, fmt.Errorf("%s history %s: %w", runtimeBin, image, err)
 	}
 	scan := bufio.NewScanner(bytes.NewReader(historyOut))
-	scan.Buffer(make([]byte, 64*1024), 1024*1024)
+	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
 	for scan.Scan() {
 		line := strings.TrimSpace(scan.Text())
 		if line != "" {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -67,7 +68,7 @@ func aggregateEgress(r io.Reader, opts attrib.Opts) (*egressObservation, error) 
 	count := 0
 	image := ""
 	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), 1024*1024)
+	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
 	for scan.Scan() {
 		line := scan.Bytes()
 		if len(bytes.TrimSpace(line)) == 0 {

@@ -65,6 +65,12 @@ jobs:
       # <0.1s, so the detector is near-free. (Needs cgo, on by default here.)
       - name: go test -race
         run: go test -race ./...
+      # Golden-file drift guard (#296). A normal `go test` only READS the golden
+      # sidecars; only -update-golden rewrites them. If that flag ever slips into
+      # the test invocation (or a golden drifts), the run mutates a committed
+      # file — fail loudly here instead of absorbing schema drift silently.
+      - name: golden files unchanged by tests
+        run: git diff --exit-code -- 'testdata/*golden*.json'
       - name: go build
         run: go build -o csd ./cmd/csd
       # Hermetic validation of the capability minimizer (greedy + #32

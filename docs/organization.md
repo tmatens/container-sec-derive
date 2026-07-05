@@ -78,9 +78,21 @@ cmd/csd
   graph would cycle. The observer owns the *deriving function*; `sidecar` owns
   the *type it returns*.
 - **An observer (`internal/observe/<name>`) imports only foundation packages.**
-  It must not import another observer, `format`, `cli`, or `cmd`. (One honest
-  exception: `capadd` reuses the caps `trace_capabilities` event, so it may
-  depend on `caps` for that event type — document any such reuse at the import.)
+  It must not import another observer, `format`, `cli`, or `cmd`. Honest,
+  documented exceptions — narrow and enumerable:
+  - **Shared trace-event reuse:** an observer may depend on a sibling for a
+    trace event type it genuinely reuses — `capadd` reuses `caps`'s
+    `trace_capabilities` `CapEvent`; `devices` reuses `fs`'s `trace_open`
+    `FileEvent`. Document the reuse at the import.
+  - **Composition:** `privileged` is the decomposition observer, so it imports
+    the `caps` + `devices` observers it composes.
+
+  Observer-agnostic *utilities* are **not** an exception: they belong in
+  `internal/observe` and are shared from there, never reached for across
+  siblings. (This is why image-digest pinning — `PopulateImageDigest` /
+  `PickRepoDigest` — lives in `internal/observe/imagedigest.go`, not in `caps`:
+  fs/devices/capadd/privileged all need it, so importing `caps` just to pin a
+  digest was cross-linking a sibling for a utility, #286.)
 - **`format` and `verify` import `sidecar` (+ observers for their recommendation
   types), never `cli`/`cmd`.**
 - **`cli` wires everything; `cmd/csd` is a thin shim over `cli`.**

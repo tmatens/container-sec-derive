@@ -15,7 +15,6 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/observe"
-	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -79,7 +78,7 @@ func ProduceDeviceObservation(opts DevicePipelineOpts, stderr io.Writer) (*sidec
 	}
 	// Digest-pin for the compose-lint-profile contract (digest-only helper;
 	// devices never observes caps).
-	caps.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
+	observe.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
 	ComputeDeviceConfidence(s)
 	return s, nil
 }

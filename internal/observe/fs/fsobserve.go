@@ -18,7 +18,6 @@ import (
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/observe"
-	"github.com/tmatens/container-sec-derive/internal/observe/caps"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -94,7 +93,7 @@ func ProduceFSObservation(opts FSPipelineOpts, stderr io.Writer) (*sidecar.Sidec
 	// Digest-pin so the compose-lint-profile contract can reference the exact
 	// artifact. fs never observes caps, so this uses the digest-only helper
 	// rather than the caps entrypoint cross-check.
-	caps.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
+	observe.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
 	computeFSConfidence(s)
 	return s, nil
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/observe"
-	"github.com/tmatens/container-sec-derive/internal/observe/fs"
+	"github.com/tmatens/container-sec-derive/internal/observe/fs" // reuses fs.FileEvent (trace_open); sanctioned event-reuse, see docs/organization.md
 )
 
 // The v0.3 device-decomposition observer reuses the v0.2 trace_open signal and

@@ -18,20 +18,17 @@
 name: CodeQL
 
 on:
-  # TEMPORARY (cost-saving during active development): the per-PR CodeQL run is
-  # turned OFF and the analysis runs on an EVERY-3-DAYS schedule instead, to
-  # conserve Actions minutes while the repo is changing rapidly. CodeQL is the
-  # slowest job (~8-12 min) and runs in artifact mode (upload: false — private
-  # repo / no GHAS), so there is no Security-tab baseline that needs per-PR
-  # freshness. RESTORE the `pull_request` trigger (branches: [main], the
-  # markdown/docs paths-ignore) when development slows; push-to-main stays dropped
-  # (#143: a squash-merge re-scans an identical tree). workflow_dispatch allows an
-  # on-demand run before a release or after a security-relevant change.
-  # PAUSED for the Actions-minutes budget (90% used; resets ~2026-07-01).
-  # Re-enable after the reset (every-3-days; was weekly "27 4 * * 1");
-  # workflow_dispatch covers an on-demand scan meanwhile.
-  # schedule:
-  #   - cron: "27 4 */3 * *"
+  # Per-PR CodeQL is intentionally OFF: it's the slowest job (~8-12 min) and runs
+  # in artifact mode (upload: false — private repo / no GHAS), so there is no
+  # Security-tab baseline that needs per-PR freshness, and `go vet` + govulncheck
+  # already gate every PR. Push-to-main is also dropped (#143: a squash-merge
+  # re-scans an identical tree). The full SAST sweep runs on a WEEKLY schedule
+  # (the ~2026-07-01 Actions-minutes-budget pause is lifted now the budget has
+  # reset; weekly — not the prior every-3-days — keeps the cost low while
+  # development is still active), and workflow_dispatch covers an on-demand run
+  # before a release or after a security-relevant change.
+  schedule:
+    - cron: "27 4 * * 1"
   workflow_dispatch:
 
 concurrency:

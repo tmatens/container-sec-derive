@@ -40,6 +40,10 @@ Subprocess, not library (Decisions item 5). IG schema is pinned per release via 
 ## Quality checks
 
 `go vet ./...`, `go test ./...`, `go build -o csd ./cmd/csd`. All must pass.
+**`golangci-lint run ./...` must also pass at 0 issues** — a per-PR `lint` job
+(errcheck/govet/ineffassign/staticcheck/unused, config in `.golangci.yml`) gates
+alongside vet/test/gofmt since #292. Run it before pushing; keep the baseline
+clean (its exclusions are deliberate — don't widen the staticcheck check-set).
 
 **The full test-tier map — what each tier proves and where it runs (hermetic vs
 live vs real-host) — is `docs/testing.md`.** Read it before reasoning about

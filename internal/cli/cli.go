@@ -78,6 +78,25 @@ const (
 	FormatK8sNetworkPolicy = "k8s-networkpolicy"
 )
 
+// validateComposeFormatOpts enforces the --compose-in/--service contract shared
+// by every observer's compose-patch branch: when --format compose-patch is
+// selected both flags are required and --compose-in must exist; otherwise
+// neither flag is meaningful and supplying one is a usage error. Centralized so
+// the five per-observer copies (caps/fs/devices/privileged/capadd) cannot drift.
+func validateComposeFormatOpts(formatMode string, composeIn, composeService *string) error {
+	if formatMode == FormatComposePatch {
+		if *composeIn == "" || *composeService == "" {
+			return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
+		}
+		if _, statErr := os.Stat(*composeIn); statErr != nil {
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
+		}
+	} else if *composeIn != "" || *composeService != "" {
+		return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+	}
+	return nil
+}
+
 func Run(args []string, stdout, stderr io.Writer) error {
 	// Subcommand dispatch. v0.1 has two explicit subcommands (`observe`,
 	// `verify`); the no-arg / flags-only form (`csd --container x`) is
@@ -271,15 +290,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		// All seven formatters are implemented for flags. compose-patch needs
 		// --compose-in/--service (validated below, shared with the cap path);
 		// compose-lint-profile honors --allow-exploratory.
-		if *formatMode == FormatComposePatch {
-			if *composeIn == "" || *composeService == "" {
-				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
-			}
-			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
-			}
-		} else if *composeIn != "" || *composeService != "" {
-			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		if err := validateComposeFormatOpts(*formatMode, composeIn, composeService); err != nil {
+			return err
 		}
 		if *allowExploratory && *formatMode != FormatComposeLintEntry {
 			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
@@ -359,15 +371,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		// All seven formatters are now implemented for devices. compose-patch
 		// needs --compose-in/--service (validated below, shared shape with the
 		// cap/fs paths); compose-lint-profile honors --allow-exploratory.
-		if *formatMode == FormatComposePatch {
-			if *composeIn == "" || *composeService == "" {
-				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
-			}
-			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
-			}
-		} else if *composeIn != "" || *composeService != "" {
-			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		if err := validateComposeFormatOpts(*formatMode, composeIn, composeService); err != nil {
+			return err
 		}
 		if *allowExploratory && *formatMode != FormatComposeLintEntry {
 			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
@@ -445,15 +450,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		// All seven formatters are implemented for privileged. compose-patch
 		// needs --compose-in/--service; compose-lint-profile honors
 		// --allow-exploratory (shared shape with the cap/fs/device paths).
-		if *formatMode == FormatComposePatch {
-			if *composeIn == "" || *composeService == "" {
-				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
-			}
-			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
-			}
-		} else if *composeIn != "" || *composeService != "" {
-			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		if err := validateComposeFormatOpts(*formatMode, composeIn, composeService); err != nil {
+			return err
 		}
 		if *allowExploratory && *formatMode != FormatComposeLintEntry {
 			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
@@ -533,15 +531,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	// implemented; the advisory is always emitted, and the concrete recommended
 	// cap_add only when --cap-add supplies the granted set.
 	if *observeMode == ObserveCapadd {
-		if *formatMode == FormatComposePatch {
-			if *composeIn == "" || *composeService == "" {
-				return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
-			}
-			if _, statErr := os.Stat(*composeIn); statErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, statErr))
-			}
-		} else if *composeIn != "" || *composeService != "" {
-			return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+		if err := validateComposeFormatOpts(*formatMode, composeIn, composeService); err != nil {
+			return err
 		}
 		if *allowExploratory && *formatMode != FormatComposeLintEntry {
 			return exit.CodedErrorf(exit.Usage, "--allow-exploratory is only meaningful with --format %s", FormatComposeLintEntry)
@@ -628,15 +619,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	// compose-patch needs both --compose-in and --service; reject the
 	// flags elsewhere so a future user doesn't believe they have an
 	// effect with another formatter.
-	if *formatMode == FormatComposePatch {
-		if *composeIn == "" || *composeService == "" {
-			return exit.CodedErrorf(exit.Usage, "--format %s requires both --compose-in <path> and --service <name>", FormatComposePatch)
-		}
-		if _, err := os.Stat(*composeIn); err != nil {
-			return exit.WrapCoded(exit.Usage, fmt.Errorf("--compose-in %q: %w", *composeIn, err))
-		}
-	} else if *composeIn != "" || *composeService != "" {
-		return exit.CodedErrorf(exit.Usage, "--compose-in / --service are only meaningful with --format %s", FormatComposePatch)
+	if err := validateComposeFormatOpts(*formatMode, composeIn, composeService); err != nil {
+		return err
 	}
 
 	s, err := caps.ProduceObservation(caps.PipelineOpts{

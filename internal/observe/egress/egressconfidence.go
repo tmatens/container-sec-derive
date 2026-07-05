@@ -3,6 +3,7 @@ package egress
 import (
 	"fmt"
 
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -20,51 +21,32 @@ import (
 // and replica disagreement transfer unchanged. The grade is reproducible from
 // Factors and capped at moderate while the deferred preconditions stand.
 func computeEgressConfidence(s *sidecar.Sidecar) {
-	var factors []string
-	moderateHits := 0
-	forceLow := false
-
-	addLow := func(msg string) {
-		factors = append(factors, "low: "+msg)
-		forceLow = true
-	}
-	addModerate := func(msg string) {
-		factors = append(factors, "moderate: "+msg)
-		moderateHits++
-	}
-	addInfo := func(msg string) {
-		factors = append(factors, "ok: "+msg)
-	}
+	var c observe.ConfidenceBuilder
 
 	// Destination volume is reported for auditability but never forces a grade
 	// down: outbound connections are sparse by nature.
 	switch n := len(s.EgressDestinations); {
 	case n == 0:
-		addInfo("no outbound connections observed; an empty allowlist would deny all egress — confirm this is intended")
+		c.Info("no outbound connections observed; an empty allowlist would deny all egress — confirm this is intended")
 	default:
-		addInfo(fmt.Sprintf("%d distinct destination(s) observed across %d connect events", n, s.TraceHealth.EventsRecorded))
+		c.Info(fmt.Sprintf("%d distinct destination(s) observed across %d connect events", n, s.TraceHealth.EventsRecorded))
 	}
 
 	// Drop rate. Same thresholds as the other rubrics; the runner aborts at
 	// >=10%, so a sidecar that still carries that rate is surfaced as low.
-	switch r := s.TraceHealth.DropRate; {
-	case r >= 0.01:
-		addLow(fmt.Sprintf("drop rate %.4f >= 1%%", r))
-	case r > 0:
-		addModerate(fmt.Sprintf("drop rate %.4f > 0 but < 1%%", r))
-	}
+	c.AddDropRateFactors(s.TraceHealth.DropRate)
 
 	// Multi-replica egress-set disagreement.
 	switch n := len(s.Target.ReplicaEgressDisagreement); {
 	case n > 1:
-		addLow(fmt.Sprintf("replica egress disagreement spans %d destinations: %v", n, s.Target.ReplicaEgressDisagreement))
+		c.Low(fmt.Sprintf("replica egress disagreement spans %d destinations: %v", n, s.Target.ReplicaEgressDisagreement))
 	case n == 1:
-		addModerate(fmt.Sprintf("replica egress disagreement: %v", s.Target.ReplicaEgressDisagreement))
+		c.Moderate(fmt.Sprintf("replica egress disagreement: %v", s.Target.ReplicaEgressDisagreement))
 	}
 
 	// Duration soft floor. 0 means "not measured" (fixture mode).
 	if s.DurationSeconds > 0 && s.DurationSeconds < 60 {
-		addLow(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
+		c.Low(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
 	}
 
 	// Workload script presence. An egress allowlist is only as complete as the
@@ -72,9 +54,9 @@ func computeEgressConfidence(s *sidecar.Sidecar) {
 	// (inverted risk) — so absence is forced LOW here, not merely moderate as in
 	// the device/fs rubrics.
 	if s.Workload != "" {
-		addInfo("workload script provided (" + s.Workload + ")")
+		c.Info("workload script provided (" + s.Workload + ")")
 	} else {
-		addLow("no workload script provided (startup + idle only) — an allowlist from idle traffic will almost certainly be incomplete")
+		c.Low("no workload script provided (startup + idle only) — an allowlist from idle traffic will almost certainly be incomplete")
 	}
 
 	// Hostname (trace_dns) correlation: when DNS was observed the allowlist gains
@@ -90,18 +72,18 @@ func computeEgressConfidence(s *sidecar.Sidecar) {
 				annotated++
 			}
 		}
-		factors = append(factors, fmt.Sprintf(
+		c.Factors = append(c.Factors, fmt.Sprintf(
 			"ok: hostnames correlated via trace_dns (%d/%d destination(s) named); %d DNS resolver(s) included in the allowlist",
 			annotated, len(s.EgressDestinations), len(s.EgressRecommendation.Resolvers)))
 	} else {
-		factors = append(factors,
+		c.Factors = append(c.Factors,
 			"deferred: no DNS observed (trace_dns) — allowlist is raw IPs and omits the resolver; ensure UDP/53 egress is permitted separately")
 	}
-	factors = append(factors, "deferred: steady-state detection not yet implemented")
+	c.Factors = append(c.Factors, "deferred: steady-state detection not yet implemented")
 
-	s.Confidence.Factors = factors
+	s.Confidence.Factors = c.Factors
 	switch {
-	case forceLow, moderateHits >= 2:
+	case c.ForceLow, c.ModerateHits >= 2:
 		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
 		s.Confidence.Level = sidecar.ConfidenceModerate

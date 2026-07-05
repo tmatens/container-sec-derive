@@ -3,6 +3,7 @@ package capadd
 import (
 	"fmt"
 
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -21,21 +22,7 @@ import (
 // perf_event_open at startup; a debugger ptraces a handful of times), so volume
 // is not a useful proxy for coverage here — the same call the device rubric makes.
 func computeCapaddConfidence(s *sidecar.Sidecar) {
-	var factors []string
-	moderateHits := 0
-	forceLow := false
-
-	addLow := func(msg string) {
-		factors = append(factors, "low: "+msg)
-		forceLow = true
-	}
-	addModerate := func(msg string) {
-		factors = append(factors, "moderate: "+msg)
-		moderateHits++
-	}
-	addInfo := func(msg string) {
-		factors = append(factors, "ok: "+msg)
-	}
+	var c observe.ConfidenceBuilder
 
 	val := s.CapaddValidation
 	used, removable, substituted := 0, 0, 0
@@ -52,41 +39,36 @@ func computeCapaddConfidence(s *sidecar.Sidecar) {
 			}
 		}
 	}
-	addInfo(fmt.Sprintf("%d capability/ies observed in use across %d held event(s)", used, s.TraceHealth.EventsRecorded))
+	c.Info(fmt.Sprintf("%d capability/ies observed in use across %d held event(s)", used, s.TraceHealth.EventsRecorded))
 
 	// The removal call is the workload-bounded edge: an "unused" cap is only as
 	// trustworthy as the workload's coverage. Reported for auditability; the
 	// workload factor below carries the actual grade weight.
 	if removable > 0 {
-		addInfo(fmt.Sprintf("%d cap(s) flagged removable (granted but no held check fired) — workload-bounded", removable))
+		c.Info(fmt.Sprintf("%d cap(s) flagged removable (granted but no held check fired) — workload-bounded", removable))
 	}
 	// The finer-cap substitution call is the OTHER workload-bounded over-trust
 	// edge (deep-review L9): a cap that looks replaceable by a finer one only
 	// because the broader syscalls weren't exercised. Priced like removable.
 	if substituted > 0 {
-		addInfo(fmt.Sprintf("%d cap(s) flagged for finer-grained substitution — workload-bounded", substituted))
+		c.Info(fmt.Sprintf("%d cap(s) flagged for finer-grained substitution — workload-bounded", substituted))
 	}
 
 	// Drop rate. Same thresholds as the cap/fs/device rubrics; the runner aborts
 	// at >=10%, so a sidecar that still carries that rate is surfaced as low.
-	switch r := s.TraceHealth.DropRate; {
-	case r >= 0.01:
-		addLow(fmt.Sprintf("drop rate %.4f >= 1%%", r))
-	case r > 0:
-		addModerate(fmt.Sprintf("drop rate %.4f > 0 but < 1%%", r))
-	}
+	c.AddDropRateFactors(s.TraceHealth.DropRate)
 
 	// Multi-replica dangerous-cap disagreement.
 	switch n := len(s.Target.ReplicaCapDisagreement); {
 	case n > 1:
-		addLow(fmt.Sprintf("replica cap disagreement spans %d cap(s): %v", n, s.Target.ReplicaCapDisagreement))
+		c.Low(fmt.Sprintf("replica cap disagreement spans %d cap(s): %v", n, s.Target.ReplicaCapDisagreement))
 	case n == 1:
-		addModerate(fmt.Sprintf("replica cap disagreement: %v", s.Target.ReplicaCapDisagreement))
+		c.Moderate(fmt.Sprintf("replica cap disagreement: %v", s.Target.ReplicaCapDisagreement))
 	}
 
 	// Duration soft floor. 0 means "not measured" (fixture mode).
 	if s.DurationSeconds > 0 && s.DurationSeconds < 60 {
-		addLow(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
+		c.Low(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
 	}
 
 	// Workload script presence — the dominant completeness signal for this
@@ -96,21 +78,21 @@ func computeCapaddConfidence(s *sidecar.Sidecar) {
 	// reviewer most needs to see, so the message names that interaction.
 	switch {
 	case s.Workload != "":
-		addInfo("workload script provided (" + s.Workload + ")")
+		c.Info("workload script provided (" + s.Workload + ")")
 	case removable > 0 || substituted > 0:
-		addModerate("no workload script provided; removable / substitution conclusions reflect startup + idle only — verify before dropping or substituting")
+		c.Moderate("no workload script provided; removable / substitution conclusions reflect startup + idle only — verify before dropping or substituting")
 	default:
-		addModerate("no workload script provided (startup + idle only)")
+		c.Moderate("no workload script provided (startup + idle only)")
 	}
 
-	factors = append(factors,
+	c.Factors = append(c.Factors,
 		"deferred: steady-state detection not yet implemented",
 		"deferred: target-exited-early signal not yet wired",
 	)
 
-	s.Confidence.Factors = factors
+	s.Confidence.Factors = c.Factors
 	switch {
-	case forceLow, moderateHits >= 2:
+	case c.ForceLow, c.ModerateHits >= 2:
 		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
 		s.Confidence.Level = sidecar.ConfidenceModerate

@@ -3,6 +3,7 @@ package fs
 import (
 	"fmt"
 
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -25,70 +26,51 @@ import (
 // PR-C; this function already reads s.Target.ReplicaWritePathDisagreement so the
 // factor lights up automatically once that field is populated.
 func computeFSConfidence(s *sidecar.Sidecar) {
-	var factors []string
-	moderateHits := 0
-	forceLow := false
-
-	addLow := func(msg string) {
-		factors = append(factors, "low: "+msg)
-		forceLow = true
-	}
-	addModerate := func(msg string) {
-		factors = append(factors, "moderate: "+msg)
-		moderateHits++
-	}
-	addInfo := func(msg string) {
-		factors = append(factors, "ok: "+msg)
-	}
+	var c observe.ConfidenceBuilder
 
 	// Write-event volume = coverage proxy for the tmpfs list's completeness.
 	switch n := s.TraceHealth.EventsRecorded; {
 	case n < 100:
-		addLow(fmt.Sprintf("write-event count %d < 100; tmpfs list may be incomplete", n))
+		c.Low(fmt.Sprintf("write-event count %d < 100; tmpfs list may be incomplete", n))
 	case n < 1000:
-		addModerate(fmt.Sprintf("write-event count %d in 100-999", n))
+		c.Moderate(fmt.Sprintf("write-event count %d in 100-999", n))
 	default:
-		addInfo(fmt.Sprintf("write-event count %d >= 1000", n))
+		c.Info(fmt.Sprintf("write-event count %d >= 1000", n))
 	}
 
 	// Drop rate. Same thresholds as the cap rubric; the runner aborts at
 	// >=10%, so a sidecar that still carries that rate is surfaced as low.
-	switch r := s.TraceHealth.DropRate; {
-	case r >= 0.01:
-		addLow(fmt.Sprintf("drop rate %.4f >= 1%%", r))
-	case r > 0:
-		addModerate(fmt.Sprintf("drop rate %.4f > 0 but < 1%%", r))
-	}
+	c.AddDropRateFactors(s.TraceHealth.DropRate)
 
 	// Multi-replica write-path disagreement (populated in PR-C).
 	switch n := len(s.Target.ReplicaWritePathDisagreement); {
 	case n > 1:
-		addLow(fmt.Sprintf("replica write-path disagreement spans %d paths: %v", n, s.Target.ReplicaWritePathDisagreement))
+		c.Low(fmt.Sprintf("replica write-path disagreement spans %d paths: %v", n, s.Target.ReplicaWritePathDisagreement))
 	case n == 1:
-		addModerate(fmt.Sprintf("replica write-path disagreement: %v", s.Target.ReplicaWritePathDisagreement))
+		c.Moderate(fmt.Sprintf("replica write-path disagreement: %v", s.Target.ReplicaWritePathDisagreement))
 	}
 
 	// Duration soft floor. 0 means "not measured" (fixture mode).
 	if s.DurationSeconds > 0 && s.DurationSeconds < 60 {
-		addLow(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
+		c.Low(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
 	}
 
 	// Workload script presence. Writes are workload-driven, so absence is a
 	// genuine coverage caveat — moderate, per the cap rubric's treatment.
 	if s.Workload != "" {
-		addInfo("workload script provided (" + s.Workload + ")")
+		c.Info("workload script provided (" + s.Workload + ")")
 	} else {
-		addModerate("no workload script provided (startup + idle only)")
+		c.Moderate("no workload script provided (startup + idle only)")
 	}
 
-	factors = append(factors,
+	c.Factors = append(c.Factors,
 		"deferred: steady-state detection not yet implemented",
 		"deferred: target-exited-early signal not yet wired",
 	)
 
-	s.Confidence.Factors = factors
+	s.Confidence.Factors = c.Factors
 	switch {
-	case forceLow, moderateHits >= 2:
+	case c.ForceLow, c.ModerateHits >= 2:
 		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
 		s.Confidence.Level = sidecar.ConfidenceModerate

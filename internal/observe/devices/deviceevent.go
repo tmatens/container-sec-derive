@@ -1,7 +1,6 @@
 package devices
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -116,23 +115,20 @@ func AggregateDevices(r io.Reader, opts attrib.Opts) (*DeviceObservation, error)
 	stats := map[string]*deviceStats{}
 	count := 0
 	image := ""
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
-	for scan.Scan() {
-		line := scan.Bytes()
+	if err := observe.IterateNDJSON(r, func(line []byte) error {
 		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+			return nil
 		}
 		var ev fs.FileEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return nil, fmt.Errorf("parse trace_open event: %w", err)
+			return fmt.Errorf("parse trace_open event: %w", err)
 		}
 		if !opts.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
-			continue
+			return nil
 		}
 		p := ev.Path()
 		if !isDeviceOpen(p) {
-			continue
+			return nil
 		}
 		count++
 		if image == "" {
@@ -160,8 +156,8 @@ func AggregateDevices(r io.Reader, opts attrib.Opts) (*DeviceObservation, error)
 		if comm := strings.TrimSpace(ev.Proc.Comm); comm != "" {
 			st.commSamples[comm] = struct{}{}
 		}
-	}
-	if err := scan.Err(); err != nil {
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 

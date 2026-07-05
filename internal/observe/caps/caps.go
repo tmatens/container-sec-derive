@@ -1,7 +1,6 @@
 package caps
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -297,13 +296,7 @@ func Aggregate(r io.Reader, opts attrib.Opts) (*sidecar.Sidecar, error) {
 	var recorded int
 	var globalFirstTsMs int64
 	globalFirstSeen := false
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
-	for scan.Scan() {
-		line := scan.Bytes()
-		if len(line) == 0 {
-			continue
-		}
+	if err := observe.IterateNDJSON(r, func(line []byte) error {
 		var ev CapEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			// Hard-fail on a malformed line, matching the fs/device/capadd
@@ -313,10 +306,10 @@ func Aggregate(r io.Reader, opts attrib.Opts) (*sidecar.Sidecar, error) {
 			// ig version (enforced by checkIGVersion) emits one clean JSON event
 			// per stdout line, so a parse failure means corrupt input, not a
 			// benign diagnostic line.
-			return nil, fmt.Errorf("parse trace_capabilities event: %w", err)
+			return fmt.Errorf("parse trace_capabilities event: %w", err)
 		}
 		if !Match(opts, ev) {
-			continue
+			return nil
 		}
 		recorded++
 		// Capable=false events are kretprobe-recorded denials: the
@@ -325,7 +318,7 @@ func Aggregate(r io.Reader, opts attrib.Opts) (*sidecar.Sidecar, error) {
 		// events_recorded so drop_rate's denominator reflects every
 		// real ig sample we parsed.
 		if !ev.Capable {
-			continue
+			return nil
 		}
 		rid := ev.Runtime.ContainerID
 		if rid == "" {
@@ -357,15 +350,15 @@ func Aggregate(r io.Reader, opts attrib.Opts) (*sidecar.Sidecar, error) {
 		// reaching the cap set" from a reviewer's perspective.
 		if IsInitComm(ev.Proc.Comm) {
 			st.suppressed++
-			continue
+			return nil
 		}
 		if opts.InitWindowMs > 0 && ev.Timestamp-st.firstTsMs < int64(opts.InitWindowMs) {
 			st.suppressed++
-			continue
+			return nil
 		}
 		name := NormalizeCap(ev.CapName)
 		if name == "" {
-			continue
+			return nil
 		}
 		// Offset origin is the earliest post-init-filter event across all
 		// replicas. Under --all-matching, staggered replicas share one
@@ -390,8 +383,8 @@ func Aggregate(r io.Reader, opts attrib.Opts) (*sidecar.Sidecar, error) {
 		if comm != "" {
 			st.comms[comm] = struct{}{}
 		}
-	}
-	if err := scan.Err(); err != nil {
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 

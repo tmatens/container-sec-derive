@@ -103,7 +103,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	flags := flag.NewFlagSet("csd", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	// Discard the flag package's own output. On a parse error it prints the bare
+	// message and a full usage dump; main() then repeats the message with the
+	// "csd: " prefix, so the error appeared twice (#291). Suppressing it here
+	// leaves the single prefixed "csd: <err>" line. -h/--help is reprinted
+	// explicitly below (it is not an error, so it must not be swallowed).
+	flags.SetOutput(io.Discard)
 	var (
 		container        = flags.String("container", "", "target container id or name (mutually exclusive with --image)")
 		image            = flags.String("image", "", "select containers by image reference (errors if >1 match without --all-matching)")
@@ -128,8 +133,16 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		composeService   = flags.String("service", "", "compose-patch only: name of the service under services: whose cap_drop/cap_add to rewrite")
 	)
 	if err := flags.Parse(args); err != nil {
-		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad
-		// flags as parse errors. CI integrators want both as EX_USAGE.
+		// flag.ContinueOnError surfaces -h/--help as ErrHelp and bad flags as
+		// parse errors. -h/--help is an explicit request, not a usage error:
+		// print usage to stdout (the discarded writer swallowed the default) and
+		// exit cleanly. A real bad flag stays EX_USAGE and main prints the single
+		// "csd: <err>" line.
+		if err == flag.ErrHelp {
+			flags.SetOutput(stdout)
+			flags.Usage()
+			return nil
+		}
 		return exit.WrapCoded(exit.Usage, err)
 	}
 

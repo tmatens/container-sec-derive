@@ -36,6 +36,40 @@ func TestRun_ExitCode_UsageOnBadFlagCombo(t *testing.T) {
 	}
 }
 
+func TestRun_BadFlag_NoDuplicateOutput(t *testing.T) {
+	// #291: Run must not print the flag package's own error/usage on a parse
+	// error -- main() prefixes the single "csd: <err>" line. Run's stderr must
+	// therefore stay empty; the error still carries EX_USAGE.
+	var out, errBuf bytes.Buffer
+	err := Run([]string{"--nope"}, &out, &errBuf)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if got := exit.CodeFor(err); got != exit.Usage {
+		t.Errorf("exit = %d, want Usage (%d)", got, exit.Usage)
+	}
+	if errBuf.Len() != 0 {
+		t.Errorf("Run wrote to stderr on parse error (duplicate of main's line):\n%s", errBuf.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("Run wrote to stdout on parse error:\n%s", out.String())
+	}
+}
+
+func TestRun_HelpPrintsUsageAndExitsClean(t *testing.T) {
+	// #291: -h/--help is an explicit request, not a usage error -- usage goes to
+	// stdout and Run returns nil (no "csd: flag: help requested" line).
+	for _, arg := range []string{"-h", "--help"} {
+		var out, errBuf bytes.Buffer
+		if err := Run([]string{arg}, &out, &errBuf); err != nil {
+			t.Errorf("%s: want nil error, got %v", arg, err)
+		}
+		if !strings.Contains(out.String(), "-container") {
+			t.Errorf("%s: usage should list flags on stdout, got:\n%s", arg, out.String())
+		}
+	}
+}
+
 func TestRun_ExitCode_TargetAmbiguous(t *testing.T) {
 	// sample.ndjson has two postgres replicas; --image without
 	// --all-matching is the documented ambiguity case.

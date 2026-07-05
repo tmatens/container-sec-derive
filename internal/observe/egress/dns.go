@@ -80,7 +80,11 @@ func aggregateDNS(r io.Reader, opts attrib.Opts) (*dnsCorrelation, error) {
 		}
 
 		// IP->hostname mapping: only response packets carry resolved addresses.
-		if !ev.IsResponse() || ev.Name == "" {
+		// Drop names that are not valid hostnames (#202): the observed container
+		// controls the query names, and an unsanitized name would flow into a
+		// root-applied nftables/NetworkPolicy comment. A dropped annotation costs
+		// only a comment — the IP allowlist itself is trace_tcp-derived.
+		if !ev.IsResponse() || ev.Name == "" || !validHostname(ev.Name) {
 			continue
 		}
 		for _, ip := range ev.Addresses {

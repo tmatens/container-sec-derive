@@ -48,13 +48,18 @@ func egressResolvers(s *sidecar.Sidecar) []sidecar.EgressDest {
 // matching it against the egress_destinations evidence (which carries the
 // trace_dns annotation). Used to comment the IP rules with the names that
 // resolved to them. Returns nil when DNS was not observed.
+//
+// Names are re-validated here (defense-in-depth for #202): the live path already
+// drops invalid names in aggregateDNS, but a sidecar can also be supplied
+// externally (--fixture / --inspect-fixture), so the formatter — the boundary
+// that writes the root-applied artifact — must not trust its input to be clean.
 func hostnamesFor(s *sidecar.Sidecar, d sidecar.EgressDest) []string {
 	if s == nil {
 		return nil
 	}
 	for _, ed := range s.EgressDestinations {
 		if ed.Addr == d.Addr && ed.Port == d.Port {
-			return ed.Hostnames
+			return validHostnames(ed.Hostnames)
 		}
 	}
 	return nil

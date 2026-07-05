@@ -275,10 +275,11 @@ func loadSidecar(path string) (*sidecar.Sidecar, error) {
 	if s.SchemaVersion == "" {
 		return nil, fmt.Errorf("%s: schema_version missing; not a csd sidecar", path)
 	}
-	// Within-1.x is accepted; cross-major is rejected. Cheap string
-	// compare on the leading "1." rather than dragging in semver.
-	if len(s.SchemaVersion) < 2 || s.SchemaVersion[0:2] != "1." {
-		return nil, fmt.Errorf("%s: unsupported schema_version %q (binary speaks 1.x only)", path, s.SchemaVersion)
+	// Same-major is accepted; a different (or unparseable) major is rejected up
+	// front rather than parsed leniently. The boundary lives in the sidecar
+	// package so this and the compose-lint-profile contract stay in lockstep.
+	if !sidecar.SchemaMajorCompatible(s.SchemaVersion) {
+		return nil, fmt.Errorf("%s: unsupported schema_version %q (binary speaks %d.x only)", path, s.SchemaVersion, sidecar.CurrentSchemaMajor())
 	}
 	return &s, nil
 }

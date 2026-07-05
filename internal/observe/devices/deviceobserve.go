@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sort"
-	"sync"
 	"syscall"
 	"time"
 
@@ -171,50 +169,10 @@ func ApplyDeviceFields(s *sidecar.Sidecar, dev *DeviceObservation) {
 // --paths for the symlink-resolved fpath), the same stderr-drain + ringbuf-loss
 // accounting; only the classifier differs (isDeviceOpen vs IsWrite/isRootfsWrite).
 func ObserveDevices(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*DeviceObservation, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceOpenGadget, "--paths", "--output", "json")
-	stdout, err := cmd.StdoutPipe()
+	obs, lost, err := ig.RunGadget(ctx, igBin, ig.TraceOpenGadget, []string{"--paths", "--output", "json"}, stderrSink,
+		func(stdout io.Reader) (*DeviceObservation, error) { return AggregateDevices(stdout, opts) })
 	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		if exit.IsIGMissing(err) {
-			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
-		}
-		return nil, fmt.Errorf("start %s: %w", igBin, err)
-	}
-
-	var (
-		wg   sync.WaitGroup
-		lost int
-	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
-	}()
-
-	obs, aggErr := AggregateDevices(stdout, opts)
-	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
-	if earlyErr {
-		// Undrained stdout on early error → ig blocks and never exits; kill it
-		// so the stderr drain + cmd.Wait() don't stall for the window (matches
-		// observe()).
-		_ = cmd.Process.Kill()
-	}
-	// Join the stderr drain BEFORE cmd.Wait() (StderrPipe contract): the read
-	// must finish before Wait closes the pipe, else a trailing `lost N` line
-	// can be dropped.
-	wg.Wait()
-	waitErr := cmd.Wait()
-	if earlyErr {
-		return nil, aggErr
-	}
-	if waitErr != nil && ctx.Err() == nil {
-		return nil, fmt.Errorf("ig exited: %w", waitErr)
+		return nil, err
 	}
 	if obs != nil {
 		obs.Dropped = lost

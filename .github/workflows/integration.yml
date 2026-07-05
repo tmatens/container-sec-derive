@@ -300,14 +300,13 @@ jobs:
       # Closed-loop "meets intent" test (scripts/closed_loop.sh). The only gate
       # that validates csd's OUTPUT, not just its pipeline: derive a cap profile,
       # re-run the workload under exactly that profile (must succeed = sufficient),
-      # then with all caps dropped (must fail = necessary). Hardware-free; the
-      # derive phase reuses trace_capabilities (attach already proven above).
-      # Skipped on the arm64 leg: closed-loop validates derived OUTPUT
-      # correctness (cap derive -> apply -> verify), which is arch-agnostic Go
-      # logic already covered on amd64. The arm64 leg only needs the per-gadget
-      # attach/parse proof from the synthetic gates above.
+      # then with all caps dropped (must fail = necessary). Hardware-free and
+      # self-contained — it builds and drives the synthetic exerciser (no
+      # reference image), so it runs on BOTH the amd64 and the native arm64 legs
+      # (#290). arm64 binaries ship, so their derived-output correctness must be
+      # validated too, not just the per-gadget attach/parse proof above; the logic
+      # is arch-agnostic Go, so the marginal cost is one exerciser build + window.
       - name: Closed-loop meets-intent test
-        if: matrix.runner != 'ubuntu-24.04-arm'
         env:
           DURATION: ${{ env.SMOKE_DURATION_CL }}
         run: |

@@ -30,6 +30,17 @@ import (
 // would fail anyway if the image isn't already local).
 const InspectDefaultTimeout = 10 * time.Second
 
+// MaxScanLineBytes caps the size of a single line the observers' bufio.Scanners
+// will buffer (the max token size). Every aggregator parses untrusted subprocess
+// output — ig gadget NDJSON, `docker history` layers — inside a root-equivalent
+// process, so a hostile or corrupt stream could otherwise pack one enormous line
+// and drive unbounded allocation. Bounding it at 1 MiB turns that into a
+// bufio.ErrTooLong, which each aggregator surfaces via scan.Err() as a hard
+// parse failure (the safe direction: refuse, don't silently truncate to a
+// smaller cap set). 64 KiB is the initial buffer; the scanner grows to this
+// ceiling only on demand, so the common small-line case pays nothing.
+const MaxScanLineBytes = 1024 * 1024
+
 // SortedKeys returns the keys of m in ascending order. Observers use it to
 // emit deterministic comm-sample / derived-cap / destination slices.
 func SortedKeys[V any](m map[string]V) []string {

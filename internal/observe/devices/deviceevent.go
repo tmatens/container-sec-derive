@@ -117,7 +117,7 @@ func AggregateDevices(r io.Reader, opts attrib.Opts) (*DeviceObservation, error)
 	count := 0
 	image := ""
 	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), 1024*1024)
+	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
 	for scan.Scan() {
 		line := scan.Bytes()
 		if len(bytes.TrimSpace(line)) == 0 {

@@ -11,6 +11,22 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Security
+
+- **Sanitize DNS-derived hostnames before they enter the egress enforcement
+  artifacts (#202).** The observed container fully controls the DNS query names it
+  emits, and DNS labels permit arbitrary octets on the wire; those names annotate
+  the `nftables` / k8s `NetworkPolicy` output as trailing `#` comments. A name
+  carrying a newline (or other control byte) could break out of the comment and
+  inject an attacker-chosen line into a ruleset the operator applies as root
+  (`nft -f`) — e.g. `ip daddr 0.0.0.0/0 accept`, defeating the default-deny
+  allowlist. csd now validates each name as a plain hostname (`[A-Za-z0-9_-]`
+  labels, RFC 1035 length limits) and drops any that fail, at both boundaries:
+  `aggregateDNS` (so csd-produced sidecars are clean) and the formatters (so an
+  externally-supplied `--fixture`/`--inspect-fixture` sidecar cannot inject
+  either). A dropped name costs only a comment annotation — the IP allowlist
+  itself is `trace_tcp`-derived and unaffected.
+
 ### Added
 
 - **In-stack (dependent-tier) drop-test derivation (`deps:` + `run.volumes_from` in

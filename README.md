@@ -32,11 +32,11 @@ Point `csd` at a running container, pick an observer, and after a recording wind
 
 Every observer emits to your choice of format (Compose, `docker run`, Kubernetes, OCI, JSON, …) and writes the same canonical JSON evidence sidecar.
 
-> **Status: v0.7.0 released**, actively developed. The current observer is `caps`/`fs`/`devices`/`privileged`/`capadd`/`egress`; the Docker-socket and host-network observers are still ahead (see [ROADMAP.md](ROADMAP.md)). Full per-release history in [CHANGELOG.md](CHANGELOG.md).
+> **Status: v0.7.0 released**, actively developed. The shipped observers are `caps`, `fs`, `devices`, `privileged`, `capadd`, and `egress`; the Docker-socket and host-network observers are still ahead (see [ROADMAP.md](ROADMAP.md)). Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Audience
 
-Anyone hardening container security on **Docker** (the tested runtime — the eBPF observation layer is runtime-agnostic, but image/mount inspection currently uses the Docker CLI, so Podman / containerd are untested; see PLAN.md "Runtime requirements"). Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed.
+Anyone hardening container security on **Docker** (the default + per-PR-tested runtime) or **rootful Podman** (via `--runtime podman`, validated by a scheduled smoke). The eBPF observation layer is runtime-agnostic; image/mount inspection uses the runtime CLI, so containerd/cri-o and rootless Podman are unsupported — see PLAN.md "Runtime requirements". Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed.
 
 ## Relationship to compose-lint
 
@@ -88,7 +88,7 @@ and the summary matrix.
 - **`ig`:** [Inspektor Gadget](https://www.inspektor-gadget.io/) at the pinned release for live mode. The `--fixture` path (replaying captured NDJSON) needs none of the above — most development works without a kernel.
 - **Build:** Go 1.26+.
 
-Not supported: kernels < 5.8, cgroup v1-only hosts, and non-Docker runtimes (Podman / containerd untested; rootless Podman explicitly out). See PLAN.md "Runtime requirements".
+Not supported: kernels < 5.8, cgroup v1-only hosts, containerd/cri-o, and rootless Podman. (Rootful Podman *is* supported via `--runtime podman`; see above.) See PLAN.md "Runtime requirements".
 
 ## Container image
 
@@ -190,6 +190,7 @@ Selecting a target:
 | `--image <ref>` | Select replicas by image; errors if more than one matches without `--all-matching`. |
 | `--all-matching` | Aggregate across every replica matching `--image` (union profile, with disagreement recorded on the sidecar). |
 | `--fixture <file>` | Replay pre-captured NDJSON instead of running `ig`. Skips kernel/BPF entirely. |
+| `--runtime <docker\|podman>` | Container runtime for image/mount inspection (default `docker`). `podman` targets **rootful** Podman; containerd/cri-o and rootless Podman are unsupported. |
 
 Window and output:
 
@@ -319,7 +320,7 @@ Each is surfaced at runtime via non-strippable caveats and confidence levels. Se
 - **Static analysis of images or compose files.** That's compose-lint's job.
 - **Build-time / Dockerfile analysis.** Different problem class.
 - **Kubernetes-first UX.** K8s output formatters are in scope; K8s-specific deployment isn't. The `--format k8s` / `k8s-networkpolicy` formatters exist so derived profiles can be applied to k8s workloads, not because the tool is intended to live as a DaemonSet.
-- **Kernels < 5.8, cgroupv1-only hosts, non-Docker runtimes (Podman / containerd untested; rootless Podman out).** See PLAN.md "Runtime requirements" for the full non-goal list.
+- **Kernels < 5.8, cgroupv1-only hosts, containerd/cri-o, and rootless Podman.** (Rootful Podman is supported via `--runtime podman`; Docker is the default.) See PLAN.md "Runtime requirements" for the full non-goal list.
 
 ## A note on the tool's own security posture
 

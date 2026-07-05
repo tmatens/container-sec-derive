@@ -205,7 +205,7 @@ func ProduceObservation(opts PipelineOpts, stderr io.Writer) (*sidecar.Sidecar, 
 	// --inspect-fixture or a resolvable-tag image name; this robust lookup
 	// (via the container's image ID) fills the gap for a live run. No-op when
 	// the cross-check already pinned.
-	PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
+	observe.PopulateImageDigest(s, opts.AggregateOpts.Container, opts.AggregateOpts.Image, opts.RuntimeBin, opts.Fixture != "", stderr)
 	ComputeConfidence(s)
 	return s, nil
 }

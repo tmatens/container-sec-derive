@@ -10,7 +10,7 @@ import (
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
 	"github.com/tmatens/container-sec-derive/internal/observe"
-	"github.com/tmatens/container-sec-derive/internal/observe/caps"
+	"github.com/tmatens/container-sec-derive/internal/observe/caps" // reuses caps.CapEvent + parse helpers (trace_capabilities); sanctioned event-reuse, see docs/organization.md
 )
 
 // The v0.5 dangerous-cap_add validator (ROADMAP §v0.5, CL-0011) is the inverse

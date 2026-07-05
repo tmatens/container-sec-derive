@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "Pinned mirror of compose-lint's curated capability profiles, consumed by the",
+    "v1 parity cross-check gate (PLAN.md 'v1 success criteria' > Correctness, issue #294).",
+    "",
+    "This is the INDEPENDENT signal called out in PLAN.md 'Validation methodology' and",
+    "weighted equal to bisection: a hand-curated reference maintained in a SEPARATE repo,",
+    "cross-checked against csd's own bisected ground truth so the two artifacts cannot",
+    "silently drift apart. The gate (internal/parity) requires the set difference between",
+    "each ground_truth.json and the curated_caps below to EXACTLY equal accepted_delta;",
+    "any drift on either side fails CI until the delta and its rationale are reconciled.",
+    "",
+    "Pinned-by-value, on purpose: compose-lint has not yet shipped its automated catalog",
+    "(compose-lint #360). Until it does, the curated set is the reference cap list from",
+    "compose-lint's ADR-017 and tests/fixtures/profiles/postgres.example.yml. When #360",
+    "publishes real derived profiles, re-point `source` at that artifact and refresh",
+    "curated_caps in the same commit that updates docs/known-deltas.md."
+  ],
+  "source": {
+    "repo": "https://github.com/tmatens/compose-lint",
+    "artifact": "curated postgres security profile (ADR-017 docs/adr/017-security-profile-catalog.md; reference cap set mirrored in tests/fixtures/profiles/postgres.example.yml)",
+    "pinned_as_of": "2026-07-05",
+    "kind": "reference-values"
+  },
+  "profiles": [
+    {
+      "image": "postgres",
+      "ground_truth": "testdata/postgres/ground_truth.json",
+      "curated_caps": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"],
+      "accepted_delta": {
+        "missing_from_bisected": ["CHOWN", "FOWNER"],
+        "extra_in_bisected": [],
+        "disposition": "documented",
+        "rationale": "docs/known-deltas.md — 'postgres:16 — bisected [DAC_OVERRIDE, SETGID, SETUID] vs. compose-lint curated [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID]': CHOWN and FOWNER are first-boot-only and are no-ops on this image's pre-owned data dir, so they never fault the kernel cap check the workload exercises."
+      }
+    }
+  ]
+}

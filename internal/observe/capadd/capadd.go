@@ -1,7 +1,6 @@
 package capadd
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -114,32 +113,29 @@ func AggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 	perReplicaName := map[string]string{}
 	count := 0
 	image := ""
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
-	for scan.Scan() {
-		line := scan.Bytes()
+	if err := observe.IterateNDJSON(r, func(line []byte) error {
 		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+			return nil
 		}
 		var ev caps.CapEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return nil, fmt.Errorf("parse trace_capabilities event: %w", err)
+			return fmt.Errorf("parse trace_capabilities event: %w", err)
 		}
 		// Target + init + active-set filtering applies to held AND denied events
 		// alike: an off-target, runc/init, or out-of-set check is noise either
 		// way. (This filtering used to short-circuit on !Capable before matching;
 		// it now matches first so a denied in-scope attempt can be retained — L10.)
 		if !caps.Match(opts, ev) {
-			continue
+			return nil
 		}
 		if caps.IsInitComm(ev.Proc.Comm) {
 			// runc/init bring-up noise: a dangerous cap used only during
 			// container setup is not the workload's requirement.
-			continue
+			return nil
 		}
 		cap := caps.NormalizeCap(ev.CapName)
 		if _, ok := activeSet[cap]; !ok {
-			continue
+			return nil
 		}
 		if !ev.Capable {
 			// Denied check: the cap was NOT held here. It does not count as
@@ -153,7 +149,7 @@ func AggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 				}
 				denied[cap][sc]++
 			}
-			continue
+			return nil
 		}
 		count++
 		if image == "" {
@@ -184,8 +180,8 @@ func AggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 		if ev.Runtime.ContainerName != "" {
 			perReplicaName[rid] = ev.Runtime.ContainerName
 		}
-	}
-	if err := scan.Err(); err != nil {
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 

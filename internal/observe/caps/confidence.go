@@ -3,6 +3,7 @@ package caps
 import (
 	"fmt"
 
+	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
 )
 
@@ -41,21 +42,7 @@ import (
 // Reporting deferred factors honestly (rather than silently grading
 // High) keeps the rubric trustworthy while the rest of the inputs land.
 func ComputeConfidence(s *sidecar.Sidecar) {
-	var factors []string
-	moderateHits := 0
-	forceLow := false
-
-	addLow := func(msg string) {
-		factors = append(factors, "low: "+msg)
-		forceLow = true
-	}
-	addModerate := func(msg string) {
-		factors = append(factors, "moderate: "+msg)
-		moderateHits++
-	}
-	addInfo := func(msg string) {
-		factors = append(factors, "ok: "+msg)
-	}
+	var c observe.ConfidenceBuilder
 
 	// Event count (post-init-filter).
 	eventCount := 0
@@ -64,34 +51,29 @@ func ComputeConfidence(s *sidecar.Sidecar) {
 	}
 	switch {
 	case eventCount < 100:
-		addLow(fmt.Sprintf("event count %d < 100", eventCount))
+		c.Low(fmt.Sprintf("event count %d < 100", eventCount))
 	case eventCount < 1000:
-		addModerate(fmt.Sprintf("event count %d in 100-999", eventCount))
+		c.Moderate(fmt.Sprintf("event count %d in 100-999", eventCount))
 	default:
-		addInfo(fmt.Sprintf("event count %d >= 1000", eventCount))
+		c.Info(fmt.Sprintf("event count %d >= 1000", eventCount))
 	}
 
 	// Drop rate. The runner is meant to abort at >=10%; if a sidecar with
 	// that rate still reaches us, surface it as low rather than trust it.
-	switch r := s.TraceHealth.DropRate; {
-	case r >= 0.01:
-		addLow(fmt.Sprintf("drop rate %.4f >= 1%%", r))
-	case r > 0:
-		addModerate(fmt.Sprintf("drop rate %.4f > 0 but < 1%%", r))
-	}
+	c.AddDropRateFactors(s.TraceHealth.DropRate)
 
 	// Replica disagreement under --all-matching.
 	switch n := len(s.Target.ReplicaCapDisagreement); {
 	case n > 1:
-		addLow(fmt.Sprintf("replica cap disagreement spans %d caps: %v", n, s.Target.ReplicaCapDisagreement))
+		c.Low(fmt.Sprintf("replica cap disagreement spans %d caps: %v", n, s.Target.ReplicaCapDisagreement))
 	case n == 1:
-		addModerate(fmt.Sprintf("replica cap disagreement: %v", s.Target.ReplicaCapDisagreement))
+		c.Moderate(fmt.Sprintf("replica cap disagreement: %v", s.Target.ReplicaCapDisagreement))
 	}
 
 	// Duration soft floor. DurationSeconds == 0 means "not measured"
 	// (e.g. fixture mode); only fire the floor when we actually know.
 	if s.DurationSeconds > 0 && s.DurationSeconds < 60 {
-		addLow(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
+		c.Low(fmt.Sprintf("observation duration %ds < 60s soft floor", s.DurationSeconds))
 	}
 
 	// Comm diversity (post-init-window). Skip when there were no events
@@ -99,11 +81,11 @@ func ComputeConfidence(s *sidecar.Sidecar) {
 	if eventCount > 0 {
 		switch d := s.Target.DistinctComms; {
 		case d < 2:
-			addLow(fmt.Sprintf("distinct comms = %d < 2", d))
+			c.Low(fmt.Sprintf("distinct comms = %d < 2", d))
 		case d == 2:
-			addModerate("distinct comms = 2")
+			c.Moderate("distinct comms = 2")
 		default:
-			addInfo(fmt.Sprintf("distinct comms = %d", d))
+			c.Info(fmt.Sprintf("distinct comms = %d", d))
 		}
 	}
 
@@ -111,9 +93,9 @@ func ComputeConfidence(s *sidecar.Sidecar) {
 	// the path is enough for the rubric -- the compose-lint contribution
 	// gate is the layer that re-checks readability.
 	if s.Workload != "" {
-		addInfo("workload script provided (" + s.Workload + ")")
+		c.Info("workload script provided (" + s.Workload + ")")
 	} else {
-		addModerate("no workload script provided (startup + idle only)")
+		c.Moderate("no workload script provided (startup + idle only)")
 	}
 
 	// Entrypoint cross-check (PLAN.md §Workload coverage items 1-2).
@@ -131,25 +113,25 @@ func ComputeConfidence(s *sidecar.Sidecar) {
 		// Attempted but failed (docker daemon down, image not present,
 		// etc.). Informational factor with the truncated reason so the
 		// reviewer can see why the check couldn't run.
-		addInfo("entrypoint cross-check unavailable: " + s.CrossCheckStatus)
+		c.Info("entrypoint cross-check unavailable: " + s.CrossCheckStatus)
 	case len(s.CoverageWarnings) > 0:
-		addLow(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
+		c.Low(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
 	case len(s.ExpectedCapsFromEntrypoint) == 0:
-		addInfo("entrypoint cross-check ran; no static signals matched")
+		c.Info("entrypoint cross-check ran; no static signals matched")
 	default:
-		addInfo(fmt.Sprintf("entrypoint cross-check clean (%d expected caps covered)", len(s.ExpectedCapsFromEntrypoint)))
+		c.Info(fmt.Sprintf("entrypoint cross-check clean (%d expected caps covered)", len(s.ExpectedCapsFromEntrypoint)))
 	}
 
 	// Deferred preconditions for High. These cap the achievable grade at
 	// moderate until later steps wire in the inputs.
-	factors = append(factors,
+	c.Factors = append(c.Factors,
 		"deferred: steady-state detection not yet implemented",
 		"deferred: target-exited-early signal not yet wired",
 	)
 
-	s.Confidence.Factors = factors
+	s.Confidence.Factors = c.Factors
 	switch {
-	case forceLow, moderateHits >= 2:
+	case c.ForceLow, c.ModerateHits >= 2:
 		s.Confidence.Level = sidecar.ConfidenceLow
 	default:
 		// Capped at moderate while deferred preconditions stand.

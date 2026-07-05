@@ -2,6 +2,7 @@ package observe
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -65,4 +66,110 @@ func TestLooksLikeWSL2(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConfidenceBuilder(t *testing.T) {
+	var c ConfidenceBuilder
+	c.Info("all good")
+	c.Moderate("one caveat")
+	c.Low("hard problem")
+	c.Moderate("another caveat")
+
+	want := []string{"ok: all good", "moderate: one caveat", "low: hard problem", "moderate: another caveat"}
+	if len(c.Factors) != len(want) {
+		t.Fatalf("Factors = %v, want %v", c.Factors, want)
+	}
+	for i := range want {
+		if c.Factors[i] != want[i] {
+			t.Errorf("Factors[%d] = %q, want %q", i, c.Factors[i], want[i])
+		}
+	}
+	if c.ModerateHits != 2 {
+		t.Errorf("ModerateHits = %d, want 2", c.ModerateHits)
+	}
+	if !c.ForceLow {
+		t.Error("ForceLow = false, want true after a Low")
+	}
+}
+
+func TestConfidenceBuilderAddDropRateFactors(t *testing.T) {
+	cases := []struct {
+		name     string
+		rate     float64
+		want     string // "" = no factor
+		forceLow bool
+		modHits  int
+	}{
+		{"zero adds nothing", 0, "", false, 0},
+		{"sub-1% is moderate", 0.005, "moderate: drop rate 0.0050 > 0 but < 1%", false, 1},
+		{"exactly 1% is low", 0.01, "low: drop rate 0.0100 >= 1%", true, 0},
+		{"above 1% is low", 0.2, "low: drop rate 0.2000 >= 1%", true, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var c ConfidenceBuilder
+			c.AddDropRateFactors(tc.rate)
+			if tc.want == "" {
+				if len(c.Factors) != 0 {
+					t.Fatalf("Factors = %v, want none", c.Factors)
+				}
+				return
+			}
+			if len(c.Factors) != 1 || c.Factors[0] != tc.want {
+				t.Fatalf("Factors = %v, want [%q]", c.Factors, tc.want)
+			}
+			if c.ForceLow != tc.forceLow || c.ModerateHits != tc.modHits {
+				t.Errorf("ForceLow=%v ModerateHits=%d, want %v/%d", c.ForceLow, c.ModerateHits, tc.forceLow, tc.modHits)
+			}
+		})
+	}
+}
+
+func TestIterateNDJSON(t *testing.T) {
+	t.Run("skips empty lines and passes the rest", func(t *testing.T) {
+		in := "a\n\nb\n\nc\n"
+		var got []string
+		if err := IterateNDJSON(strings.NewReader(in), func(line []byte) error {
+			got = append(got, string(line))
+			return nil
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if strings.Join(got, ",") != "a,b,c" {
+			t.Errorf("got %v, want [a b c]", got)
+		}
+	})
+
+	t.Run("returns fn error and stops", func(t *testing.T) {
+		sentinel := errors.New("boom")
+		count := 0
+		err := IterateNDJSON(strings.NewReader("a\nb\nc\n"), func(line []byte) error {
+			count++
+			if string(line) == "b" {
+				return sentinel
+			}
+			return nil
+		})
+		if !errors.Is(err, sentinel) {
+			t.Fatalf("err = %v, want sentinel", err)
+		}
+		if count != 2 {
+			t.Errorf("fn called %d times, want 2 (stopped at b)", count)
+		}
+	})
+
+	t.Run("over-long line surfaces as a scanner error", func(t *testing.T) {
+		huge := strings.Repeat("x", MaxScanLineBytes+1)
+		called := false
+		err := IterateNDJSON(strings.NewReader(huge+"\n"), func(line []byte) error {
+			called = true
+			return nil
+		})
+		if err == nil {
+			t.Fatal("want a scanner error for an over-long line, got nil")
+		}
+		if called {
+			t.Error("fn should not be called for a line exceeding MaxScanLineBytes")
+		}
+	})
 }

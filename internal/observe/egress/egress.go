@@ -1,7 +1,6 @@
 package egress
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -67,26 +66,23 @@ func aggregateEgress(r io.Reader, opts attrib.Opts) (*egressObservation, error) 
 	stats := map[string]*egressStats{}
 	count := 0
 	image := ""
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
-	for scan.Scan() {
-		line := scan.Bytes()
+	if err := observe.IterateNDJSON(r, func(line []byte) error {
 		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+			return nil
 		}
 		var ev tcpEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return nil, fmt.Errorf("parse trace_tcp event: %w", err)
+			return fmt.Errorf("parse trace_tcp event: %w", err)
 		}
 		if !opts.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
-			continue
+			return nil
 		}
 		if !ev.IsConnect() {
-			continue
+			return nil
 		}
 		if ev.Dst.Addr == "" || ev.Dst.Port == 0 {
 			// Incomplete endpoint — nothing actionable for an allowlist.
-			continue
+			return nil
 		}
 		dest := sidecar.EgressDest{Addr: ev.Dst.Addr, Port: ev.Dst.Port, Version: ev.Dst.Version}
 		key := dest.String()
@@ -116,8 +112,8 @@ func aggregateEgress(r io.Reader, opts attrib.Opts) (*egressObservation, error) 
 		if comm := strings.TrimSpace(ev.Proc.Comm); comm != "" {
 			st.commSamples[comm] = struct{}{}
 		}
-	}
-	if err := scan.Err(); err != nil {
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 

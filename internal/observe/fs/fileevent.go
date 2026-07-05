@@ -1,7 +1,6 @@
 package fs
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -191,22 +190,19 @@ func aggregateWrites(r io.Reader, opts attrib.Opts) (*writeObservation, error) {
 	stats := map[string]*writeStats{}
 	count := 0
 	image := ""
-	scan := bufio.NewScanner(r)
-	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
-	for scan.Scan() {
-		line := scan.Bytes()
+	if err := observe.IterateNDJSON(r, func(line []byte) error {
 		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+			return nil
 		}
 		var ev FileEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return nil, fmt.Errorf("parse trace_open event: %w", err)
+			return fmt.Errorf("parse trace_open event: %w", err)
 		}
 		if !opts.MatchesRuntime(ev.Runtime.ContainerID, ev.Runtime.ContainerName, ev.Runtime.ContainerImage) {
-			continue
+			return nil
 		}
 		if !ev.IsWrite() {
-			continue
+			return nil
 		}
 		p := ev.Path()
 		if p == "" || !isRootfsWrite(p) {
@@ -214,7 +210,7 @@ func aggregateWrites(r io.Reader, opts attrib.Opts) (*writeObservation, error) {
 			// aren't rootfs writes the read_only/tmpfs recommendation can act
 			// on (#86). Filtered here so the whole pipeline (writable_paths,
 			// recommendation, event count) sees only actionable writes.
-			continue
+			return nil
 		}
 		count++
 		if image == "" {
@@ -242,8 +238,8 @@ func aggregateWrites(r io.Reader, opts attrib.Opts) (*writeObservation, error) {
 		if comm := strings.TrimSpace(ev.Proc.Comm); comm != "" {
 			st.commSamples[comm] = struct{}{}
 		}
-	}
-	if err := scan.Err(); err != nil {
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 

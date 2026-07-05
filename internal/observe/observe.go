@@ -11,6 +11,7 @@
 package observe
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -173,4 +174,79 @@ func WorseConfidence(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// ConfidenceBuilder accumulates confidence-rubric factors with the shared
+// "low:"/"moderate:"/"ok:" prefixes and tracks the force-low + moderate-hit
+// state each observer's confidence function feeds into its final grade. Every
+// observer previously defined the same addLow/addModerate/addInfo closures and
+// the same forceLow/moderateHits locals inline; centralizing them keeps the
+// factor prefixes and the "two moderates force low" rule from drifting across
+// the five observers (PLAN.md §Confidence scoring).
+//
+// The zero value is ready to use. Callers append their own factors via Low /
+// Moderate / Info, then read Factors and grade with ForceLow / ModerateHits.
+type ConfidenceBuilder struct {
+	Factors      []string
+	ModerateHits int
+	ForceLow     bool
+}
+
+// Low appends a "low:" factor and forces the grade to low.
+func (c *ConfidenceBuilder) Low(msg string) {
+	c.Factors = append(c.Factors, "low: "+msg)
+	c.ForceLow = true
+}
+
+// Moderate appends a "moderate:" factor and counts one moderate hit (two of
+// which force the grade to low).
+func (c *ConfidenceBuilder) Moderate(msg string) {
+	c.Factors = append(c.Factors, "moderate: "+msg)
+	c.ModerateHits++
+}
+
+// Info appends an "ok:" factor, which exerts no grade pressure.
+func (c *ConfidenceBuilder) Info(msg string) {
+	c.Factors = append(c.Factors, "ok: "+msg)
+}
+
+// AddDropRateFactors applies the shared drop-rate rubric — >=1% is low, >0 but
+// <1% is moderate, exactly 0 contributes nothing — which was duplicated
+// verbatim in all five observers' confidence functions. The runner is meant to
+// abort at the >=10% threshold; a sidecar that still reaches grading with a
+// >=1% rate is downgraded rather than trusted.
+func (c *ConfidenceBuilder) AddDropRateFactors(dropRate float64) {
+	switch {
+	case dropRate >= 0.01:
+		c.Low(fmt.Sprintf("drop rate %.4f >= 1%%", dropRate))
+	case dropRate > 0:
+		c.Moderate(fmt.Sprintf("drop rate %.4f > 0 but < 1%%", dropRate))
+	}
+}
+
+// IterateNDJSON scans r line by line with the shared bounded buffer (64 KiB
+// initial, MaxScanLineBytes ceiling), skips empty lines, and calls fn for each
+// non-empty line. It returns the first error fn returns (aborting the scan) or
+// any scanner error — notably bufio.ErrTooLong when a single line exceeds
+// MaxScanLineBytes.
+//
+// Every aggregator parses untrusted subprocess NDJSON inside a root-equivalent
+// process and must surface scan.Err() as a hard failure (the safe direction:
+// refuse, don't silently truncate to a smaller cap set). Centralizing the
+// scanner setup + loop + terminal scan.Err() here keeps that correctness guard
+// from drifting across the five copies (#280). fn keeps its own per-observer
+// state via closure and returns an error to hard-fail on a malformed line.
+func IterateNDJSON(r io.Reader, fn func(line []byte) error) error {
+	scan := bufio.NewScanner(r)
+	scan.Buffer(make([]byte, 64*1024), MaxScanLineBytes)
+	for scan.Scan() {
+		line := scan.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		if err := fn(line); err != nil {
+			return err
+		}
+	}
+	return scan.Err()
 }

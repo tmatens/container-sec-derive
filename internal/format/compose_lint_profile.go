@@ -160,8 +160,8 @@ func CheckComposeLintContract(s *sidecar.Sidecar) []string {
 	switch {
 	case s.SchemaVersion == "":
 		v = append(v, "schema_version missing")
-	case !strings.HasPrefix(s.SchemaVersion, "1."):
-		v = append(v, fmt.Sprintf("schema_version %q outside current major (1.x)", s.SchemaVersion))
+	case !sidecar.SchemaMajorCompatible(s.SchemaVersion):
+		v = append(v, fmt.Sprintf("schema_version %q outside current major (%d.x)", s.SchemaVersion, sidecar.CurrentSchemaMajor()))
 	}
 	if s.ImageDigest == "" {
 		v = append(v, "image_digest missing (profile cannot be pinned to a digest)")

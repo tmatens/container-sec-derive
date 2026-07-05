@@ -8,11 +8,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -213,61 +211,18 @@ func ProduceObservation(opts PipelineOpts, stderr io.Writer) (*sidecar.Sidecar, 
 	return s, nil
 }
 
-// observe spawns `ig run trace_capabilities --output json` and aggregates
-// events for the lifetime of ctx. ig's stderr is tee'd through
-// parseIGStderr so the ringbuf-loss counter (v0.51.0 emits these as
-// stderr warnings, not typed stdout events) lands on the sidecar.
+// Observe spawns `ig run trace_capabilities --output json` through the
+// internal/ig signal seam and aggregates events for the lifetime of ctx.
+// RunGadget drains ig's stderr so the ringbuf-loss counter (v0.51.0 emits these
+// as stderr warnings, not typed stdout events) lands on the sidecar.
 func Observe(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*sidecar.Sidecar, error) {
-	cmd := exec.CommandContext(ctx, igBin, "run", ig.TraceCapabilitiesGadget, "--output", "json")
-	stdout, err := cmd.StdoutPipe()
+	s, lost, err := ig.RunGadget(ctx, igBin, ig.TraceCapabilitiesGadget, []string{"--output", "json"}, stderrSink,
+		func(stdout io.Reader) (*sidecar.Sidecar, error) { return Aggregate(stdout, opts) })
 	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
+		return nil, err
 	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
-	}
-	if err := cmd.Start(); err != nil {
-		if exit.IsIGMissing(err) {
-			return nil, exit.WrapCoded(exit.IGMissing, fmt.Errorf("ig binary %q not available: %w", igBin, err))
-		}
-		return nil, fmt.Errorf("start %s: %w", igBin, err)
-	}
-
-	var (
-		wg   sync.WaitGroup
-		lost int
-	)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		lost = ig.ParseIGStderr(stderrPipe, stderrSink)
-	}()
-
-	s, aggErr := Aggregate(stdout, opts)
-	earlyErr := aggErr != nil && !errors.Is(aggErr, io.EOF)
-	if earlyErr {
-		// Aggregation bailed early (oversized untrusted stdout line, or a
-		// target-selection ambiguity) with ig's stdout pipe undrained; ig will
-		// block on the full pipe and never exit, so kill it now rather than let
-		// the stderr drain and cmd.Wait() below stall for the rest of the
-		// --duration window (a fast exit.TargetAmbiguous is the intended path).
-		_ = cmd.Process.Kill()
-	}
-	// Join the stderr-drain goroutine BEFORE cmd.Wait(): Wait closes the pipe,
-	// and the documented StderrPipe contract requires the read to finish first,
-	// else an in-flight Read can drop a trailing `lost N` line. With the join
-	// here, the lost-counter read below needs no extra synchronisation.
-	wg.Wait()
-	waitErr := cmd.Wait()
 	if s != nil {
 		s.TraceHealth.EventsDropped = lost
-	}
-	if earlyErr {
-		return nil, aggErr
-	}
-	if waitErr != nil && ctx.Err() == nil {
-		return nil, fmt.Errorf("ig exited: %w", waitErr)
 	}
 	return s, nil
 }

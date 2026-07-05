@@ -209,7 +209,7 @@ func locateComposeService(lines []string, service string) (composeServiceLoc, er
 		}
 	}
 	if nameAt < 0 {
-		return composeServiceLoc{}, fmt.Errorf("service %q not found under services:", service)
+		return composeServiceLoc{}, fmt.Errorf("service %q not found under the services: mapping", service)
 	}
 
 	nameIndent := leadingSpaces(lines[nameAt])

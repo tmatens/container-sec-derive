@@ -36,6 +36,11 @@
 #      the cap gated it (a setuid-root helper like netdata's apps.plugin makes the
 #      syscall as root regardless). "Collects data" must mean NON-ZERO, not merely
 #      non-null: a denied collector reports 0 (see the netdata correctness check).
+#      And the check must exercise real FUNCTION, never a /health|/healthz|liveness
+#      endpoint — those stay green while the process is up (homepage's
+#      /api/healthcheck returns 200 while / 500s on an unwritable config). A
+#      readiness endpoint is fine only as a wait-gate before a real
+#      request/uid/data assertion, not as the assertion itself.
 #   2. If it genuinely can't be exercised in the observation window (workload
 #      coverage), that's a CRITERIA-DOC caveat + low confidence, NOT an untested
 #      entry laundered into the derived minimum.

@@ -4,6 +4,69 @@
 
 Given a running container, observe every Linux capability check it makes, and emit the minimum `cap_drop` / `cap_add` configuration that would have satisfied the observed behavior. Output is reviewable, format-flexible, and confidence-tagged.
 
+## Positioning: audience, moat, and the seccomp gap
+
+The evidence sidecar, cosign/OpenVEX signing, confidence rubric, and the
+`compose-lint-profile` acceptance contract are compliance-grade features, so it is
+fair to ask who they are *for* — most compliance-grade hardening happens on
+Kubernetes, and the `csd` surface is Docker/Compose-first. This section states the
+bet deliberately rather than leaving the mismatch for an evaluator to trip over.
+
+**Target persona (the ICP).** The primary user is the **Docker/Compose single-node
+operator** — the self-hoster / homelab maintainer and the small-team ops engineer
+who runs services with `docker compose up`, not a cluster. That is who the field
+work already reflects (netdata, postgres, homepage, immich, forgejo,
+home_assistant, mariadb — all single-node Compose services), who the sibling
+[compose-lint](https://github.com/tmatens/compose-lint) already serves, and who is
+*least* served by the incumbents below. The auditable-evidence machinery is not
+aimed at a compliance department; it exists so that a careful operator (or a PR
+reviewer accepting a derived profile into the compose-lint catalog) can trust a
+recommendation instead of eyeballing it. Evidence discipline is a
+**contribution-and-review** feature here, not an audit-department one.
+
+**Why the Docker-first bet, given the k8s majority.** The Kubernetes
+runtime-hardening surface is already crowded — Security Profiles Operator,
+Kubescape `kapprofiler`, KubeArmor, Cilium/Hubble all live there (see
+[docs/comparison.md](docs/comparison.md)). The Docker/Compose single-node surface,
+where the same operator hardens by trial-and-error with no observe→emit tool that
+speaks Compose, is the **underserved** one. `csd` bets on that gap on purpose. The
+`k8s` / `oci` / `k8s-networkpolicy` formatters are the **bridge for the crossover
+case** (a derived profile that must also apply to a k8s workload), not a claim to be
+a Kubernetes-first tool — that is an explicit non-goal (see README "Out of scope").
+The reversal, if the bet is wrong, is to promote the k8s/OCI formatters to
+first-class; the architecture already supports it, so this is a positioning choice,
+not an architectural lock.
+
+**Not a one-stop hardening tool.** `csd` deliberately does **not** emit a seccomp
+profile — the single most common runtime-derived artifact, and the one every named
+peer leads with (IG `advise`, SPO, SlimToolkit, oci-seccomp-bpf-hook). That is the
+`security_opt` blind spot ([docs/LIMITATIONS.md](docs/LIMITATIONS.md)): no built-in
+IG denial gadget produces it at the pin, and integrating IG's `advise
+seccomp-profile` behind a `--observe seccomp` passthrough is a ROADMAP item, not a
+v1 promise. So the honest framing is **pair `csd` with a seccomp generator**, not
+"`csd` replaces your hardening toolchain." The "unique combination" pitch is about
+the *set of dimensions `csd` covers in one Compose-native CLI*, not about being
+complete.
+
+**Durable moat vs. commoditizable core.** `csd` wraps IG, and the ROADMAP itself
+proposes contributing an upstream `advise capabilities` gadget; Kubescape's
+`kapprofiler` already records capabilities on the same engine. So the *technical*
+core — "multi-dimensional runtime observation" — is **commoditizable**: an upstream
+dependency could absorb it. The parts intended to be **durable** are the ones an
+observation engine does not give you for free:
+
+- the **compose-lint derive↔catalog feedback loop** (derive a profile, contribute
+  it to a curated static catalog, close the loop back to instant offline guidance —
+  no peer replicates this pairing);
+- the **evidence + acceptance contract** (signed sidecar, confidence rubric,
+  `compose-lint-profile` gate) as a *contribution-trust* mechanism;
+- the **Compose-native UX** for the single-node operator above;
+- the sharply-framed **`privileged: true` → `cap_add` + `devices` decomposition**.
+
+Roadmap effort concentrates on that defensible surface; raw observation plumbing is
+treated as replaceable, and depending on IG for it is an accepted, bounded risk (see
+Decisions item 7).
+
 ## v1 user-facing UX
 
 **One-shot CLI**, not a long-running daemon. Daemon shape is a v2 question; one-shot proves the concept with half the surface area.

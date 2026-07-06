@@ -139,16 +139,26 @@ formatter, not the product's home.)
 
 ## Adjacent, different shape: detect-and-enforce platforms
 
-These observe behaviour and build least-privilege *enforcement*, but they are
-runtime daemons/operators, not emit-and-exit generators — and `csd` puts
-enforcement explicitly out of scope:
+These observe behaviour and build least-privilege *enforcement*, and they are
+runtime daemons/operators rather than emit-and-exit generators — `csd` puts
+enforcement explicitly out of scope. But "they enforce, we generate" **understates
+the overlap** for KubeArmor specifically, so be precise about the real delta:
 
-- **KubeArmor (AccuKnox)** — least-permissive inline enforcement from observed behaviour.
+- **KubeArmor (AccuKnox)** — inline least-permissive enforcement, **and** a
+  *discovery mode* that auto-generates least-privilege policy (capabilities, file,
+  network, process) from observed behaviour — the same observe→emit loop `csd` runs.
+  The honest distinction is **not** "KubeArmor can't generate config." It's **output
+  shape and coupling**: KubeArmor emits enforcement-coupled Kubernetes CRDs tied to
+  its own engine, while `csd` emits vendor-neutral Compose / `docker run` / OCI that
+  you apply with any runtime. Same loop, different artifact and different lock-in.
 - **Tetragon (Cilium / Isovalent)** — observe normal behaviour → least-privilege TracingPolicies.
 - **Falco**, **Tracee (Aqua)** — eBPF detection (not config generation).
 - **Sysdig Secure / Aqua / Prisma Cloud / Wiz** — commercial CNAPPs with runtime least-privilege and drift recommendations.
 
-`csd` "generates, you apply"; this tier "watches and blocks." Different jobs.
+So against KubeArmor the line is "vendor-neutral config you apply yourself vs.
+enforcement-coupled CRDs bound to a runtime engine," not "generates vs. doesn't."
+Against the pure detection tools (Falco/Tracee) the "generates vs. only detects"
+distinction does hold.
 
 ## The static alternative (and csd's own sibling)
 
@@ -170,7 +180,7 @@ none of the peers above replicate.
 | SlimToolkit | ✅ | ✅ | ✅ | ✅ | seccomp, apparmor (+ image minify) | CLI (Docker) |
 | oci-seccomp-bpf-hook | ✅ | ✅ | ✅ | ✅ | seccomp | OCI hook (Podman) |
 | Cilium/Hubble, Otterize, Sysdig (net) | ✅ | ✅ | ✅ | ✅ (k8s) | network policy | cluster |
-| KubeArmor / Tetragon / Falco | ✅ | ✅ | enforcement, not config | ✅ | varies | daemon/operator |
+| KubeArmor / Tetragon / Falco | ✅ | ✅ | KubeArmor: ✅ (enforcement-coupled CRDs); Falco/Tracee: detection only | ✅ | varies | daemon/operator |
 | aa-genprof / audit2allow / udica | ✅ | ❌ (audit log) | ✅ | host/container | apparmor / selinux | host CLI |
 | compose-lint / Trivy / Checkov | ❌ (static) | ❌ | ✅ (from manifest) | ✅ | varies | CI / CLI |
 
@@ -182,6 +192,13 @@ none of the peers above replicate.
 - **The differentiation is real but specific:** the *combination* of dimensions in
   one Docker-first CLI, the `privileged: true` decomposition framing, Compose-native
   output, the compose-lint loop, and the evidence/signing discipline.
+- **Know which half is the moat.** The raw "multi-dimensional runtime observation"
+  is **commoditizable** — `csd` gets it from IG, `kapprofiler` already records caps
+  on the same engine, and an upstream `advise capabilities` gadget could absorb it.
+  The **durable** half is what an observation engine doesn't hand you: the
+  compose-lint derive↔catalog feedback loop, the evidence/acceptance contract as a
+  contribution-trust mechanism, the Compose-native UX, and the `privileged:`
+  decomposition framing. See [PLAN.md "Positioning"](../PLAN.md#positioning-audience-moat-and-the-seccomp-gap).
 - **The most visible gap** is that `csd` does not emit a **seccomp** profile — the
   single most common runtime-derived artifact — by design (the `security_opt` blind
   spot, [LIMITATIONS.md](LIMITATIONS.md)). A user who primarily wants seccomp should

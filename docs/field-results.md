@@ -3,8 +3,9 @@
 Durable record of `container-sec-derive` runs against real, digest-pinned
 container images on a live BPF host. Each entry is reproducible from the image
 reference alone. These are the worked examples behind the capability/hardening
-narrative (issue #222) and the first candidates for the compose-lint profile
-catalog.
+narrative — written up for a general audience in
+[articles/finding-minimum-capabilities.md](articles/finding-minimum-capabilities.md)
+— and the first candidates for the compose-lint profile catalog.
 
 Two derivation signals are used, and the netdata case shows why **both** are
 needed:

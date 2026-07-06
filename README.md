@@ -301,6 +301,7 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 - [docs/known-deltas.md](docs/known-deltas.md) — every documented difference between observed cap sets and bisected ground truth, with cause and disposition.
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — the structural limits on what csd can derive (dynamic-only floor, the `security_opt` blind spot, inverted-risk derivations, signal-blocked dimensions) and why.
 - [docs/wsl2.md](docs/wsl2.md) — WSL2 + Docker Desktop smoke matrix, kernel/BTF caveats, gap-reporting flow.
+- [docs/articles/finding-minimum-capabilities.md](docs/articles/finding-minimum-capabilities.md) — a teaching-oriented, tool-agnostic walk-through of Linux capabilities in containers and how to find the real minimum (observe + bisect), using the netdata / postgres / homepage field results as worked examples.
 
 ## Limitations
 

@@ -97,6 +97,61 @@ func validateComposeFormatOpts(formatMode string, composeIn, composeService *str
 	return nil
 }
 
+// renderObserverFormat runs the shared six-format compose-security dispatch (plus
+// json) for one observer's Formatter, so the five observer paths (caps/fs/devices/
+// privileged/capadd) no longer each carry a near-identical switch that could
+// drift. obsLabel qualifies the error message the way the old per-observer copies
+// did -- "" for caps ("write compose"), "fs"/"device"/"privileged"/"capadd" for
+// the others ("write fs compose") -- keeping surfaced errors byte-identical.
+// compose-patch reads --compose-in here (usage error on read failure) and, like
+// compose-lint-profile, wraps its write error as EX_USAGE; the caller has already
+// validated the flag combination via validateComposeFormatOpts. Both are
+// usage-class: a compose-patch failure means the user pointed at a file that
+// can't host the patch (service-not-found / services-block-missing), and a
+// compose-lint-profile failure means the artifact didn't clear the contribution
+// contract -- surfacing EX_USAGE lets CI catch it rather than accept empty stdout.
+func renderObserverFormat(stdout io.Writer, formatMode string, f format.Formatter, s *sidecar.Sidecar, obsLabel, composeIn, composeService string, allowExploratory bool) error {
+	label := obsLabel
+	if label != "" {
+		label += " "
+	}
+	switch formatMode {
+	case FormatCompose:
+		if err := f.Compose(stdout, s); err != nil {
+			return fmt.Errorf("write %scompose: %w", label, err)
+		}
+	case FormatJSON:
+		if err := format.WriteJSON(stdout, s); err != nil {
+			return fmt.Errorf("write json: %w", err)
+		}
+	case FormatDockerRun:
+		if err := f.DockerRun(stdout, s); err != nil {
+			return fmt.Errorf("write %sdocker-run: %w", label, err)
+		}
+	case FormatK8s:
+		if err := f.K8s(stdout, s); err != nil {
+			return fmt.Errorf("write %sk8s: %w", label, err)
+		}
+	case FormatOCI:
+		if err := f.OCI(stdout, s); err != nil {
+			return fmt.Errorf("write %soci: %w", label, err)
+		}
+	case FormatComposePatch:
+		raw, readErr := os.ReadFile(composeIn)
+		if readErr != nil {
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", composeIn, readErr))
+		}
+		if err := f.ComposePatch(stdout, s, raw, composeIn, composeService); err != nil {
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("write %scompose-patch: %w", label, err))
+		}
+	case FormatComposeLintEntry:
+		if err := f.ComposeLintProfile(stdout, s, allowExploratory); err != nil {
+			return exit.WrapCoded(exit.Usage, fmt.Errorf("write %scompose-lint-profile: %w", label, err))
+		}
+	}
+	return nil
+}
+
 func Run(args []string, stdout, stderr io.Writer) error {
 	// Subcommand dispatch. v0.1 has two explicit subcommands (`observe`,
 	// `verify`); the no-arg / flags-only form (`csd --container x`) is
@@ -312,39 +367,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		switch *formatMode {
-		case FormatCompose:
-			if err := format.WriteFSCompose(stdout, *s.FSRecommendation); err != nil {
-				return fmt.Errorf("write fs compose: %w", err)
-			}
-		case FormatJSON:
-			if err := format.WriteJSON(stdout, s); err != nil {
-				return fmt.Errorf("write json: %w", err)
-			}
-		case FormatDockerRun:
-			if err := format.WriteFSDockerRun(stdout, *s.FSRecommendation); err != nil {
-				return fmt.Errorf("write fs docker-run: %w", err)
-			}
-		case FormatK8s:
-			if err := format.WriteFSK8s(stdout, *s.FSRecommendation); err != nil {
-				return fmt.Errorf("write fs k8s: %w", err)
-			}
-		case FormatOCI:
-			if err := format.WriteFSOCI(stdout, *s.FSRecommendation); err != nil {
-				return fmt.Errorf("write fs oci: %w", err)
-			}
-		case FormatComposePatch:
-			raw, readErr := os.ReadFile(*composeIn)
-			if readErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
-			}
-			if err := format.WriteFSComposePatch(stdout, *s.FSRecommendation, raw, *composeIn, *composeService); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write fs compose-patch: %w", err))
-			}
-		case FormatComposeLintEntry:
-			if err := format.WriteFSComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write fs compose-lint-profile: %w", err))
-			}
+		if err := renderObserverFormat(stdout, *formatMode, format.FSFormatter, s, "fs", *composeIn, *composeService, *allowExploratory); err != nil {
+			return err
 		}
 		if *outPath != "" {
 			if err := writeSidecar(s, *outPath); err != nil {
@@ -392,39 +416,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		switch *formatMode {
-		case FormatCompose:
-			if err := format.WriteDeviceCompose(stdout, *s.DeviceRecommendation); err != nil {
-				return fmt.Errorf("write device compose: %w", err)
-			}
-		case FormatJSON:
-			if err := format.WriteJSON(stdout, s); err != nil {
-				return fmt.Errorf("write json: %w", err)
-			}
-		case FormatDockerRun:
-			if err := format.WriteDeviceDockerRun(stdout, *s.DeviceRecommendation); err != nil {
-				return fmt.Errorf("write device docker-run: %w", err)
-			}
-		case FormatK8s:
-			if err := format.WriteDeviceK8s(stdout, *s.DeviceRecommendation); err != nil {
-				return fmt.Errorf("write device k8s: %w", err)
-			}
-		case FormatOCI:
-			if err := format.WriteDeviceOCI(stdout, *s.DeviceRecommendation); err != nil {
-				return fmt.Errorf("write device oci: %w", err)
-			}
-		case FormatComposePatch:
-			raw, readErr := os.ReadFile(*composeIn)
-			if readErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
-			}
-			if err := format.WriteDeviceComposePatch(stdout, *s.DeviceRecommendation, raw, *composeIn, *composeService); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write device compose-patch: %w", err))
-			}
-		case FormatComposeLintEntry:
-			if err := format.WriteDeviceComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write device compose-lint-profile: %w", err))
-			}
+		if err := renderObserverFormat(stdout, *formatMode, format.DeviceFormatter, s, "device", *composeIn, *composeService, *allowExploratory); err != nil {
+			return err
 		}
 		if *outPath != "" {
 			if err := writeSidecar(s, *outPath); err != nil {
@@ -475,39 +468,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		switch *formatMode {
-		case FormatCompose:
-			if err := format.WritePrivilegedCompose(stdout, s); err != nil {
-				return fmt.Errorf("write privileged compose: %w", err)
-			}
-		case FormatJSON:
-			if err := format.WriteJSON(stdout, s); err != nil {
-				return fmt.Errorf("write json: %w", err)
-			}
-		case FormatDockerRun:
-			if err := format.WritePrivilegedDockerRun(stdout, s); err != nil {
-				return fmt.Errorf("write privileged docker-run: %w", err)
-			}
-		case FormatK8s:
-			if err := format.WritePrivilegedK8s(stdout, s); err != nil {
-				return fmt.Errorf("write privileged k8s: %w", err)
-			}
-		case FormatOCI:
-			if err := format.WritePrivilegedOCI(stdout, s); err != nil {
-				return fmt.Errorf("write privileged oci: %w", err)
-			}
-		case FormatComposePatch:
-			raw, readErr := os.ReadFile(*composeIn)
-			if readErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
-			}
-			if err := format.WritePrivilegedComposePatch(stdout, s, raw, *composeIn, *composeService); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write privileged compose-patch: %w", err))
-			}
-		case FormatComposeLintEntry:
-			if err := format.WritePrivilegedComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write privileged compose-lint-profile: %w", err))
-			}
+		if err := renderObserverFormat(stdout, *formatMode, format.PrivilegedFormatter, s, "privileged", *composeIn, *composeService, *allowExploratory); err != nil {
+			return err
 		}
 		if *outPath != "" {
 			if err := writeSidecar(s, *outPath); err != nil {
@@ -564,39 +526,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		switch *formatMode {
-		case FormatCompose:
-			if err := format.WriteCapaddCompose(stdout, s.CapaddValidation); err != nil {
-				return fmt.Errorf("write capadd compose: %w", err)
-			}
-		case FormatJSON:
-			if err := format.WriteJSON(stdout, s); err != nil {
-				return fmt.Errorf("write json: %w", err)
-			}
-		case FormatDockerRun:
-			if err := format.WriteCapaddDockerRun(stdout, s.CapaddValidation); err != nil {
-				return fmt.Errorf("write capadd docker-run: %w", err)
-			}
-		case FormatK8s:
-			if err := format.WriteCapaddK8s(stdout, s.CapaddValidation); err != nil {
-				return fmt.Errorf("write capadd k8s: %w", err)
-			}
-		case FormatOCI:
-			if err := format.WriteCapaddOCI(stdout, s.CapaddValidation); err != nil {
-				return fmt.Errorf("write capadd oci: %w", err)
-			}
-		case FormatComposePatch:
-			raw, readErr := os.ReadFile(*composeIn)
-			if readErr != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
-			}
-			if err := format.WriteCapaddComposePatch(stdout, s.CapaddValidation, raw, *composeIn, *composeService); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write capadd compose-patch: %w", err))
-			}
-		case FormatComposeLintEntry:
-			if err := format.WriteCapaddComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-				return exit.WrapCoded(exit.Usage, fmt.Errorf("write capadd compose-lint-profile: %w", err))
-			}
+		if err := renderObserverFormat(stdout, *formatMode, format.CapaddFormatter, s, "capadd", *composeIn, *composeService, *allowExploratory); err != nil {
+			return err
 		}
 		if *outPath != "" {
 			if err := writeSidecar(s, *outPath); err != nil {
@@ -640,46 +571,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	switch *formatMode {
-	case FormatCompose:
-		if err := format.WriteCompose(stdout, s); err != nil {
-			return fmt.Errorf("write compose: %w", err)
-		}
-	case FormatComposePatch:
-		raw, readErr := os.ReadFile(*composeIn)
-		if readErr != nil {
-			return exit.WrapCoded(exit.Usage, fmt.Errorf("read --compose-in %q: %w", *composeIn, readErr))
-		}
-		if err := format.WriteComposePatch(stdout, s, raw, *composeIn, *composeService); err != nil {
-			// Service-not-found / services-block-missing are usage
-			// errors: the user pointed at a file that can't host the
-			// patch, not a runtime failure of csd.
-			return exit.WrapCoded(exit.Usage, fmt.Errorf("write compose-patch: %w", err))
-		}
-	case FormatDockerRun:
-		if err := format.WriteDockerRun(stdout, s); err != nil {
-			return fmt.Errorf("write docker-run: %w", err)
-		}
-	case FormatJSON:
-		if err := format.WriteJSON(stdout, s); err != nil {
-			return fmt.Errorf("write json: %w", err)
-		}
-	case FormatK8s:
-		if err := format.WriteK8s(stdout, s); err != nil {
-			return fmt.Errorf("write k8s: %w", err)
-		}
-	case FormatOCI:
-		if err := format.WriteOCI(stdout, s); err != nil {
-			return fmt.Errorf("write oci: %w", err)
-		}
-	case FormatComposeLintEntry:
-		if err := format.WriteComposeLintProfile(stdout, s, *allowExploratory); err != nil {
-			// Contract-not-met is a usage-class failure: the user asked
-			// for a contribution-ready profile and the artifact didn't
-			// clear the bar. Surface as EX_USAGE so CI pipelines catch
-			// it rather than quietly accepting a silently-empty stdout.
-			return exit.WrapCoded(exit.Usage, fmt.Errorf("write compose-lint-profile: %w", err))
-		}
+	if err := renderObserverFormat(stdout, *formatMode, format.CapsFormatter, s, "", *composeIn, *composeService, *allowExploratory); err != nil {
+		return err
 	}
 
 	// Sidecar is written before the drop-rate abort so CI integrators

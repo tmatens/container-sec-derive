@@ -110,6 +110,30 @@ running) is a floor, and its weakness is deliberate and documented; a real
 derivation should assert the intended posture — a request served, a non-root uid,
 a passing workload — which is per-service knowledge, supplied via `CORRECTNESS`.
 
+**A correctness check must exercise real function — never a health/liveness
+endpoint.** `/health`, `/healthz`, `/api/healthcheck`, and liveness probes are
+*designed* to stay green as long as the process is up; they say nothing about
+whether the service does its job. Two ways this bites, both seen here:
+
+- **netdata:** drop `SETUID`/`SETGID` and it runs "healthy" *as root*; drop
+  `SYS_PTRACE` and `apps.plugin` reports every per-process metric as **0** (not
+  null) — still "healthy". A liveness probe passes a functionally-broken,
+  wrongly-privileged container.
+- **homepage:** `/api/healthcheck` returns 200 ("up") while the dashboard `/`
+  500s because its config isn't writable by the run uid.
+
+A green health endpoint over a broken service does double damage: it accepts the
+broken container *and* it hides an inadequate correctness check — you can't tell
+whether a cap is genuinely removable or whether your check simply can't see the
+breakage (the `fixed`-list trap `scripts/drop_test.sh` documents). So a correctness
+check asserts the service's real function: a served request with the *correct*
+status, a non-root uid, non-zero collected data, a passing workload. A
+readiness/health endpoint may be used as a **wait gate** (poll until the service is
+up before probing), but never as the correctness *assertion* — the pattern the
+`alloy`, `loki`, `grafana`, and `redis` checks follow (ready-gate, then a real
+read/write). Audited 2026-07-06: every `testdata/drop-test/correctness/*.sh`
+follows this rule.
+
 **And even a decent correctness check can under-derive.** Run against a real homelab
 netdata (`cap_drop:[ALL]` + `cap_add:[SYS_PTRACE, SYS_ADMIN, DAC_OVERRIDE,
 SETUID, SETGID]`, `pid:host`, host mounts) with a correctness check that asserts "ready +

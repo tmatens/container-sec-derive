@@ -36,7 +36,9 @@ Every observer emits to your choice of format (Compose, `docker run`, Kubernetes
 
 ## Audience
 
-Anyone hardening container security on **Docker** (the default + per-PR-tested runtime) or **rootful Podman** (via `--runtime podman`, validated by a scheduled smoke). The eBPF observation layer is runtime-agnostic; image/mount inspection uses the runtime CLI, so containerd/cri-o and rootless Podman are unsupported — see PLAN.md "Runtime requirements". Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed.
+The primary user is the **Docker/Compose single-node operator** — the self-hoster / homelab maintainer or small-team ops engineer who hardens services with `docker compose up`, not a cluster. That's the surface no observe→emit tool speaks natively (the Kubernetes side is already crowded — Security Profiles Operator, Kubescape, KubeArmor, Cilium; see [docs/comparison.md](docs/comparison.md)), so `csd` bets on it deliberately. The `k8s` / `oci` formatters are the bridge for the crossover case (a derived profile that must also apply to a k8s workload), not a claim to be Kubernetes-first — see [PLAN.md "Positioning"](PLAN.md#positioning-audience-moat-and-the-seccomp-gap) for the full bet and [Out of scope](#out-of-scope).
+
+Concretely, runs on **Docker** (the default + per-PR-tested runtime) or **rootful Podman** (via `--runtime podman`, validated by a scheduled smoke). The eBPF observation layer is runtime-agnostic; image/mount inspection uses the runtime CLI, so containerd/cri-o and rootless Podman are unsupported — see PLAN.md "Runtime requirements". Not orchestrator-specific — the engine observes containers, not Compose files; Compose-shaped output is one of several formatters. Useful for: shrinking a container's attack surface with evidence, passing CIS / compose-lint / Pod Security checks, and decomposing the `privileged: true` you were told you needed. `csd` is **not a one-stop hardening tool** — it does not emit a seccomp profile (see below), so pair it with a seccomp generator rather than expecting it to replace your toolchain.
 
 ## Relationship to compose-lint
 
@@ -71,15 +73,25 @@ implementations. The honest one-paragraph map (full version in
 - **Cilium/Hubble, Otterize, Sysdig** — auto-generate Kubernetes egress network
   policies from observed traffic; `csd`'s `egress` observer is the Docker/`nftables`
   counterpart.
-- **KubeArmor / Tetragon / Falco** — observe behaviour to *enforce* least privilege;
-  `csd` generates config and leaves enforcement to you (out of scope, below).
+- **KubeArmor / Tetragon / Falco** — observe behaviour to build least-privilege
+  *enforcement*. KubeArmor's discovery mode does auto-generate least-privilege policy
+  from observation (the same observe→emit loop), so the honest delta isn't "they
+  don't generate config" — it's **output shape and coupling**: they emit
+  enforcement-coupled Kubernetes CRDs bound to their own runtime engine, whereas
+  `csd` emits vendor-neutral Compose / `docker run` / OCI you apply yourself
+  (enforcement is out of scope, below).
 - **compose-lint / Trivy / Checkov / Polaris** — derive hardening *statically* from
   manifests; `csd`'s whole pitch is to stop guessing and watch the container run.
 
 `csd`'s defensible niche is the **combination**: a Docker-first, multi-dimensional,
 evidence-backed, Compose-native deriver. No single public tool produces the same set
-of artifacts. See [docs/comparison.md](docs/comparison.md) for the per-tool detail
-and the summary matrix.
+of artifacts — but that claim is about the *dimensions `csd` covers in one CLI*
+(caps, fs, devices, `privileged`, `cap_add`, egress), **not** about being a complete
+hardening toolchain: it deliberately omits seccomp, the most common runtime-derived
+artifact, and is meant to be paired with a seccomp generator (IG `advise`, SPO,
+SlimToolkit). See [docs/comparison.md](docs/comparison.md) for the per-tool detail
+and the summary matrix, and [PLAN.md "Positioning"](PLAN.md#positioning-audience-moat-and-the-seccomp-gap)
+for the durable-differentiator-vs-commoditizable-core map.
 
 ## Requirements
 

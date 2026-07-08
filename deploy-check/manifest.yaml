@@ -71,10 +71,13 @@ services:
 
   # Immich's redis (valkey) — the other leaf. The entrypoint drops root → the
   # valkey user (uid 999) via `setpriv` (needs SETUID/SETGID) and, on a foreign
-  # data dir, would chown it (CHOWN). immich's redis declares no volume, so it uses
-  # the image's own pre-owned /data — no chown happens and CHOWN is unused. Derived
-  # minimum [SETUID, SETGID] → verdict over_permissioned, drop [CHOWN]. The
-  # correctness check does a PING + SET/GET round-trip and asserts a non-root uid.
+  # data dir, would chown it (CHOWN). immich now runs valkey with `read_only: true`
+  # + `tmpfs: /data` (#38) and `--requirepass` (#36), so: (a) the correctness check
+  # MUST authenticate — an unauth PING returns NOAUTH, which is what made this row
+  # derive as derive-error before #332; and (b) whether CHOWN is exercised now turns
+  # on the fresh tmpfs /data's ownership, so the drop-test settles the verdict rather
+  # than the old "pre-owned /data → drop CHOWN" assumption. The correctness check
+  # does an auth-aware PING + SET/GET round-trip and asserts a non-root server uid.
   - name: immich-redis
     forgejo_repo: dad/immich
     compose_path: docker-compose.yaml

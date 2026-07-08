@@ -88,7 +88,10 @@ the relevant entry.
   `--runtime`-parameterized (#164) and the lane runs a podman cross-runtime smoke
   whose `inspect`/`history` path is exactly what #180 protects —
   `podman=<client-version>` (all single projected `--format` fields, no
-  `docker info`/`inspect` blob, so no env can ride along). Makes the Docker 29
+  `docker info`/`inspect` blob, so no env can ride along). The podman line is
+  annotated with whether the podman cross-runtime smoke actually ran on that leg
+  (it is non-PR + amd64-only), so a recorded `podman=<v>` on a PR leg reads as
+  "installed only", never as "podman was tested this run". Makes the Docker 29
   containerd-image-store default visible in the run diagnostics; the store line
   stays Docker-specific by design (the containerd image store has no podman
   analogue). Turns the `PLAN.md` "Docker ≥ 20.10" floor into something a run can

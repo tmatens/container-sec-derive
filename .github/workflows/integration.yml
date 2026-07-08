@@ -147,6 +147,11 @@ jobs:
       # CO-RE can't attach; ig version mismatch → SchemaMismatch). These
       # are hard-coded facts, NOT an env dump — no secrets can appear.
       - name: Preflight (kernel / BTF / ig)
+        env:
+          # Trusted control values (not attacker-influenced PR content) used only
+          # to annotate whether the podman cross-runtime smoke runs on this leg.
+          EVENT_NAME: ${{ github.event_name }}
+          RUNNER_LABEL: ${{ matrix.runner }}
         run: |
           {
             echo "preflight: arch=$(uname -m)"
@@ -173,7 +178,15 @@ jobs:
             # cross-runtime smoke, whose inspect/history path is exactly what #180's
             # decoupling protects -- so record podman too, not just docker. Client
             # version (no daemon/service required for rootless podman); projected field.
-            echo "preflight: podman=$(podman version --format '{{.Client.Version}}' 2>&1 | head -1)"
+            # The podman smoke is non-PR + amd64-only, so on other legs podman is
+            # merely INSTALLED, not exercised -- annotate which, so a bare
+            # "podman=<v>" line can't be misread as "podman was tested this run".
+            if [ "${EVENT_NAME}" != "pull_request" ] && [ "${RUNNER_LABEL}" = "ubuntu-24.04" ]; then
+              podman_status="exercised by cross-runtime smoke"
+            else
+              podman_status="installed only; cross-runtime smoke not run on this leg"
+            fi
+            echo "preflight: podman=$(podman version --format '{{.Client.Version}}' 2>&1 | head -1) (${podman_status})"
           } | tee preflight.txt
 
       # jq + docker are preinstalled on ubuntu-24.04 runners. Run the

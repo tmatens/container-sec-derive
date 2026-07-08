@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -374,6 +375,106 @@ func TestApplyEntrypointCrossCheck_PreservesExistingDigest(t *testing.T) {
 	ApplyEntrypointCrossCheck(s, path, "", false, nil)
 	if s.ImageDigest != "sha256:9999999999999999999999999999999999999999999999999999999999999999" {
 		t.Errorf("pre-populated digest overwritten: got %q", s.ImageDigest)
+	}
+}
+
+// writeFakeRuntime installs a stub container CLI that returns valid `inspect`
+// JSON but fails `history` -- the exact Docker-29 containerd-store degradation
+// issue #180 is about. Returns the absolute path to pass as runtimeBin.
+func writeFakeRuntime(t *testing.T, inspectJSON string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake runtime is a /bin/sh script")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fakeruntime")
+	script := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  inspect) cat <<'JSON'\n" + inspectJSON + "\nJSON\n    ;;\n" +
+		"  history) echo 'history: image store does not support this' >&2; exit 1 ;;\n" +
+		"  *) exit 2 ;;\nesac\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake runtime: %v", err)
+	}
+	return path
+}
+
+// issue #180: a `history` failure must not discard the good `inspect` data.
+// With a live runtime whose `history` half fails, the argv cross-check still
+// derives expected caps and the RepoDigest is still promoted; the status
+// degrades to "partial", not a full "unavailable" that drops everything.
+func TestApplyEntrypointCrossCheck_HistoryFailurePreservesInspect(t *testing.T) {
+	const digest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+	inspectJSON := `{"config":{"Entrypoint":["chown","-R","app","/data"],"Cmd":null},` +
+		`"repo_digests":["postgres@` + digest + `"]}`
+	fake := writeFakeRuntime(t, inspectJSON)
+
+	s := sidecar.NewSidecar()
+	s.Image = "postgres:16"
+	// Observe all three caps the chown heuristic expects, so a *clean* history
+	// path would produce zero warnings -- isolating this test to the digest +
+	// expected-caps preservation, not the warning logic.
+	s.Capabilities = []sidecar.Capability{{Name: "CHOWN"}, {Name: "FOWNER"}, {Name: "DAC_OVERRIDE"}}
+	var stderr bytes.Buffer
+	ApplyEntrypointCrossCheck(s, "", fake, false, &stderr)
+
+	// Status degrades to partial, carrying the history error, not a full drop.
+	if !strings.HasPrefix(s.CrossCheckStatus, sidecar.CrossCheckStatusPartialHistoryPrefix) {
+		t.Fatalf("status = %q, want %q prefix", s.CrossCheckStatus, sidecar.CrossCheckStatusPartialHistoryPrefix)
+	}
+	// The inspect-derived argv cross-check still ran.
+	if !obstest.EqualSlice(s.ExpectedCapsFromEntrypoint, []string{"CHOWN", "DAC_OVERRIDE", "FOWNER"}) {
+		t.Errorf("expected caps = %v (argv cross-check should survive history failure)", s.ExpectedCapsFromEntrypoint)
+	}
+	// The digest inspect fetched was NOT discarded.
+	if s.ImageDigest != digest {
+		t.Errorf("ImageDigest = %q, want %q (digest must survive history failure)", s.ImageDigest, digest)
+	}
+	// stderr surfaces the degradation for the operator.
+	if !strings.Contains(stderr.String(), "partial (history unavailable)") {
+		t.Errorf("stderr missing partial-history note:\n%s", stderr.String())
+	}
+}
+
+// issue #180: the same soft-fail path must still surface argv coverage
+// warnings when the observed caps don't cover the argv-expected set -- history
+// being unavailable only drops the setcap-derived signals, not the argv ones.
+func TestApplyEntrypointCrossCheck_HistoryFailureStillEmitsArgvWarnings(t *testing.T) {
+	inspectJSON := `{"config":{"Entrypoint":["chown","-R","app","/data"],"Cmd":null},"repo_digests":[]}`
+	fake := writeFakeRuntime(t, inspectJSON)
+
+	s := sidecar.NewSidecar()
+	s.Image = "postgres:16"
+	s.Capabilities = []sidecar.Capability{{Name: "CHOWN"}} // FOWNER + DAC_OVERRIDE missing
+	ApplyEntrypointCrossCheck(s, "", fake, false, nil)
+
+	if len(s.CoverageWarnings) != 2 {
+		t.Errorf("warnings = %v, want 2 (FOWNER + DAC_OVERRIDE) despite history failure", s.CoverageWarnings)
+	}
+}
+
+// A full `inspect` failure remains fatal: nothing is usable, so the status is a
+// non-ok reason and the argv/digest fields stay empty (unchanged behavior).
+func TestApplyEntrypointCrossCheck_InspectFailureIsFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake runtime is a /bin/sh script")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "fakeruntime")
+	// Fails on every subcommand, including inspect.
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 'daemon down' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write fake runtime: %v", err)
+	}
+	s := sidecar.NewSidecar()
+	s.Image = "postgres:16"
+	ApplyEntrypointCrossCheck(s, "", fake, false, nil)
+
+	if s.CrossCheckStatus == "" || s.CrossCheckStatus == sidecar.CrossCheckStatusOK ||
+		strings.HasPrefix(s.CrossCheckStatus, sidecar.CrossCheckStatusPartialHistoryPrefix) {
+		t.Errorf("inspect failure should yield a plain non-ok status, got %q", s.CrossCheckStatus)
+	}
+	if len(s.ExpectedCapsFromEntrypoint) != 0 || s.ImageDigest != "" {
+		t.Errorf("inspect failure should leave argv/digest empty: caps=%v digest=%q",
+			s.ExpectedCapsFromEntrypoint, s.ImageDigest)
 	}
 }
 

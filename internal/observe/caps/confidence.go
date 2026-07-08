@@ -2,6 +2,7 @@ package caps
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/tmatens/container-sec-derive/internal/observe"
 	"github.com/tmatens/container-sec-derive/internal/sidecar"
@@ -109,13 +110,23 @@ func ComputeConfidence(s *sidecar.Sidecar) {
 		// Emit no factor -- absence of evidence isn't evidence of
 		// absence, and the sidecar's empty ExpectedCapsFromEntrypoint
 		// + empty CoverageWarnings already tell the reviewer.
+	case len(s.CoverageWarnings) > 0:
+		// Argv-derived coverage warnings force low. Checked before the
+		// unavailable/partial branches because the warnings come from the
+		// inspect argv, which is present on both a fully-"ok" run and a
+		// partial (history-unavailable) one (issue #180) -- so a degraded
+		// `history` must not silently drop the force-low signal.
+		c.Low(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
+	case strings.HasPrefix(s.CrossCheckStatus, sidecar.CrossCheckStatusPartialHistoryPrefix):
+		// Inspect half succeeded (argv cross-check + digest authoritative);
+		// history half failed, so setcap-from-history signals are absent but
+		// no argv warnings fired. Informational, not a grade penalty.
+		c.Info("entrypoint cross-check partial: " + strings.TrimPrefix(s.CrossCheckStatus, sidecar.CrossCheckStatusPartialHistoryPrefix))
 	case s.CrossCheckStatus != sidecar.CrossCheckStatusOK:
 		// Attempted but failed (docker daemon down, image not present,
 		// etc.). Informational factor with the truncated reason so the
 		// reviewer can see why the check couldn't run.
 		c.Info("entrypoint cross-check unavailable: " + s.CrossCheckStatus)
-	case len(s.CoverageWarnings) > 0:
-		c.Low(fmt.Sprintf("%d entrypoint coverage warnings present (see coverage_warnings)", len(s.CoverageWarnings)))
 	case len(s.ExpectedCapsFromEntrypoint) == 0:
 		c.Info("entrypoint cross-check ran; no static signals matched")
 	default:

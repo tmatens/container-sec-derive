@@ -79,6 +79,16 @@ const (
 // regardless of whether signals fired).
 const CrossCheckStatusOK = "ok"
 
+// CrossCheckStatusPartialHistoryPrefix prefixes a CrossCheckStatus when the
+// `inspect` half of the cross-check succeeded (argv heuristics + digest are
+// authoritative) but the `history` half failed, so only the setcap-from-history
+// signals are absent. This is a graceful degradation, not a failure: a `history`
+// regression under Docker 29's containerd image store (see issue #180) must not
+// discard the good digest/Config that `inspect` already returned. The confidence
+// rubric treats this distinctly from a full "unavailable" so argv-derived
+// coverage warnings still apply.
+const CrossCheckStatusPartialHistoryPrefix = "partial (history unavailable): "
+
 // Sidecar is the canonical JSON evidence artifact. All formatters derive
 // from this struct; it is the single source of truth for an observation run.
 // See PLAN.md §Output schema for the full field-by-field contract.

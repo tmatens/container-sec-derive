@@ -32,6 +32,19 @@ the relevant entry.
 
 ### Fixed
 
+- **Entrypoint cross-check no longer discards a good `inspect` when `docker
+  history` fails (#180).** `inspectEntrypoint` ran `docker inspect` and `docker
+  history` as an all-or-nothing pair, so a `history` regression — the kind Docker
+  29's containerd image store introduces, where layers can read `<missing>` for
+  non-locally-built images — threw away the digest and `Config` that `inspect` had
+  already fetched, skipping the argv cap cross-check and the digest pin entirely.
+  The two calls are now decoupled: an `inspect` failure is still fatal (nothing is
+  usable), but a `history` failure is soft — the argv heuristics and RepoDigest
+  promotion still run, and `cross_check_status` degrades to `partial (history
+  unavailable): …` instead of a full `unavailable`. Argv-derived coverage warnings
+  still force confidence low in the partial case (they come from `inspect`, which
+  survived); only the setcap-from-history signals are lost.
+
 - **Self-hosted live-BPF lane self-heals its pinned `ig` and fails loudly when it
   can't (#322).** The `integration-selfhosted` runner lost the pinned `ig` binary
   (a reboot / `/usr/local/bin` wipe), so every live smoke fast-failed with
@@ -65,6 +78,21 @@ the relevant entry.
   itself is `trace_tcp`-derived and unaffected.
 
 ### Added
+
+- **Live-BPF preflight now records the Docker version and image store (#180).**
+  The hosted and self-hosted integration lanes ran the live smokes against
+  whatever Docker the runner shipped, un-pinned and unrecorded — so a smoke
+  failure couldn't be tied to a Docker version or image-store change after the
+  fact. The preflight now logs `docker=<server-version>`,
+  `docker-store=<driver + DriverStatus>`, and — because csd is
+  `--runtime`-parameterized (#164) and the lane runs a podman cross-runtime smoke
+  whose `inspect`/`history` path is exactly what #180 protects —
+  `podman=<client-version>` (all single projected `--format` fields, no
+  `docker info`/`inspect` blob, so no env can ride along). Makes the Docker 29
+  containerd-image-store default visible in the run diagnostics; the store line
+  stays Docker-specific by design (the containerd image store has no podman
+  analogue). Turns the `PLAN.md` "Docker ≥ 20.10" floor into something a run can
+  actually attest to.
 
 - **In-stack (dependent-tier) drop-test derivation (`deps:` + `run.volumes_from` in
   `scripts/drop_test.sh`).** Derives the capability minimum for a service that

@@ -123,3 +123,41 @@ func TestConfidence_CrossCheckUnavailableIsInformationalOnly(t *testing.T) {
 		t.Errorf("expected an 'unavailable' info factor, got:\n%s", joined)
 	}
 }
+
+// issue #180: a partial (history-unavailable) cross-check keeps the argv +
+// digest signals authoritative. With no coverage warnings it is informational
+// only (must not demote), and it reads as "partial", not "unavailable".
+func TestConfidence_PartialHistoryNoWarningsIsInformational(t *testing.T) {
+	s := cleanModerate()
+	s.CrossCheckStatus = sidecar.CrossCheckStatusPartialHistoryPrefix + "docker history postgres:16: exit status 1"
+	if got := gradeOf(s); got != sidecar.ConfidenceModerate {
+		t.Errorf("grade = %q, want moderate (partial cross-check w/o warnings is info):\n%s", got, strings.Join(s.Confidence.Factors, "\n"))
+	}
+	joined := strings.Join(s.Confidence.Factors, "\n")
+	if !strings.Contains(joined, "cross-check partial") {
+		t.Errorf("expected a 'partial' info factor, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "cross-check unavailable") {
+		t.Errorf("partial cross-check must not read as 'unavailable':\n%s", joined)
+	}
+	// The redundant prefix must be stripped from the factor prose.
+	if strings.Contains(joined, sidecar.CrossCheckStatusPartialHistoryPrefix) {
+		t.Errorf("partial prefix leaked into factor prose:\n%s", joined)
+	}
+}
+
+// issue #180: argv coverage warnings force low even when `history` was
+// unavailable -- the warnings derive from the inspect argv, which survives a
+// history failure. This is the branch-ordering guarantee (warnings before the
+// partial/unavailable branches).
+func TestConfidence_PartialHistoryWithWarningsStillForcesLow(t *testing.T) {
+	s := cleanModerate()
+	s.CrossCheckStatus = sidecar.CrossCheckStatusPartialHistoryPrefix + "docker history postgres:16: exit status 1"
+	s.CoverageWarnings = []string{"entrypoint references `chown` but CHOWN was not observed."}
+	if got := gradeOf(s); got != sidecar.ConfidenceLow {
+		t.Errorf("grade = %q, want low (argv coverage warnings force low despite history failure):\n%s", got, strings.Join(s.Confidence.Factors, "\n"))
+	}
+	if joined := strings.Join(s.Confidence.Factors, "\n"); !strings.Contains(joined, "coverage warnings") {
+		t.Errorf("expected a coverage-warnings factor, got:\n%s", joined)
+	}
+}

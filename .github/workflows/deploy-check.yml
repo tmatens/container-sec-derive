@@ -3,8 +3,11 @@ name: deploy-check
 # (deploy-check/manifest.yaml), clone the service's LIVE compose from Forgejo and
 # run scripts/compose_derive.sh against it — deriving the capability minimum under
 # the REAL deployed invocation (on the posture-matched runner) and diffing it
-# against the declared cap_add. REPORT-ONLY: verdicts land in the job summary; the
-# job does not fail on a verdict (graduate to enforce later).
+# against the declared cap_add. ENFORCE=1: verdicts land in the job summary, and
+# the job FAILS (exit 12) if any service is under_permissioned — a needed cap is
+# missing, so the hardened deploy would break. not_minimized / over_permissioned /
+# clone-failed stay advisory (green). None of the current manifest services are
+# under_permissioned, so this gate is a regression tripwire, not a live red.
 #
 # MUST run on the self-hosted `csd` runner: the drop-test restarts real
 # containers, and the caps minimum for SYS_ADMIN/BPF-class caps is only truthful
@@ -27,12 +30,17 @@ jobs:
     runs-on: [self-hosted, csd]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: deploy-check (report-only)
+      - name: deploy-check (enforce — fails on under_permissioned)
         env:
           FORGEJO_RO_TOKEN: ${{ secrets.FORGEJO_RO_TOKEN }}
+          ENFORCE: "1"
         run: |
-          PY=python3 bash scripts/deploy_check.sh > summary.md 2> verdict.log || true
+          # Capture the exit code so the summary/verdict still print on a fail:
+          # a `> log || true` would swallow the enforce exit (12), a pipe would
+          # mask it behind the last stage's status.
+          PY=python3 bash scripts/deploy_check.sh > summary.md 2> verdict.log && rc=0 || rc=$?
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
           echo "----- verdict -----"
           cat verdict.log
           cat summary.md
+          exit "$rc"

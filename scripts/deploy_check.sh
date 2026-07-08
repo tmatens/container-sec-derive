@@ -4,23 +4,27 @@
 # it — deriving the capability minimum under the service's own invocation (on the
 # posture-matched runner) and diffing it against the declared cap_add.
 #
-# REPORT-ONLY: prints a per-service verdict table (Markdown, for a job summary)
-# and always exits 0. under_permissioned (a needed cap is missing → would break)
-# is flagged loudest, but does not fail the job at this stage — graduate to
-# enforce by having the caller exit non-zero on it.
+# Prints a per-service verdict table (Markdown, for a job summary).
+#
+# ENFORCE unset (default) -> REPORT-ONLY: always exits 0.
+# ENFORCE=1               -> exits 12 iff a service is under_permissioned (a needed
+#   cap is missing → the hardened deploy would break). not_minimized /
+#   over_permissioned / clone-failed stay advisory (exit 0) either way — matching
+#   #240's contract (fail on under_permissioned; over-/not-minimized are warnings).
 #
 # Clone transport:
 #   FORGEJO_SSH=1                -> git clone forgejo:<repo>.git   (SSH key; local)
 #   else FORGEJO_RO_TOKEN=<tok>  -> HTTPS with an Authorization header (CI)
 #     FORGEJO_BASE default https://git.matens.xyz
 #
-#   PY=python3 bash scripts/deploy_check.sh   [> summary.md]
+#   PY=python3 [ENFORCE=1] bash scripts/deploy_check.sh   [> summary.md]
 set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-python3}"
 MANIFEST="${MANIFEST:-$REPO/deploy-check/manifest.yaml}"
 FORGEJO_BASE="${FORGEJO_BASE:-https://git.matens.xyz}"
+ENFORCE="${ENFORCE:-}"   # set to fail (exit 12) on an under_permissioned service
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 [ -f "$MANIFEST" ] || { echo "no manifest at $MANIFEST" >&2; exit 2; }
 
@@ -84,5 +88,11 @@ case "$worst" in
   1) echo "deploy-check: some services are not minimized / over-permissioned (advisory)" >&2 ;;
   2) echo "deploy-check: UNDER-permissioned service(s) found — a needed cap is missing" >&2 ;;
 esac
-# report-only: always succeed. (Enforce by: exit "$worst".)
+# Enforce (ENFORCE=1) fails ONLY on under_permissioned (worst==2) with the derive
+# exit code 12 — a needed cap is missing, so the hardened deploy would break.
+# not_minimized / over_permissioned / clone-failed (worst==1) stay advisory.
+# Unset ENFORCE = report-only: always exit 0.
+if [ -n "$ENFORCE" ] && [ "$worst" -ge 2 ]; then
+  exit 12
+fi
 exit 0

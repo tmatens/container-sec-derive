@@ -103,10 +103,12 @@ the relevant entry.
   manifest entry, clones a homelab service's **live** compose from Forgejo and
   runs `compose_derive.sh` against it — deriving the capability minimum under the
   real deployed invocation (on the posture-matched host) and diffing it against
-  the declared `cap_add`. **Report-only**: per-service verdicts
+  the declared `cap_add`. Per-service verdicts
   (matches / not_minimized / over_permissioned / under_permissioned) land in the
-  job summary; the job doesn't fail on a verdict (graduate to enforce by exiting
-  on the worst). First manifest covers **netdata**, **homepage**, **caddy**, and
+  job summary; under `ENFORCE=1` (the scheduled job) an **under_permissioned**
+  service **fails the run** (exit 12) — a needed cap is missing, so the hardened
+  deploy would break — while over_permissioned / not_minimized stay advisory.
+  First manifest covers **netdata**, **homepage**, **caddy**, and
   immich's **postgres** and **redis (valkey)** — all validated end-to-end on the
   matched host. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.
 - **`compose_derive.sh` derives services that `build:` a custom image.** The

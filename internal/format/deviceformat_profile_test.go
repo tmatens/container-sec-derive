@@ -44,7 +44,7 @@ func TestWriteDeviceComposeLintProfileAccepted(t *testing.T) {
 		"devices: [/dev/dri/card0, /dev/net/tun]",
 		"derived_caps: [CAP_NET_ADMIN]",
 		"observer: devices",
-		`sidecar_schema_version: "1.5"`,
+		`sidecar_schema_version: "1.6"`,
 		"confidence: moderate",
 		"validated_image: docker.io/library/gpu@sha256:deadbeef",
 		"validated_via: [bpf-observation]",

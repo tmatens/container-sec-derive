@@ -11,6 +11,25 @@ the relevant entry.
 
 ## [Unreleased]
 
+### Added
+
+- **Egress provenance data model — `egress_destination_intel` sidecar block
+  (#206).** A name-centric view of the observed egress that tags each destination
+  with **provenance** (`confirmed` — an address was dialed — vs `resolved_only` —
+  a name the container looked up via `trace_dns` but never connected to, the
+  name-level DNS-vs-connect coverage signal) and **visibility**
+  (`image_intrinsic` — a public FQDN/IP that generalizes across deployments — vs
+  `deployment_specific` — the operator's own topology, private IPs / internal
+  names, which must never reach a public profile). Provenance is computed at
+  **name granularity** — a name is `confirmed` if *any* of its resolved addresses
+  was dialed — so a multi-address CDN/dual-stack pool where one address connected
+  is not a false gap (validated by the #206 measurement spike). This is data
+  alongside the allowlist: it **never widens** the enforced
+  `egress_recommendation.allowlist` (a `resolved_only` destination is surfaced,
+  not auto-added). Additive, omitempty; sidecar `schema_version` bumped **1.5 →
+  1.6** (a non-egress sidecar is byte-identical save the version string). First
+  slice of the ROADMAP "Workload coverage & egress-as-data" epic.
+
 ### Fixed
 
 - **Self-hosted live-BPF lane self-heals its pinned `ig` and fails loudly when it

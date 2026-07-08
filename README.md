@@ -244,6 +244,8 @@ Window and output:
 
 The **`egress`** observer uses its own enforcement formats instead of the compose-security ones above — `nftables` (a default-DROP `inet csd_egress` output chain with an accept rule per destination) and `k8s-networkpolicy` (a NetworkPolicy with an Egress `ipBlock`/port rule per destination), plus `json`. They're rejected for the other observers, and vice-versa.
 
+The `json`/sidecar output additionally carries an **`egress_destination_intel`** block (#206): a name-centric view tagging each destination with **provenance** — `confirmed` (an address was dialed) vs `resolved_only` (a name the container looked up but never connected to) — and **visibility** — `image_intrinsic` (a public endpoint) vs `deployment_specific` (private IPs / internal names, the operator's own topology). It is *data*, not enforcement: a `resolved_only` destination is surfaced as a coverage candidate, never added to the enforced allowlist, and the `deployment_specific` tag gates what may ever reach a public profile.
+
 > **Egress carries an *inverted risk*.** For caps/devices the danger is *over*-permission; for an egress allowlist it's the opposite — a destination the workload never exercised will be **blocked** by a default-deny ruleset, breaking the app. So an incomplete allowlist is a hard failure, the output leads with a non-strippable caveat, and the confidence rubric forces a **low** grade when no `--workload` is supplied. Verify completeness before enforcing.
 
 ## Sidecar

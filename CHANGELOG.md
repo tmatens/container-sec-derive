@@ -32,6 +32,17 @@ the relevant entry.
 
 ### Fixed
 
+- **deploy-check: immich-redis no longer derives as `derive-error` (#332).** immich
+  runs valkey with `--requirepass` (#36), so an *unauthenticated* `redis-cli ping`
+  returns `NOAUTH`, never `PONG` — the correctness check
+  (`testdata/drop-test/correctness/redis_deploy.sh`) looped to its deadline and the
+  whole service came back `derive-error` (a coverage gap hidden inside a green
+  report-only run, surfaced once #329 made the verdict legible). The check is now
+  auth-aware: it recovers the `--requirepass` value from the running server's argv
+  (`/proc/1/cmdline`) and authenticates, so PING + SET/GET work whether or not the
+  service requires a password (an empty placeholder → no auth → plain PING). Also
+  parses `/proc/1/status` for the non-root-uid assertion on the host rather than
+  requiring `awk` inside the valkey image.
 - **Entrypoint cross-check no longer discards a good `inspect` when `docker
   history` fails (#180).** `inspectEntrypoint` ran `docker inspect` and `docker
   history` as an all-or-nothing pair, so a `history` regression — the kind Docker

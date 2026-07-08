@@ -166,7 +166,14 @@ jobs:
             # Driver=overlay2 -> legacy graphdriver store; Driver=overlayfs with a
             # DriverStatus of io.containerd.snapshotter.v1 -> containerd image store
             # (Docker 29 default). DriverStatus is a projected slice field, not a blob.
+            # Docker-specific by design: the containerd image store is a Docker Engine
+            # concept (podman uses containers/storage), so there is no generic analogue.
             echo "preflight: docker-store=$(docker info --format '{{.Driver}} {{.DriverStatus}}' 2>&1 | head -1)"
+            # csd is --runtime-parameterized (#164) and this lane runs a podman
+            # cross-runtime smoke, whose inspect/history path is exactly what #180's
+            # decoupling protects -- so record podman too, not just docker. Client
+            # version (no daemon/service required for rootless podman); projected field.
+            echo "preflight: podman=$(podman version --format '{{.Client.Version}}' 2>&1 | head -1)"
           } | tee preflight.txt
 
       # jq + docker are preinstalled on ubuntu-24.04 runners. Run the

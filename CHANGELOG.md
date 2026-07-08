@@ -83,11 +83,16 @@ the relevant entry.
   The hosted and self-hosted integration lanes ran the live smokes against
   whatever Docker the runner shipped, un-pinned and unrecorded — so a smoke
   failure couldn't be tied to a Docker version or image-store change after the
-  fact. The preflight now logs `docker=<server-version>` and
-  `docker-store=<driver + DriverStatus>` (single projected `--format` fields, no
-  `docker info`/`inspect` blob, so no env can ride along), making the Docker 29
-  containerd-image-store default visible in the run diagnostics. Turns the
-  `PLAN.md` "Docker ≥ 20.10" floor into something a run can actually attest to.
+  fact. The preflight now logs `docker=<server-version>`,
+  `docker-store=<driver + DriverStatus>`, and — because csd is
+  `--runtime`-parameterized (#164) and the lane runs a podman cross-runtime smoke
+  whose `inspect`/`history` path is exactly what #180 protects —
+  `podman=<client-version>` (all single projected `--format` fields, no
+  `docker info`/`inspect` blob, so no env can ride along). Makes the Docker 29
+  containerd-image-store default visible in the run diagnostics; the store line
+  stays Docker-specific by design (the containerd image store has no podman
+  analogue). Turns the `PLAN.md` "Docker ≥ 20.10" floor into something a run can
+  actually attest to.
 
 - **In-stack (dependent-tier) drop-test derivation (`deps:` + `run.volumes_from` in
   `scripts/drop_test.sh`).** Derives the capability minimum for a service that

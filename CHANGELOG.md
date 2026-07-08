@@ -13,6 +13,16 @@ the relevant entry.
 
 ### Fixed
 
+- **Self-hosted live-BPF lane self-heals its pinned `ig` and fails loudly when it
+  can't (#322).** The `integration-selfhosted` runner lost the pinned `ig` binary
+  (a reboot / `/usr/local/bin` wipe), so every live smoke fast-failed with
+  `IGMissing(31)` and the lane stayed degraded for weeks. A new
+  `scripts/install_pinned_ig.sh` — an idempotent, per-arch installer verified
+  against `ig-pin/SHA256SUMS` — now runs at the top of the self-hosted job to
+  re-provision `ig` on the next run, and the preflight step **asserts** the pinned
+  `ig` is present, hard-failing with one clear line instead of six identical
+  downstream failures. The same script replaces the duplicated inline install
+  blocks in `integration.yml`, so the hosted and self-hosted lanes can't drift.
 - **Flag-parse errors print once, and `-h`/`--help` exits cleanly (#291).** A bad
   flag previously emitted the message twice (the `flag` package's bare line plus a
   usage dump, then `main`'s `csd: ` prefixed line); it now shows the single

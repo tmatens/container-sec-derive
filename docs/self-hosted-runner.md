@@ -25,14 +25,28 @@ churn from the production host).
 
 The runner host must have:
 - **Docker** (the smokes spin containers).
-- The **pinned `ig`** on `PATH` (the version in `internal/ig/ig.go` `PinnedIGVersion`).
-  Install it the same way `integration.yml` does — download the per-arch tarball
-  for that tag and verify it against `ig-pin/SHA256SUMS` before installing to
-  `/usr/local/bin`.
 - **Passwordless `sudo`** for the runner user (the smokes run `csd` under `sudo`
   for `CAP_BPF`/`CAP_PERFMON` + the docker socket).
 - A kernel with **BTF** (`/sys/kernel/btf/vmlinux`) so `cap_capable` CO-RE can
   attach. The preflight step records and reports this.
+
+The **pinned `ig`** (the version in `internal/ig/ig.go` `PinnedIGVersion`) is
+**self-healed by the workflow**: an `Ensure pinned ig` step runs
+`scripts/install_pinned_ig.sh` at the top of every job, which idempotently
+downloads the per-arch tarball for the pinned tag, verifies it against
+`ig-pin/SHA256SUMS`, and installs it to `/usr/local/bin` (skipping the download
+when the pin is already present). So an `ig` lost to a reboot or a
+`/usr/local/bin` wipe re-provisions itself on the next run instead of failing
+every smoke with `IGMissing(31)` (issue #322). The `Preflight` step then
+**asserts** the pinned `ig` is present and hard-fails with one clear line if it
+isn't — no more six identical downstream failures.
+
+To pre-provision `ig` on the host yourself (optional, e.g. baking it into a VM
+image), run the same script from a repo checkout:
+
+```sh
+scripts/install_pinned_ig.sh   # needs curl/tar/sha256sum/dpkg + root or sudo
+```
 
 ## Register an ephemeral runner (sketch)
 

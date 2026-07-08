@@ -46,18 +46,34 @@ jobs:
       - name: Build csd
         run: go build -o csd ./cmd/csd
 
+      # Self-heal the pinned ig (issue #322). A self-hosted runner that lost its
+      # ig to a reboot or a /usr/local/bin wipe used to fail every smoke with
+      # IGMissing(31); re-provisioning it here — idempotently, verified against
+      # ig-pin/SHA256SUMS, the same script the hosted lane uses — means the lane
+      # recovers on the next run instead of staying degraded for weeks. Passwordless
+      # sudo (already required for the BPF smokes) writes /usr/local/bin.
+      - name: Ensure pinned ig (self-heal, verified against ig-pin/SHA256SUMS)
+        run: scripts/install_pinned_ig.sh
+
       # The whole point of a second runner: record ITS kernel (different from the
-      # hosted ubuntu-24.04 one) + that the pinned ig is present. Host prereqs
-      # (docker, pinned ig on PATH, passwordless sudo for BPF) are the runner
-      # owner's responsibility — see docs/self-hosted-runner.md.
-      - name: Preflight (record this host's kernel / ig / docker)
+      # hosted ubuntu-24.04 one). The ig assertion is a HARD gate so a missing or
+      # wrong ig top-lines the report as one clear line here, not six identical
+      # downstream IGMissing failures (issue #322). Docker + passwordless sudo for
+      # BPF remain the runner owner's responsibility — see docs/self-hosted-runner.md.
+      - name: Preflight (assert pinned ig; record this host's kernel / docker)
         run: |
+          ig_pin="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
+          ig_have="$(ig version 2>/dev/null | awk 'NR==1{print $1}' || true)"
           {
             echo "self-hosted preflight: kernel=$(uname -r)"
             if [ -e /sys/kernel/btf/vmlinux ]; then echo "self-hosted preflight: BTF=present"; else echo "self-hosted preflight: BTF=ABSENT"; fi
-            echo "self-hosted preflight: ig=$(ig version 2>&1 | head -1)"
+            echo "self-hosted preflight: ig=${ig_have:-MISSING} (pin ${ig_pin})"
             echo "self-hosted preflight: docker=$(docker version --format '{{.Server.Version}}' 2>&1 | head -1)"
           } | tee preflight_sh.txt
+          if [ "${ig_have}" != "${ig_pin}" ]; then
+            echo "::error::pinned ig ${ig_pin} missing/mismatched on runner (found '${ig_have:-none}') — smokes would fail IGMissing(31); see docs/self-hosted-runner.md"
+            exit 1
+          fi
 
       # The hardware-free smoke suite, now on a DIFFERENT real kernel. Reuses the
       # same gates the hosted integration job runs; capture each exit code so a

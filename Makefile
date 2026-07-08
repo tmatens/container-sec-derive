@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -135,6 +135,12 @@ bisect-selftest:
 # docker work, so this is hermetic and belongs in the fast CI gate.
 drop-test-selftest:
 	./scripts/drop_test_selftest.sh
+
+# compose-derive-selftest asserts compose_to_spec.py carries tmpfs/read_only (and
+# mounts/env) into the spec, so a container's cold-start asset creation is
+# exercised and its caps derive faithfully (#337). Hermetic: python+yaml, no docker.
+compose-derive-selftest:
+	./scripts/compose_derive_selftest.sh
 
 # parity runs the v1 compose-lint parity cross-check gate (#294): the set
 # difference between each testdata/<image>/ground_truth.json and the pinned

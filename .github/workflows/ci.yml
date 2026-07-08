@@ -84,6 +84,12 @@ jobs:
       # work, so it belongs in the fast gate.
       - name: drop-test fixed-guard self-test
         run: ./scripts/drop_test_selftest.sh
+      # Hermetic transform test: compose_to_spec.py carries tmpfs/read_only (and
+      # mount/env) into the spec, so a container's cold-start asset creation
+      # (chowning a fresh tmpfs data dir) is exercised and its caps derive
+      # faithfully (#337). Pure python+yaml, no docker.
+      - name: compose->spec transform self-test
+        run: ./scripts/compose_derive_selftest.sh
 
   # Deep static analysis beyond `go vet` (#292): errcheck / staticcheck /
   # ineffassign / unused, configured in .golangci.yml. A separate job so it runs

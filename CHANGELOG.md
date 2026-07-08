@@ -32,6 +32,13 @@ the relevant entry.
 
 ### Fixed
 
+- **deploy-check self-report now posts to the associated PR regardless of its
+  state.** The verdict comment only upserted onto an *open* PR, so a dispatch
+  fired to validate a branch that was merged mid-run left a closed PR and the
+  verdict went unposted (readable only in the job summary). It now falls back from
+  open PR → any associated PR, so a just-merged validation run still surfaces its
+  table over the API. (A run with no PR at all — a scheduled run on `main` —
+  remains job-summary-only.)
 - **deploy-check: immich-redis no longer derives as `derive-error` (#332).** immich
   runs valkey with `--requirepass` (#36), so an *unauthenticated* `redis-cli ping`
   returns `NOAUTH`, never `PONG` — the correctness check

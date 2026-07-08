@@ -45,11 +45,16 @@ the relevant entry.
   (`testdata/drop-test/correctness/redis_deploy.sh`) looped to its deadline and the
   whole service came back `derive-error` (a coverage gap hidden inside a green
   report-only run, surfaced once #329 made the verdict legible). The check is now
-  auth-aware: it recovers the `--requirepass` value from the running server's argv
-  (`/proc/1/cmdline`) and authenticates, so PING + SET/GET work whether or not the
-  service requires a password (an empty placeholder → no auth → plain PING). Also
-  parses `/proc/1/status` for the non-root-uid assertion on the host rather than
-  requiring `awk` inside the valkey image.
+  auth-aware: it recovers the `--requirepass` value from the container's
+  **configured command** (`docker inspect` .Config.Entrypoint/.Config.Cmd) and
+  authenticates, so PING + SET/GET work whether or not the service requires a
+  password. Reading the *config* rather than `/proc/1/cmdline` is deliberate — an
+  entrypoint/`setpriv` wrapper can leave pid 1 as something other than
+  `valkey-server`, so pid 1's argv misses the flag while the child still enforces
+  it. On a residual PING failure the check now dumps the configured command, pid 1
+  cmdline, the raw `redis-cli` reply, and a `docker logs` tail so the cause is
+  legible. Also parses `/proc/1/status` for the non-root-uid assertion on the host
+  rather than requiring `awk` inside the valkey image.
 - **Entrypoint cross-check no longer discards a good `inspect` when `docker
   history` fails (#180).** `inspectEntrypoint` ran `docker inspect` and `docker
   history` as an all-or-nothing pair, so a `history` regression — the kind Docker

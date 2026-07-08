@@ -4,26 +4,35 @@
 # SETUID/SETGID; on a foreign-owned data dir it also chowns it — CHOWN).
 #
 # Auth-aware (#332): a valkey/redis started with `--requirepass <pw>` (immich
-# added this in #36) answers an *unauthenticated* PING with NOAUTH, never PONG —
-# so the old unauth PING looped to its deadline and the whole service derived as
-# derive-error. We recover the password the server was actually started with from
-# its argv (/proc/1/cmdline) and authenticate, so this works whether or not the
-# service requires a password. The compose_derive ${VAR} placeholder is
-# transparent: we read back whatever value the server was launched with (empty
-# placeholder → no auth needed → plain PING still works).
+# added this in #36) answers an *unauthenticated* PING with NOAUTH, never PONG,
+# so an unauth check loops to its deadline and the whole service derives as
+# derive-error. We recover the password from the container's CONFIGURED command
+# (`docker inspect` .Config.Entrypoint/.Config.Cmd), NOT /proc/1/cmdline — an
+# entrypoint/setpriv wrapper can leave pid 1 as something other than
+# valkey-server, so the argv of pid 1 misses the flag while the child still
+# enforces it. compose_derive doesn't substitute placeholders in `command`, so
+# the server's requirepass is the literal ${VAR} string and we read back exactly
+# that; a server with no requirepass needs no password (plain PING).
 set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"; C="$DROP_TEST_CONTAINER"
 
+# Recover any --requirepass from the container's configured argv (entrypoint +
+# cmd), one token per line, parsed on the host.
+argv="$(docker inspect -f '{{range .Config.Entrypoint}}{{println .}}{{end}}{{range .Config.Cmd}}{{println .}}{{end}}' "$C" 2>/dev/null)"
+pw="$(printf '%s\n' "$argv" | awk '/^--requirepass$/{if(getline v)print v; exit} /^--requirepass=/{sub(/^--requirepass=/,""); print; exit}')"
+authflag=(); [ -n "$pw" ] && authflag=(-a "$pw" --no-auth-warning)
+
 deadline=$((SECONDS+30))
-authflag=()
-while :; do
-  # (Re)discover any --requirepass from the running server's argv. cat runs in the
-  # container; tr/awk parse on the host (so no awk is required inside the image).
-  pw="$(docker exec "$C" cat /proc/1/cmdline 2>/dev/null | tr '\0' '\n' \
-        | awk '/^--requirepass$/{if(getline v)print v; exit} /^--requirepass=/{sub(/^--requirepass=/,""); print; exit}')"
-  authflag=(); [ -n "$pw" ] && authflag=(-a "$pw" --no-auth-warning)
-  docker exec "$C" redis-cli "${authflag[@]}" ping 2>/dev/null | grep -qi PONG && break
-  (( SECONDS >= deadline )) && { echo "redis not responding to PING (auth=$([ -n "$pw" ] && echo yes || echo no))"; exit 1; }
+until docker exec "$C" redis-cli "${authflag[@]}" ping 2>/dev/null | grep -qi PONG; do
+  if (( SECONDS >= deadline )); then
+    # Rich diagnostics so a residual failure is legible, not another guess.
+    echo "redis not responding to PING (auth=$([ -n "$pw" ] && echo yes || echo no))"
+    echo "  cfg-cmd: $(printf '%s' "$argv" | tr '\n' ' ')"
+    echo "  pid1:    $(docker exec "$C" cat /proc/1/cmdline 2>/dev/null | tr '\0' ' ')"
+    echo "  ping:    $(docker exec "$C" redis-cli "${authflag[@]}" ping 2>&1 | head -1)"
+    echo "  logs:    $(docker logs "$C" 2>&1 | tail -3 | tr '\n' '|')"
+    exit 1
+  fi
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 1
 done

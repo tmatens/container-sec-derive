@@ -45,8 +45,9 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
 - `deploy-check.yml` + `scripts/deploy_check.sh` + `deploy-check/manifest.yaml`
   (csd#240): on the `csd` runner, per manifest entry, clone the service's **live**
   `dad/*` compose from Forgejo and run `compose_derive.sh` against it → per-service
-  `deploy_check` verdict in the job summary. **Report-only** (does not fail on a
-  verdict; graduate to enforce by exiting on the worst).
+  `deploy_check` verdict in the job summary. **Enforced** (`ENFORCE=1`): fails the
+  run on an under_permissioned service; over_permissioned / not_minimized stay
+  advisory.
 - **Decisions settled:** the runner reads the live composes over HTTPS with a
   **read-only `FORGEJO_RO_TOKEN`** repo secret (a vendored copy would drift — the
   point is the *real* deployment). First scope = **netdata** (validated on the

@@ -223,7 +223,7 @@ The caddy case (above) yields two rules for a locally-built (`build:`) image:
    is digest-pinned and meant to be pulled and reused by anyone running that image;
    a profile for a build only you can produce is neither pullable nor reproducible
    by others, so it can't be verified or shared. Deriving against a custom image
-   belongs to **deploy-check** — a report-only verdict on *your own* deployment —
+   belongs to **deploy-check** — a verdict on *your own* deployment —
    never to the catalog, which targets public, pullable images.
 
 2. **"The capability reads removable" is not the same as "safe to drop" — ask what

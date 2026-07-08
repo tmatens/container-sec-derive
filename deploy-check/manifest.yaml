@@ -3,8 +3,9 @@
 # For each entry the job clones the service's LIVE compose from Forgejo and runs
 # scripts/compose_derive.sh against it: derive the capability minimum under the
 # service's OWN invocation (on the posture-matched runner) and diff it against
-# the declared cap_add. Report-only — verdicts land in the job summary; the job
-# does not fail on a verdict.
+# the declared cap_add. Verdicts land in the job summary; under ENFORCE=1 (the
+# scheduled job) an under_permissioned service fails the run, while
+# over_permissioned / not_minimized stay advisory.
 #
 # `correctness` is a repo-relative correctness check (the per-service "still works
 # CORRECTLY" bar). A weak check under-derives, so only services with a real one

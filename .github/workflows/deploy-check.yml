@@ -3,8 +3,15 @@ name: deploy-check
 # (deploy-check/manifest.yaml), clone the service's LIVE compose from Forgejo and
 # run scripts/compose_derive.sh against it — deriving the capability minimum under
 # the REAL deployed invocation (on the posture-matched runner) and diffing it
-# against the declared cap_add. REPORT-ONLY: verdicts land in the job summary; the
-# job does not fail on a verdict (graduate to enforce later).
+# against the declared cap_add. ENFORCE=1: verdicts land in the job summary, and
+# the job FAILS (exit 12) if any service is under_permissioned — a needed cap is
+# missing, so the hardened deploy would break. not_minimized / over_permissioned /
+# clone-failed stay advisory (green). None of the current manifest services are
+# under_permissioned, so this gate is a regression tripwire, not a live red.
+#
+# A red is disambiguated by exit code: 12 = a real under_permissioned verdict;
+# 3 = the job could not run (e.g. the FORGEJO_RO_TOKEN secret below is unset).
+# So an infra/secret problem never masquerades as a security finding.
 #
 # MUST run on the self-hosted `csd` runner: the drop-test restarts real
 # containers, and the caps minimum for SYS_ADMIN/BPF-class caps is only truthful
@@ -22,17 +29,65 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  pull-requests: write # self-report the verdict table as a PR comment on dispatch
 jobs:
   deploy-check:
     runs-on: [self-hosted, csd]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: deploy-check (report-only)
+      - name: deploy-check (enforce — fails on under_permissioned)
         env:
           FORGEJO_RO_TOKEN: ${{ secrets.FORGEJO_RO_TOKEN }}
+          ENFORCE: "1"
         run: |
-          PY=python3 bash scripts/deploy_check.sh > summary.md 2> verdict.log || true
+          # stdout = the verdict table (captured to summary.md for the report step);
+          # stderr = the per-service progress heartbeat + final verdict line, left
+          # UN-redirected so the Actions console streams it live (derivation is
+          # minutes per service). Capture the exit code so a fail still surfaces
+          # the table — a bare `|| true` would swallow the enforce exit (12).
+          PY=python3 bash scripts/deploy_check.sh > summary.md && rc=0 || rc=$?
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
-          echo "----- verdict -----"
-          cat verdict.log
           cat summary.md
+          exit "$rc"
+      # Self-report: append the table to the job summary and, when this ref has an
+      # open PR (dispatch/schedule carry no PR context), upsert it as a PR comment
+      # over api.github.com — the only channel readable from a firewalled client.
+      # continue-on-error: a reporting hiccup must never red the security gate.
+      - name: Report verdict (job summary + PR comment)
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          [ -s summary.md ] || { echo "no verdict table (run could not derive); see the Actions run"; exit 0; }
+          { echo "### deploy-check report"; echo "[run](${RUN_URL})"; echo; cat summary.md; } >> "$GITHUB_STEP_SUMMARY"
+          # python3 (guaranteed on the runner) + urllib — no curl/jq dependency.
+          python3 - <<'PY'
+          import json, os, urllib.request as U
+          api="https://api.github.com"
+          repo=os.environ["REPO"]; tok=os.environ["GH_TOKEN"]
+          sha=os.environ["HEAD_SHA"]; run=os.environ["RUN_URL"]
+          H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json","User-Agent":"deploy-check"}
+          def req(method, path, body=None):
+              data=json.dumps(body).encode() if body is not None else None
+              with U.urlopen(U.Request(api+path, data=data, method=method, headers=H)) as r:
+                  return json.load(r)
+          summary=open("summary.md").read()
+          marker="<!-- csd-deploy-check-report -->"
+          pulls=req("GET", f"/repos/{repo}/commits/{sha}/pulls")
+          openpr=[p for p in pulls if p.get("state")=="open"]
+          if not openpr:
+              print("no open PR for this commit; job summary only"); raise SystemExit(0)
+          pr=openpr[0]["number"]
+          body=f"{marker}\n### deploy-check report\n[run]({run}) · commit `{sha[:9]}`\n\n{summary}\n"
+          comments=req("GET", f"/repos/{repo}/issues/{pr}/comments?per_page=100")
+          existing=next((c["id"] for c in comments if marker in (c.get("body") or "")), None)
+          if existing:
+              req("PATCH", f"/repos/{repo}/issues/comments/{existing}", {"body": body}); print("updated comment", existing)
+          else:
+              req("POST", f"/repos/{repo}/issues/{pr}/comments", {"body": body}); print("created comment on PR", pr)
+          PY

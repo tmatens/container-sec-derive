@@ -29,8 +29,8 @@ func TestProduceEgressObservation_Fixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.SchemaVersion != "1.5" {
-		t.Errorf("schema = %q, want 1.5", s.SchemaVersion)
+	if s.SchemaVersion != "1.6" {
+		t.Errorf("schema = %q, want 1.6", s.SchemaVersion)
 	}
 	if s.EgressRecommendation == nil || len(s.EgressRecommendation.Allowlist) != 2 {
 		t.Fatalf("allowlist = %+v, want 2 destinations", s.EgressRecommendation)

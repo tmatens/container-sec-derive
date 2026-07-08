@@ -165,6 +165,11 @@ func applyEgressFields(s *sidecar.Sidecar, eg *egressObservation, corr *dnsCorre
 	}
 	s.EgressDestinations = ed
 
+	// #206 name-centric provenance view: confirmed vs resolved-only destinations,
+	// each tagged with a publish visibility. Data alongside the allowlist, never
+	// widening it. nil-safe on corr (TCP-only egress → IP-only entries).
+	s.EgressDestinationIntel = buildEgressIntel(eg.Dests, corr)
+
 	// Cross-replica egress-set disagreement under --all-matching: any union
 	// destination not observed on every replica. The egress analog of
 	// ReplicaDeviceDisagreement; undefined (left empty) with <2 replicas. A

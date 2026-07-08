@@ -205,8 +205,8 @@ func TestRun_OutFlagWritesSidecar(t *testing.T) {
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("sidecar is not valid JSON: %v", err)
 	}
-	if s.SchemaVersion != "1.5" {
-		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.5")
+	if s.SchemaVersion != "1.6" {
+		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.6")
 	}
 	if len(s.Capabilities) != 5 {
 		t.Errorf("got %d capabilities, want 5", len(s.Capabilities))

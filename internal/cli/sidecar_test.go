@@ -56,8 +56,8 @@ func TestWriteSidecar_ChownAndMode(t *testing.T) {
 
 func TestNewSidecar_Constants(t *testing.T) {
 	s := sidecar.NewSidecar()
-	if s.SchemaVersion != "1.5" {
-		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.5")
+	if s.SchemaVersion != "1.6" {
+		t.Errorf("SchemaVersion = %q, want %q", s.SchemaVersion, "1.6")
 	}
 	if s.ToolVersion != "0.7.0" {
 		t.Errorf("ToolVersion = %q, want %q", s.ToolVersion, "0.7.0")

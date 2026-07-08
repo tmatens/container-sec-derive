@@ -36,8 +36,14 @@ import (
 // (the UDP/53 resolver endpoints a default-DROP allowlist must permit). A
 // TCP-only egress sidecar (no --dns-fixture / no live trace_dns) is byte-identical
 // under 1.5 save for the schema_version string; all prior sidecars likewise.
+// The #206 egress provenance model bumps 1.5 -> 1.6 for one more additive,
+// omitempty egress field: `egress_destination_intel`, a name-centric,
+// provenance- and visibility-tagged view of the observed egress (see
+// EgressDestinationIntel). A non-egress sidecar is byte-identical under 1.6 save
+// for the schema_version string; a 1.6-aware consumer knows an egress document
+// may carry the intel block.
 const (
-	SchemaVersion = "1.5"
+	SchemaVersion = "1.6"
 	ToolVersion   = "0.7.0"
 	// Caveat is hardcoded so downstream consumers cannot strip the
 	// "this is workload-bounded, not a correctness proof" framing.
@@ -131,6 +137,10 @@ type Sidecar struct {
 	// minimum allowlist recommendation.
 	EgressDestinations   []EgressDestination   `json:"egress_destinations,omitempty"`
 	EgressRecommendation *EgressRecommendation `json:"egress_recommendation,omitempty"`
+	// EgressDestinationIntel is the #206 name-centric provenance view of the
+	// egress. Additive, omitempty; see the type doc. Never widens the enforced
+	// allowlist (EgressRecommendation.Allowlist) — it is data alongside it.
+	EgressDestinationIntel []EgressDestinationIntel `json:"egress_destination_intel,omitempty"`
 
 	TraceHealth TraceHealth `json:"trace_health"`
 	Confidence  Confidence  `json:"confidence"`
@@ -265,6 +275,47 @@ type EgressDestination struct {
 	Hostnames   []string `json:"hostnames,omitempty"`
 	EventCount  int      `json:"event_count"`
 	CommSamples []string `json:"comm_samples,omitempty"`
+}
+
+// Egress provenance + visibility tag values (issue #206). Provenance separates a
+// destination the container actually dialed from one it merely resolved;
+// visibility separates a public endpoint that generalizes across deployments
+// from the operator's own topology, which must never reach a public profile.
+const (
+	// EgressProvenanceConfirmed: an observed connect() reached one of Addrs.
+	EgressProvenanceConfirmed = "confirmed"
+	// EgressProvenanceResolvedOnly: the name was resolved (trace_dns) but none of
+	// its addresses were dialed this run — a coverage candidate, surfaced but
+	// never auto-added to the enforced allowlist.
+	EgressProvenanceResolvedOnly = "resolved_only"
+	// EgressVisibilityImageIntrinsic: a public-routable destination (public FQDN /
+	// public IP) that is a property of the image — publishable (names only).
+	EgressVisibilityImageIntrinsic = "image_intrinsic"
+	// EgressVisibilityDeploymentSpecific: a private/internal destination — the
+	// operator's topology; local-only, never published. The conservative default
+	// on any ambiguity.
+	EgressVisibilityDeploymentSpecific = "deployment_specific"
+)
+
+// EgressDestinationIntel is the #206 name-centric, provenance- and
+// visibility-tagged view of the observed egress. It is DATA, not enforcement:
+// the enforced allowlist stays EgressRecommendation.Allowlist (confirmed
+// connects only). This block additionally surfaces names the container RESOLVED
+// but did not dial (Provenance == "resolved_only"), so a coverage gap is visible
+// without widening the allowlist, and tags each destination's publish Visibility
+// so a consumer never leaks the operator's topology into a public profile.
+//
+// Grouped by the resolved hostname where DNS was observed (folding the many IPs
+// a name resolves to into one entry); an IP contacted with no observed lookup is
+// one entry with an empty Name. Addrs are a POINT-IN-TIME SNAPSHOT — they rot as
+// services move, so a durable name-based policy needs a name-aware enforcer, not
+// these IPs frozen.
+type EgressDestinationIntel struct {
+	Name       string   `json:"name,omitempty"` // resolved hostname; empty for an IP dialed with no observed DNS
+	Addrs      []string `json:"addrs"`          // observed/resolved IPs for this destination (snapshot; sorted, distinct)
+	Ports      []int    `json:"ports,omitempty"`
+	Provenance string   `json:"provenance"` // EgressProvenance*
+	Visibility string   `json:"visibility"` // EgressVisibility*
 }
 
 // FSRecommendation is the v0.2 read-only-filesystem conclusion: make the

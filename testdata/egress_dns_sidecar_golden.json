@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.5",
+  "schema_version": "1.6",
   "image": "myapp:1",
   "observed_at": "2026-04-19T12:00:00Z",
   "duration_seconds": 600,
@@ -71,6 +71,39 @@
     ],
     "caveat": "Egress allowlist reflects only destinations contacted during observation. A destination the workload did not exercise will be BLOCKED by these rules — verify completeness before enforcing default-deny."
   },
+  "egress_destination_intel": [
+    {
+      "name": "api.example.com",
+      "addrs": [
+        "1.1.1.1"
+      ],
+      "ports": [
+        443
+      ],
+      "provenance": "confirmed",
+      "visibility": "image_intrinsic"
+    },
+    {
+      "name": "cdn.example.com",
+      "addrs": [
+        "2606:4700:4700::1001",
+        "2606:4700:4700::1111"
+      ],
+      "provenance": "resolved_only",
+      "visibility": "image_intrinsic"
+    },
+    {
+      "name": "db.internal",
+      "addrs": [
+        "10.0.0.5"
+      ],
+      "ports": [
+        5432
+      ],
+      "provenance": "confirmed",
+      "visibility": "deployment_specific"
+    }
+  ],
   "trace_health": {
     "events_recorded": 3,
     "events_dropped": 0,

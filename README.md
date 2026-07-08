@@ -34,6 +34,18 @@ Every observer emits to your choice of format (Compose, `docker run`, Kubernetes
 
 > **Status: v0.7.0 released**, actively developed. The shipped observers are `caps`, `fs`, `devices`, `privileged`, `capadd`, and `egress`; the Docker-socket and host-network observers are still ahead (see [ROADMAP.md](ROADMAP.md)). Full per-release history in [CHANGELOG.md](CHANGELOG.md).
 
+## How it works: observe and bisect
+
+`csd` finds the minimum permissions a container needs using two independent methods that cross-check each other.
+
+**Observe** watches the container run. Using eBPF, `csd` records every permission the container requests from the kernel while you exercise it. The set of requests is the minimum config — built up from what actually happened, with no guessing.
+
+**Bisect** uses the kernel as the judge. `csd` removes one permission, restarts the container, and runs your workload. If it still works, the permission wasn't needed; if it breaks, it was. Repeating this until nothing more can be removed leaves a set that is *1-minimal* — you can't drop a single permission without something breaking. "Still works" is decided by an application-level correctness check that drives the real service (e.g. sign in and upload a file), not merely "the process is still running" — a daemon can keep running while silently failing to do its job.
+
+The two are deliberately independent. Observe asks *what the container used*; bisect asks *what it can't run without*. A trustworthy result is one where both agree.
+
+Both share one limit worth stating plainly: they can only account for what your workload actually does during the run. A permission needed by a code path you never trigger is invisible to both. The more representative your workload, the more complete the result — which is why `csd` reports how confident it is, and never claims to be a correctness proof.
+
 ## Audience
 
 The primary user is the **Docker/Compose single-node operator** — the self-hoster / homelab maintainer or small-team ops engineer who hardens services with `docker compose up`, not a cluster. That's the surface no observe→emit tool speaks natively (the Kubernetes side is already crowded — Security Profiles Operator, Kubescape, KubeArmor, Cilium; see [docs/comparison.md](docs/comparison.md)), so `csd` bets on it deliberately. The `k8s` / `oci` formatters are the bridge for the crossover case (a derived profile that must also apply to a k8s workload), not a claim to be Kubernetes-first — see [PLAN.md "Positioning"](PLAN.md#positioning-audience-moat-and-the-seccomp-gap) for the full bet and [Out of scope](#out-of-scope).

@@ -9,6 +9,10 @@ name: deploy-check
 # clone-failed stay advisory (green). None of the current manifest services are
 # under_permissioned, so this gate is a regression tripwire, not a live red.
 #
+# A red is disambiguated by exit code: 12 = a real under_permissioned verdict;
+# 3 = the job could not run (e.g. the FORGEJO_RO_TOKEN secret below is unset).
+# So an infra/secret problem never masquerades as a security finding.
+#
 # MUST run on the self-hosted `csd` runner: the drop-test restarts real
 # containers, and the caps minimum for SYS_ADMIN/BPF-class caps is only truthful
 # on a host matching the deploy target's posture (docs/self-hosted-runner.md).

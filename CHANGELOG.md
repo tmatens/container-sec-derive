@@ -107,7 +107,11 @@ the relevant entry.
   (matches / not_minimized / over_permissioned / under_permissioned) land in the
   job summary; under `ENFORCE=1` (the scheduled job) an **under_permissioned**
   service **fails the run** (exit 12) — a needed cap is missing, so the hardened
-  deploy would break — while over_permissioned / not_minimized stay advisory.
+  deploy would break — while over_permissioned / not_minimized stay advisory. A
+  red is disambiguated by exit code so an infra/secret problem never looks like a
+  security finding: **12** = a real under_permissioned verdict; **3** = the job
+  could not run (no clone credential — `FORGEJO_RO_TOKEN` unset). A per-service
+  clone failure stays advisory (exit 0) but is flagged as a coverage gap.
   First manifest covers **netdata**, **homepage**, **caddy**, and
   immich's **postgres** and **redis (valkey)** — all validated end-to-end on the
   matched host. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.

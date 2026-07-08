@@ -131,47 +131,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # Single source of truth for the ig version: internal/ig/ig.go's
-      # PinnedIGVersion, same extraction as image-build.yml. csd also
-      # enforces this pin at runtime (ExitSchemaMismatch on mismatch),
-      # so installing the wrong version here surfaces as a smoke FAIL.
-      - name: Resolve pinned ig version
-        id: vars
-        run: |
-          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
-          if [ -z "${ig_version}" ]; then
-            echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go"
-            exit 1
-          fi
-          echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
-
-      # Fetch + verify ig against the committed supply-chain pin, exactly
-      # as the Dockerfile builder stage does: download the per-arch
-      # tarball from the IG release, check its sha256 against the line in
-      # ig-pin/SHA256SUMS (signed at pin-bump time by refresh-ig-pin.sh),
-      # then install to /usr/local/bin (on sudo's secure_path). No
-      # fallback download path — a digest miss fails the job.
+      # Fetch + verify the pinned ig against the committed supply-chain pin
+      # (ig-pin/SHA256SUMS, signed at pin-bump time by refresh-ig-pin.sh) and
+      # install it to /usr/local/bin. Version is internal/ig/ig.go's
+      # PinnedIGVersion; csd also enforces the pin at runtime
+      # (ExitSchemaMismatch on mismatch), so a wrong ig surfaces as a smoke
+      # FAIL. Shared with the self-hosted lane so the two can't drift.
       - name: Install pinned ig (per-arch, verified against ig-pin/SHA256SUMS)
-        env:
-          IG_VERSION: ${{ steps.vars.outputs.ig_version }}
-        run: |
-          set -euo pipefail
-          # ig ships per-arch tarballs; pick by the runner's arch so the arm64
-          # leg installs arm64 ig. dpkg's arch names (amd64/arm64) match ig's
-          # artifact naming exactly, and ig-pin/SHA256SUMS carries both digests.
-          arch="$(dpkg --print-architecture)"
-          artifact="ig-linux-${arch}-${IG_VERSION}.tar.gz"
-          url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"
-          curl -fsSL "${url}" -o "/tmp/${artifact}"
-          line="$(grep -E "  ${artifact}\$" ig-pin/SHA256SUMS || true)"
-          if [ -z "${line}" ]; then
-            echo "::error::no digest for ${artifact} in ig-pin/SHA256SUMS — bump PinnedIGVersion and run scripts/refresh-ig-pin.sh"
-            exit 1
-          fi
-          ( cd /tmp && printf '%s\n' "${line}" | sha256sum -c - )
-          tar -C /tmp -xzf "/tmp/${artifact}" ig
-          sudo install -m 0755 /tmp/ig /usr/local/bin/ig
-          ig version
+        run: scripts/install_pinned_ig.sh
 
       - name: Build csd
         run: go build -o csd ./cmd/csd
@@ -396,36 +363,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Resolve pinned ig version
-        id: vars
-        run: |
-          ig_version="$(awk -F'"' '/^[[:space:]]+PinnedIGVersion[[:space:]]+=/ {print $2; exit}' internal/ig/ig.go)"
-          if [ -z "${ig_version}" ]; then
-            echo "::error::could not extract PinnedIGVersion from internal/ig/ig.go"
-            exit 1
-          fi
-          echo "ig_version=${ig_version}" >> "$GITHUB_OUTPUT"
-
       - name: Install pinned ig (per-arch, verified against ig-pin/SHA256SUMS)
-        env:
-          IG_VERSION: ${{ steps.vars.outputs.ig_version }}
-        run: |
-          set -euo pipefail
-          # ig ships per-arch tarballs; pick by the runner's arch so the arm64
-          # leg installs arm64 ig. dpkg's arch names (amd64/arm64) match ig's
-          # artifact naming exactly, and ig-pin/SHA256SUMS carries both digests.
-          arch="$(dpkg --print-architecture)"
-          artifact="ig-linux-${arch}-${IG_VERSION}.tar.gz"
-          url="https://github.com/inspektor-gadget/inspektor-gadget/releases/download/${IG_VERSION}/${artifact}"
-          curl -fsSL "${url}" -o "/tmp/${artifact}"
-          line="$(grep -E "  ${artifact}\$" ig-pin/SHA256SUMS || true)"
-          if [ -z "${line}" ]; then
-            echo "::error::no digest for ${artifact} in ig-pin/SHA256SUMS"
-            exit 1
-          fi
-          ( cd /tmp && printf '%s\n' "${line}" | sha256sum -c - )
-          tar -C /tmp -xzf "/tmp/${artifact}" ig
-          sudo install -m 0755 /tmp/ig /usr/local/bin/ig
+        run: scripts/install_pinned_ig.sh
 
       - name: Build csd
         run: go build -o csd ./cmd/csd

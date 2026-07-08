@@ -111,7 +111,10 @@ the relevant entry.
   red is disambiguated by exit code so an infra/secret problem never looks like a
   security finding: **12** = a real under_permissioned verdict; **3** = the job
   could not run (no clone credential — `FORGEJO_RO_TOKEN` unset). A per-service
-  clone failure stays advisory (exit 0) but is flagged as a coverage gap.
+  clone failure stays advisory (exit 0) but is flagged as a coverage gap. The job
+  streams a per-service progress heartbeat (`[n/5] deriving …`) live to the
+  Actions console and self-reports the verdict table to the job summary and, on a
+  ref with an open PR, as an upserted PR comment (readable without the log API).
   First manifest covers **netdata**, **homepage**, **caddy**, and
   immich's **postgres** and **redis (valkey)** — all validated end-to-end on the
   matched host. Needs a read-only `FORGEJO_RO_TOKEN` repo secret.

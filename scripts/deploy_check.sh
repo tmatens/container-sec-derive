@@ -66,12 +66,19 @@ printf '| service | verdict | drop | add | detail |\n|---|---|---|---|---|\n'
 
 worst=0        # most severe verdict seen (0 ok · 1 advisory · 2 under_permissioned)
 unchecked=0    # services that could not be checked (clone failed) — a coverage gap
+# Progress heartbeat goes to stderr (the caller leaves it un-redirected so it
+# streams live to the console — the derivation is minutes per service).
+total=0; for _l in "${ENTRIES[@]}"; do [ -n "$_l" ] && total=$((total + 1)); done
+i=0
 for line in "${ENTRIES[@]}"; do
   IFS=$'\t' read -r name repo cpath service correctness <<<"$line"
   [ -n "$name" ] || continue
+  i=$((i + 1))
+  echo "progress: [$i/$total] deriving $name ($repo)…" >&2
   cdir="$WORK/$name"
   if ! clone_repo "$repo" "$cdir" 2>"$WORK/clone.err"; then
     printf '| %s | ⚠️ clone-failed | | | %s |\n' "$name" "$(tail -1 "$WORK/clone.err" | tr '|' '/')"
+    echo "progress: [$i/$total] $name → clone-failed" >&2
     worst=1; unchecked=$((unchecked + 1)); continue
   fi
   CORRECTNESS="$correctness" PY="$PY" \
@@ -85,6 +92,7 @@ for line in "${ENTRIES[@]}"; do
     *)  v="⚠️ derive-error";       sev=1 ;;
   esac
   [ "$sev" -gt "$worst" ] && worst="$sev"
+  echo "progress: [$i/$total] $name → $v" >&2
   if [ "$rc" = 0 ] || [ "$rc" -ge 10 ]; then
     drop="$("$PY" -c 'import json,sys; d=json.load(open(sys.argv[1]))["deploy_check"]; print(" ".join(d["drop"]) or "—")' "$WORK/out.json" 2>/dev/null || echo '—')"
     add="$("$PY" -c 'import json,sys; d=json.load(open(sys.argv[1]))["deploy_check"]; print(" ".join(d["add"]) or "—")' "$WORK/out.json" 2>/dev/null || echo '—')"

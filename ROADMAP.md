@@ -174,6 +174,95 @@ For users running iptables/nftables egress filtering or Cilium-style network pol
 
 ---
 
+## Workload coverage & egress-as-data — issue #206 [design settled, unscheduled]
+
+> **Thesis (issue #206):** every observer's output is bounded by what the
+> `--workload` exercised, and that coverage gap is today only *caveated*, never
+> *measured*. For a security tool, an unmeasured gap ships under-permissive output
+> that "looks complete" — and for `egress` (inverted risk) a missed destination
+> becomes a default-DROP that breaks the app. Measuring and narrowing coverage is
+> where the product's value compounds, versus the aggregation/formatting (the easy
+> half). This epic is the consolidated design; the issue thread carries the
+> evidence.
+
+**North star: csd derives, the operator enforces.** There is no single portable
+way to enforce name-based egress (Cilium `toFQDNs`, an L7 proxy, a host nftables
+set — each different, none universal), so csd should not chase enforcement across
+runtimes. The egress deliverable is **provenance-tagged destination data**; the
+`nftables`/`k8s-networkpolicy`/`toFQDNs`/proxy renders are optional per-context
+adapters, and `json` is the canonical output.
+
+**Spike evidence (2026-07-08, issue #206).** A live measurement (real ig
+v0.51.0, concurrent `trace_dns`+`trace_tcp`) tested the "resolved-but-not-connected
+= coverage gap" signal. **IP-level it is 82% noise** (dual-stack AAAA never dialed
+on a no-v6 host; multi-A CDN/LB pools). **Name-level it is clean** — the dual-stack
+torture test produced *zero* false positives while genuine resolved-but-never-dialed
+names were caught exactly. So the signal is real **only at name granularity**, and
+only as a *complement* (it is blind to direct-IP egress — common in homelab).
+
+### The provenance data model
+
+Each egress destination carries:
+
+- `name` + `observed_ips` (the IPs *this container* was told to use, from its own
+  `trace_dns` answers) + `ports`;
+- **provenance**: `confirmed` (observed connecting) vs `resolved-only` (looked up,
+  not dialed this run — the name-level DNS-vs-connect candidate);
+- **visibility**: `image-intrinsic` (public-safe) vs `deployment-specific`
+  (local-only), computed mechanically (see public-safety below);
+- honesty metadata: `observed_ips` are a **point-in-time snapshot** that rots as
+  services move — a name-aware enforcer is needed to stay correct.
+
+### Public-profile safety (conservative, fail-safe)
+
+Unlike caps/fs/devices (properties of the *image*), egress destinations are mostly
+the operator's *topology* — publishing them leaks network layout and is wrong for
+other deployments. So:
+
+1. `egress` is **local-only by default**; full names + snapshot IPs live only in
+   the local sidecar (the operator's own data).
+2. The `compose-lint-profile` formatter emits **no egress destinations** by default.
+3. The only publishable egress artifact is an **opt-in, auto-redacted,
+   image-intrinsic public-FQDN advisory** (names not IPs) — "this image contacts
+   these external endpoints by design."
+4. Redaction is **automatic, never manual**: a destination is `deployment-specific`
+   (excluded) if it is a private/reserved IP (RFC-1918, CGNAT `100.64/10`, loopback,
+   link-local, ULA) or an internal name (`.lan`/`.local`/`.internal`/`.corp`/`.arpa`,
+   any dotless single-label name). Only a public-routable IP / public multi-label
+   FQDN is even a candidate, and even then the name is kept and the IP dropped.
+5. That advisory still passes the existing human-reviewed contribution PR.
+6. **On any ambiguity, classify `deployment-specific`** — the costs are asymmetric
+   (a false "private" loses one advisory line; a false "public" leaks topology).
+
+### Staged build (each slice independent, none scheduled)
+
+1. **Egress provenance data model** (json/sidecar): name-level destinations tagged
+   `confirmed`/`resolved-only` with the `visibility` scope + snapshot honesty.
+   Enforcement renders become adapters over this. Hermetically testable from the
+   spike captures.
+2. **Public-profile safety**: the local-only default + the auto-redacted opt-in
+   advisory + the `visibility` gate on the `compose-lint-profile` formatter.
+3. **Generic coverage signals (all observers)**: run-to-run **convergence** (rerun /
+   longer window; new behavior still appearing ⇒ incomplete — and it catches the
+   direct-IP egress DNS cannot see), and promote steady-state / target-exited-early
+   from buried confidence inputs to first-class coverage *outputs*. This is the
+   generalization of the v1 entrypoint cross-check (PLAN.md §Workload coverage) and
+   subsumes the `probes.yaml` placeholder.
+4. **Later / optional**: name-aware enforcement *adapters* (Cilium `toFQDNs`, a
+   squid/Envoy proxy allowlist config); a **forgiving, optional** named manifest
+   (fuzzy match, warn-never-fail, never the price of entry); `csd record`/replay of
+   a long window; hooks to score an existing e2e/load suite's coverage.
+
+### Non-goals
+
+- csd does not own runtime enforcement, and does not auto-widen a default-DROP
+  allowlist (DNS candidates are surfaced, promoted only on explicit opt-in).
+- No hand-authored exact-IP manifest as the entry point — coverage must be mostly
+  auto-derived (DNS-vs-connect at name level, convergence) with any manifest
+  optional and forgiving.
+
+---
+
 ## Stretch — beyond the named rules
 
 - **Resource baselines.** Observe peak memory / CPU usage; emit `mem_limit:` / `cpus:` recommendations. Could justify a new compose-lint rule.

@@ -30,6 +30,12 @@
 # budget for PRs. The bisection job (make ground-truth-*, ~5-8 min PER image) is
 # workflow_dispatch-only for the same reason — it must never run per-PR.
 #
+# Docker-29 validation lane (issue #180): the `docker29` dispatch input reruns the
+# whole smoke matrix against Docker Engine 29 + the containerd image store
+# (scripts/install_docker29.sh) so "Docker >= 20.10" becomes a tested RANGE, not
+# just a floor. workflow_dispatch-only (it mutates the runner's engine); promote
+# to a monthly cron once the Actions budget allows.
+#
 # All third-party actions SHA-pinned per CLAUDE.md §Dependency pinning;
 # SHAs are kept in lockstep with ci.yml / image-build.yml / release.yml.
 name: integration
@@ -67,6 +73,11 @@ on:
         options: [none, postgres, caddy, tailscale, all]
       run_missrate:
         description: "Run the kretprobe miss-rate (capture-deficit) measurement"
+        required: false
+        default: false
+        type: boolean
+      docker29:
+        description: "Validation lane (#180): install Docker 29 + the containerd image store before the smokes, so the caps/fs gates run against the Docker-29 default store"
         required: false
         default: false
         type: boolean
@@ -142,6 +153,19 @@ jobs:
 
       - name: Build csd
         run: go build -o csd ./cmd/csd
+
+      # Docker-29 validation lane (issue #180 TODO 3). workflow_dispatch-only, opt
+      # in via the `docker29` input: replace the runner's Docker with Engine 29 and
+      # switch it to the containerd image store BEFORE the smokes, so the existing
+      # caps/fs/device/capadd/egress gates all run against the Docker-29 default
+      # store (which changes `docker history` — the exact path #328 hardened). The
+      # preflight below then records `docker-store=overlayfs …io.containerd.snapshotter.v1`,
+      # so the flip is visible in the diagnostic report. Skipped on every PR run
+      # (Actions cost + it mutates the engine); the script hard-fails if either the
+      # version or the store didn't take, so a green run is a real attestation.
+      - name: Install Docker 29 + containerd image store (validation lane)
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.docker29 == 'true'
+        run: scripts/install_docker29.sh
 
       # Fixed-fact preflight so a failure self-classifies (BTF absent →
       # CO-RE can't attach; ig version mismatch → SchemaMismatch). These

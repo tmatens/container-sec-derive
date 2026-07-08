@@ -79,6 +79,19 @@ the relevant entry.
 
 ### Added
 
+- **Docker-29 validation lane — run the live-BPF gates against the containerd
+  image store (#180).** A `docker29` `workflow_dispatch` input on the integration
+  workflow installs Docker Engine 29 and switches the runner to the containerd
+  image store (`scripts/install_docker29.sh`) before the smokes, so the existing
+  caps/fs/device/capadd/egress gates all run against the Docker-29 fresh-install
+  default — the store that changes `docker history` (the exact path #328 hardened
+  to degrade gracefully). Turns the `PLAN.md` "Docker ≥ 20.10" floor into a tested
+  **range** rather than a single-version assumption. The installer is idempotent
+  and hard-fails if either the version or the store didn't take, so a green run is
+  a real attestation; the preflight's `docker-store=` line makes the flip visible
+  in the diagnostic report. `workflow_dispatch`-only for now (it mutates the
+  runner's engine and costs Actions minutes) — promotable to a monthly cron.
+
 - **Live-BPF preflight now records the Docker version and image store (#180).**
   The hosted and self-hosted integration lanes ran the live smokes against
   whatever Docker the runner shipped, un-pinned and unrecorded — so a smoke

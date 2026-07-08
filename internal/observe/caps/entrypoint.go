@@ -49,6 +49,15 @@ type entrypointInspection struct {
 	Cmd          []string `json:"cmd"`
 	HistoryLines []string `json:"history_lines"`
 	RepoDigests  []string `json:"repo_digests,omitempty"`
+
+	// historyErr records a non-fatal `<runtime> history` failure when the
+	// `inspect` half succeeded. When set, argv heuristics + digest promotion
+	// still run off the inspect data; only the setcap-from-history signals are
+	// absent (issue #180: a Docker-29 containerd-store `history` regression must
+	// not discard a good digest/Config). Unexported, so it is neither serialized
+	// into sidecars nor read from --inspect-fixture JSON (fixtures always run the
+	// full cross-check).
+	historyErr error
 }
 
 // argvHeuristic is one row of PLAN.md §Workload coverage item 1's table.
@@ -95,10 +104,14 @@ type signalHit struct {
 }
 
 // inspectEntrypoint runs `<runtime> inspect` + `<runtime> history` for image
-// and returns the combined metadata. Both subprocesses must succeed; a
-// partial-data path would force callers to distinguish "no history" from
-// "history unavailable," which is more cognitive load than it's worth
-// for a proxy signal. runtimeBin is the container CLI (`docker`/`podman`, see
+// and returns the combined metadata. The two calls are decoupled (issue #180):
+// `inspect` failure is fatal (returns a non-nil error; without argv/digest there
+// is nothing to cross-check), but a `history` failure is soft -- the inspect data
+// (Entrypoint/Cmd/RepoDigests) is returned with insp.historyErr set so the caller
+// still applies the argv cross-check and promotes the digest. This matters under
+// Docker 29's containerd image store, where `history` can degrade (layers become
+// `<missing>` for non-locally-built images) while `inspect` stays healthy.
+// runtimeBin is the container CLI (`docker`/`podman`, see
 // internal/runtime); empty defaults to docker. docker and podman share these
 // commands + --format templates (podman's docker-compatible inspect surface).
 func inspectEntrypoint(ctx context.Context, image, runtimeBin string) (entrypointInspection, error) {
@@ -137,7 +150,11 @@ func inspectEntrypoint(ctx context.Context, image, runtimeBin string) (entrypoin
 
 	historyOut, err := exec.CommandContext(ctx, runtimeBin, "history", "--no-trunc", "--format", "{{.CreatedBy}}", "--", image).Output()
 	if err != nil {
-		return insp, fmt.Errorf("%s history %s: %w", runtimeBin, image, err)
+		// Soft-fail: keep the good inspect data (Entrypoint/Cmd/RepoDigests) and
+		// let the caller run the argv cross-check + promote the digest. Only the
+		// setcap-from-history signals are lost. See issue #180.
+		insp.historyErr = fmt.Errorf("%s history %s: %w", runtimeBin, image, err)
+		return insp, nil
 	}
 	scan := bufio.NewScanner(bytes.NewReader(historyOut))
 	scan.Buffer(make([]byte, 64*1024), observe.MaxScanLineBytes)
@@ -242,6 +259,11 @@ func setcapCapsFromHistory(lines []string) []string {
 //  2. Live `docker inspect` + `docker history` against s.Image
 //  3. Skip (fixture mode without --inspect-fixture, or no image ref)
 //
+// A live `history` failure is non-fatal (issue #180): the argv cross-check +
+// digest promotion still run off the inspect data and CrossCheckStatus records
+// the degradation via CrossCheckStatusPartialHistoryPrefix. Only a full `inspect`
+// failure (or an unreadable fixture) short-circuits with a non-ok status.
+//
 // Phase A (PLAN.md §Workload coverage item 2 deferred): divergence is
 // recorded but does NOT force confidence to low; ComputeConfidence reads
 // the populated fields and emits an informational factor.
@@ -288,7 +310,16 @@ func ApplyEntrypointCrossCheck(s *sidecar.Sidecar, inspectFixture, runtimeBin st
 	if s.ImageDigest == "" {
 		s.ImageDigest = observe.PickRepoDigest(s.Image, insp.RepoDigests)
 	}
-	s.CrossCheckStatus = sidecar.CrossCheckStatusOK
+	// A soft `history` failure degrades to a "partial" status but keeps the
+	// argv cross-check + digest authoritative (issue #180); a clean run is "ok".
+	if insp.historyErr != nil {
+		s.CrossCheckStatus = sidecar.CrossCheckStatusPartialHistoryPrefix + truncateReason(insp.historyErr.Error())
+		if stderrSink != nil {
+			fmt.Fprintf(stderrSink, "csd: entrypoint cross-check partial (history unavailable): %v\n", insp.historyErr)
+		}
+	} else {
+		s.CrossCheckStatus = sidecar.CrossCheckStatusOK
+	}
 	if stderrSink != nil {
 		for _, w := range s.CoverageWarnings {
 			fmt.Fprintf(stderrSink, "csd: coverage_warning: %s\n", w)

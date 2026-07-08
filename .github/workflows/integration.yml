@@ -157,6 +157,16 @@ jobs:
               echo "preflight: BTF=ABSENT (cap_capable CO-RE cannot attach)"
             fi
             echo "preflight: ig=$(ig version 2>&1 | head -1)"
+            # Record what Docker the run actually tested against (issue #180): the
+            # hosted runner ships an unpinned Docker, and Docker 29 makes the
+            # containerd image store the default -- which changes `docker history`.
+            # Both are single projected --format fields (Server.Version, Driver),
+            # never a `docker info`/`inspect` blob, so no env/secret can ride along.
+            echo "preflight: docker=$(docker version --format '{{.Server.Version}}' 2>&1 | head -1)"
+            # Driver=overlay2 -> legacy graphdriver store; Driver=overlayfs with a
+            # DriverStatus of io.containerd.snapshotter.v1 -> containerd image store
+            # (Docker 29 default). DriverStatus is a projected slice field, not a blob.
+            echo "preflight: docker-store=$(docker info --format '{{.Driver}} {{.DriverStatus}}' 2>&1 | head -1)"
           } | tee preflight.txt
 
       # jq + docker are preinstalled on ubuntu-24.04 runners. Run the

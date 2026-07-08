@@ -69,6 +69,10 @@ jobs:
             if [ -e /sys/kernel/btf/vmlinux ]; then echo "self-hosted preflight: BTF=present"; else echo "self-hosted preflight: BTF=ABSENT"; fi
             echo "self-hosted preflight: ig=${ig_have:-MISSING} (pin ${ig_pin})"
             echo "self-hosted preflight: docker=$(docker version --format '{{.Server.Version}}' 2>&1 | head -1)"
+            # Image store: overlay2 -> legacy graphdriver; overlayfs + a DriverStatus of
+            # io.containerd.snapshotter.v1 -> containerd image store (Docker 29 default).
+            # See issue #180 -- `docker history` differs under the containerd store.
+            echo "self-hosted preflight: docker-store=$(docker info --format '{{.Driver}} {{.DriverStatus}}' 2>&1 | head -1)"
           } | tee preflight_sh.txt
           if [ "${ig_have}" != "${ig_pin}" ]; then
             echo "::error::pinned ig ${ig_pin} missing/mismatched on runner (found '${ig_have:-none}') — smokes would fail IGMissing(31); see docs/self-hosted-runner.md"

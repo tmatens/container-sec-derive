@@ -74,9 +74,11 @@ services:
   # data dir, would chown it (CHOWN). immich now runs valkey with `read_only: true`
   # + `tmpfs: /data` (#38) and `--requirepass` (#36), so: (a) the correctness check
   # MUST authenticate — an unauth PING returns NOAUTH, which is what made this row
-  # derive as derive-error before #332; and (b) whether CHOWN is exercised now turns
-  # on the fresh tmpfs /data's ownership, so the drop-test settles the verdict rather
-  # than the old "pre-owned /data → drop CHOWN" assumption. The correctness check
+  # derive as derive-error before #332; and (b) CHOWN IS needed — the entrypoint
+  # chowns the fresh, root-owned tmpfs /data on boot. Since #337 the drop-test
+  # reproduces the tmpfs faithfully (before, /data fell back to the image's pre-owned
+  # dir, chown was a no-op, and CHOWN derived falsely-removable — which failed the
+  # live deploy, immich #44). Expected verdict now: matches. The correctness check
   # does an auth-aware PING + SET/GET round-trip and asserts a non-root server uid.
   - name: immich-redis
     forgejo_repo: dad/immich

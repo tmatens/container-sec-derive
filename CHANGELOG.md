@@ -32,6 +32,20 @@ the relevant entry.
 
 ### Fixed
 
+- **deploy-check: reproduce `tmpfs:`/`read_only:` so cold-start caps derive
+  faithfully (#337).** `compose_to_spec.py` (split out of `compose_derive.sh` to be
+  unit-testable) now carries a service's `tmpfs:` mounts and `read_only:` flag into
+  the drop-test spec — they were silently dropped. Without them a `tmpfs: /data`
+  fell back to the image's **pre-owned** dir, so a container that chowns its data
+  dir on boot (valkey → `CHOWN`) never exercised the chown and the cap derived as
+  falsely **removable** — a "safe to drop" that then failed the live deploy
+  (immich #44 → health-check fail → auto-rollback). A `tmpfs` now stages a fresh,
+  root-owned dir, exercising the cold-start chown, so chown-class caps
+  (CHOWN/FOWNER/…) derive like bind-mounted data dirs already did. New hermetic
+  `compose_derive_selftest.sh` (python+yaml, no docker; `make
+  compose-derive-selftest`, in the CI gate) locks the propagation. General lesson:
+  cold-start **asset creation** is a distinct coverage dimension the harness must
+  exercise, now guarded by a test.
 - **deploy-check self-report now posts to the associated PR regardless of its
   state.** The verdict comment only upserted onto an *open* PR, so a dispatch
   fired to validate a branch that was merged mid-run left a closed PR and the

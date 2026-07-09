@@ -1,9 +1,9 @@
 #!/bin/sh
-# Synthetic drop-test fidelity target (csd#340 items 2 & 3). Demonstrates that a
-# capability's necessity depends on the mounted dir's INITIAL STATE — content,
-# ownership, AND permission mode — none of which the default fresh-empty-dir
-# staging reproduces. Runs as root (uid 0), so DAC applies only when the relevant
-# CAP is dropped.
+# Synthetic drop-test fidelity target (csd#340 items 2/3/4/6). Demonstrates that a
+# capability's necessity depends on a dir's INITIAL STATE — content, ownership,
+# permission mode, or (for rootfs) the mere fact it is chowned — none of which the
+# default fresh-empty-dir staging reproduces on its own. Runs as root (uid 0), so
+# DAC applies only when the relevant CAP is dropped.
 #
 # CSD_SEED_OP selects the probe (default: read):
 #   read  (item 2): read ${DATA}/secret. When that file pre-exists owned by a
@@ -18,6 +18,25 @@ DATA="${CSD_SEED_DIR:-/data}"
 OP="${CSD_SEED_OP:-read}"
 
 case "$OP" in
+  rootfs-chown)
+    # No-mount ROOTFS cold-start (item 4/6 lock): a service with NO external
+    # volume that mkdir+chowns a path on its own rootfs. The rootfs is fresh on
+    # every drop-test trial (a new container), so this is inherently FAITHFUL —
+    # the lock proves CHOWN derives needed here, and that the confidence guard must
+    # NOT treat "no mounts" as "nothing to exercise". CSD_ROOTFS_CHOWN_UID=0 makes
+    # the chown a no-op (the control: the dir is already root-owned -> removable).
+    d="${CSD_ROOTFS_DIR:-/var/lib/csd-app}"
+    uid="${CSD_ROOTFS_CHOWN_UID:-999}"
+    mkdir -p "$d" || { echo "mkdir ${d} failed"; exit 1; }
+    if [ "$uid" = 0 ]; then
+      echo "rootfs dir ${d} created, no ownership change (control) — no CHOWN needed"
+    elif chown "${uid}:${uid}" "$d" 2>/dev/null; then
+      echo "chowned rootfs dir ${d} to ${uid} (CHOWN present)"
+    else
+      echo "DENIED chown of rootfs dir ${d} to ${uid} as root — need CAP_CHOWN"
+      exit 1
+    fi
+    ;;
   chown)
     # Named-volume ownership-repair pattern (item 4): a root entrypoint chowns its
     # data dir to the service uid on boot, but only when it is NOT already correct

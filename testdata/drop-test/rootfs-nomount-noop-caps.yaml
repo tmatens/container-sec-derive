@@ -1,0 +1,19 @@
+# No-op control for csd#340 item 6 (see rootfs-nomount-caps.yaml): the SAME
+# no-mount synthetic, but CSD_ROOTFS_CHOWN_UID=0 so the boot-time mkdir is followed
+# by NO ownership change (the rootfs dir is already root-owned). Nothing requires
+# CAP_CHOWN, so the drop-test derives it REMOVABLE. Only the chown target differs
+# from the item-6 spec (uid 999 there, a no-op here), proving the derived CHOWN
+# tracks a real owner change and that the no-mount rootfs path discriminates rather
+# than always reporting [CHOWN]. The smoke asserts CHOWN is PRESENT in the item-6
+# minimum and ABSENT here.
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env: ["CSD_SEED_OP=rootfs-chown", "CSD_ROOTFS_CHOWN_UID=0"]
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

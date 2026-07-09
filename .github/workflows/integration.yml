@@ -44,14 +44,36 @@ on:
   pull_request:
     branches: [main]
     # Skip the live BPF smoke (~5-8 min) on changes that can't affect the
-    # observer: docs, the Renovate config, license. Anything else (Go code,
-    # workflows, scripts, testdata) still runs it. workflow_dispatch is
-    # unaffected and always runs.
+    # observer: docs, the Renovate config, license, and the drop-test EXPERIMENT
+    # layer + deploy-check consumption surface (below). Anything else (Go observer
+    # code, the observer smoke scripts, workflows) still runs it. workflow_dispatch
+    # is unaffected and always runs.
+    #
+    # paths-ignore skips ONLY when EVERY changed file matches — a PR that also
+    # touches Go / an observer smoke still runs the job. The drop-test harness uses
+    # no eBPF (it restarts containers; §Architecture EXPERIMENT vs OBSERVATION) and
+    # is validated on the self-hosted runner (integration-selfhosted / deploy-check),
+    # so a PR confined to it can't affect cap_capable attach/attribution.
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
       - 'renovate.json'
       - 'LICENSE'
+      - 'testdata/drop-test/**'
+      - 'deploy-check/**'
+      - 'scripts/drop_test.sh'
+      - 'scripts/drop_test_selftest.sh'
+      - 'scripts/smoke_drop_*.sh'
+      - 'scripts/compose_derive.sh'
+      - 'scripts/compose_derive_selftest.sh'
+      - 'scripts/compose_to_spec.py'
+      - 'scripts/compose_verdict.py'
+      - 'scripts/deploy_check.sh'
+      - 'scripts/apptier_verify.sh'
+      - 'scripts/derive_profiles.sh'
+      - '.github/workflows/integration-selfhosted.yml'
+      - '.github/workflows/deploy-check.yml'
+      - '.github/workflows/derive-profiles.yml'
   # PAUSED for the Actions-minutes budget (90% used; resets ~2026-07-01).
   # Re-enable this cron after the reset — it's the every-3-days FULL run:
   # reference workloads @30s + the arm64 live-BPF lane + the podman cross-runtime

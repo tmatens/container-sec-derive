@@ -93,6 +93,11 @@
 # would over-derive real root/self-owned named volumes into a false
 # under_permissioned (deferred to the #340 confidence guard). Or pin the exact
 # ownership/mode with run.seed_mounts when known.
+# By contrast a service with NO mounts that mkdir+chowns a path on its own ROOTFS
+# is inherently FAITHFUL (csd#340 item 6): the rootfs is fresh on every trial (a
+# new container), so a real owner change fires and CHOWN derives correctly. The
+# confidence guard must therefore NOT treat "no mounts" as "nothing to exercise" —
+# a no-mount rootfs cold-start is high-confidence, not low.
 #   run:
 #     seed_mounts:
 #       - target: /data          # mount point in the container

@@ -108,6 +108,8 @@ jobs:
           cat smoke_drop_mode.txt
           PY=python3 scripts/smoke_drop_namedvol.sh > smoke_drop_namedvol.txt 2>&1 || { echo "FAIL smoke_drop_namedvol"; rc=1; }
           cat smoke_drop_namedvol.txt
+          PY=python3 scripts/smoke_drop_rootfs.sh > smoke_drop_rootfs.txt 2>&1 || { echo "FAIL smoke_drop_rootfs"; rc=1; }
+          cat smoke_drop_rootfs.txt
           exit $rc
 
       # The real-hardware device test — only this self-hosted job can run it
@@ -134,6 +136,7 @@ jobs:
             grep -hE '^(PASS|FAIL|smoke-drop-seed:)' smoke_drop_seed.txt 2>/dev/null || true;
             grep -hE '^(PASS|FAIL|smoke-drop-mode:)' smoke_drop_mode.txt 2>/dev/null || true;
             grep -hE '^(PASS|FAIL|smoke-drop-namedvol:)' smoke_drop_namedvol.txt 2>/dev/null || true;
+            grep -hE '^(PASS|FAIL|smoke-drop-rootfs:)' smoke_drop_rootfs.txt 2>/dev/null || true;
             echo '-- hardware-ful devices --';
             grep -hE '^(PASS|FAIL|INFO|smoke-device-hw:)' smoke_device_hw.txt 2>/dev/null || true;
             echo '```';

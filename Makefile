@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -100,6 +100,13 @@ smoke-drop-mode:
 # a no-op, CHOWN removable). Docker + python + jq only (no csd build / no BPF).
 smoke-drop-namedvol:
 	./scripts/smoke_drop_namedvol.sh
+
+# smoke-drop-rootfs locks the no-mount ROOTFS cold-start case (csd#340 item 6): a
+# service with no external volume that mkdir+chowns a rootfs path derives CHOWN
+# needed (rootfs is fresh per trial — inherently faithful) vs a no-op chown
+# (removable). Docker + python + jq only (no csd build / no BPF).
+smoke-drop-rootfs:
+	./scripts/smoke_drop_rootfs.sh
 
 # apptier-immich runs the app-tier verify (docs/app-tier-verification.md): brings
 # up immich's released stack with the DERIVED DB hardening and drives its real API

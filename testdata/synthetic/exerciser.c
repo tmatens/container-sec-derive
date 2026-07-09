@@ -64,10 +64,12 @@ static void exercise_device(void) {
     if (fd >= 0) close(fd);
 }
 
-/* Foreign-owned, mode-0600 file baked into the image (owned by uid 65534). Read
- * as root it needs a DAC override: normal DAC denies (root is neither owner nor
- * group), so the kernel checks CAP_DAC_OVERRIDE -> a cap_capable(DAC_OVERRIDE,
- * syscall=openat) event. This drives the adversarial "does csd narrow soundly"
+/* A mode-0000 file baked into the image. Read as root it needs a DAC override:
+ * mode 0000 has no read bit for anyone, so DAC denies the read regardless of
+ * ownership, and the kernel checks CAP_DAC_OVERRIDE -> a cap_capable(DAC_OVERRIDE,
+ * syscall=openat) event. (Mode is the discriminator, not ownership — a root-owned
+ * 0600 file would be readable by root with no cap check.) This drives the
+ * adversarial "does csd narrow soundly"
  * test (#349 scenario 5): DAC_READ_SEARCH *would* also satisfy this read, but the
  * openat syscall alone cannot prove the access is read-only (it could have been a
  * write), so csd must NOT narrow DAC_OVERRIDE -> DAC_READ_SEARCH. Legacy-loop only

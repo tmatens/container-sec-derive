@@ -169,3 +169,18 @@ func CheckIGVersion(igBin string, stderr io.Writer) error {
 	}
 	return nil
 }
+
+// NormalizeSyscall canonicalizes an ig syscall-name field to the bare lowercase
+// form csd's syscall knowledge (the capadd finer-cap KB) and its fixtures use.
+//
+// Live ig v0.51.0 emits SYS_-prefixed UPPERCASE names — verified by capture on the
+// pinned runner: "SYS_PERF_EVENT_OPEN", "SYS_CHOWN", "SYS_SETUID", and (note) a libc
+// open()/openat() surfaces as "SYS_OPEN" (see scripts/capture_ig_naming.sh). csd's
+// hand-authored fixtures historically used the bare lowercase form ("perf_event_open",
+// "openat"), so any logic keyed on the raw name matched the fixtures but MISSED live
+// ig — which is how the SYS_ADMIN->PERFMON substitution shipped dead (#349 scenario 6).
+// Normalizing at the parse boundary (CapEvent, FileEvent) makes every observer see
+// one canonical form regardless of the fixture-vs-live naming divergence.
+func NormalizeSyscall(s string) string {
+	return strings.TrimPrefix(strings.ToLower(strings.TrimSpace(s)), "sys_")
+}

@@ -42,3 +42,23 @@ func TestParseIGStderr_NoTrailingNewline(t *testing.T) {
 		t.Errorf("ParseIGStderr = %d, want 5 (final line without newline)", got)
 	}
 }
+
+// TestNormalizeSyscall locks the canonicalization of ig's SYS_-prefixed uppercase
+// syscall names to the bare lowercase form csd's KB + fixtures use. The real names
+// are capture-verified against pinned ig v0.51.0 (scripts/capture_ig_naming.sh);
+// the openat->SYS_OPEN case is the non-obvious one (#349 scenario 6 / fixture drift).
+func TestNormalizeSyscall(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"SYS_PERF_EVENT_OPEN", "perf_event_open"}, // live ig
+		{"SYS_OPEN", "open"},                       // libc open()/openat() surfaces as SYS_OPEN
+		{"SYS_CHOWN", "chown"},
+		{"perf_event_open", "perf_event_open"}, // already canonical (legacy fixture) -> no-op
+		{" SYS_SETUID ", "setuid"},             // trimmed
+		{"MOUNT", "mount"},
+		{"", ""},
+	} {
+		if got := NormalizeSyscall(tc.in); got != tc.want {
+			t.Errorf("NormalizeSyscall(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

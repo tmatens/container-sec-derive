@@ -45,6 +45,8 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <sys/syscall.h>
+#include <linux/perf_event.h>
 
 static const char *TARGET = "/csd-exerciser-target";
 
@@ -80,6 +82,29 @@ static const char *DAC_FOREIGN_TARGET = "/csd-exerciser-foreign";
 static void exercise_read_foreign(void) {
     int fd = open(DAC_FOREIGN_TARGET, O_RDONLY);
     if (fd >= 0) { char b; if (read(fd, &b, 1) < 0) { /* ignore */ } close(fd); }
+}
+
+/* System-wide perf_event_open (pid=-1, cpu=0) — CPU-wide monitoring that requires
+ * an admin capability (perfmon_capable: CAP_PERFMON, falling back to CAP_SYS_ADMIN)
+ * regardless of perf_event_paranoid. Drives the SOUND-substitution test (#349
+ * scenario 6): SYS_ADMIN observed ONLY via perf_event_open IS safely narrowable to
+ * CAP_PERFMON, and the capadd KB (finerBySyscall perf_event_open->PERFMON) must
+ * offer that. Run with the container holding CAP_SYS_ADMIN so the check comes back
+ * capable=true. musl has no wrapper, so call the syscall directly. Legacy-loop only
+ * + gated on CSD_EXERCISE_PERF, so no other smoke and never the miss-rate tally is
+ * perturbed. */
+static void exercise_perf(void) {
+    struct perf_event_attr attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.type = PERF_TYPE_HARDWARE;
+    attr.size = sizeof(attr);
+    attr.config = PERF_COUNT_HW_CPU_CYCLES;
+    attr.disabled = 1;
+    attr.exclude_kernel = 1;
+    attr.exclude_hv = 1;
+    /* pid=-1 + cpu=0 = system-wide: needs CAP_PERFMON/CAP_SYS_ADMIN. */
+    long fd = syscall(__NR_perf_event_open, &attr, -1, 0, -1, 0UL);
+    if (fd >= 0) close((int)fd);
 }
 
 /* Each exercise_* returns the count of cap-invoking syscalls that
@@ -193,6 +218,7 @@ int main(void) {
         exercise_setuid();
         exercise_device();
         if (getenv("CSD_EXERCISE_DAC")) exercise_read_foreign();
+        if (getenv("CSD_EXERCISE_PERF")) exercise_perf();
         if (cycle % 5 == 0) {
             fprintf(stdout, "cycle=%d\n", cycle);
         }

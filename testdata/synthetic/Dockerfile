@@ -3,7 +3,9 @@
 # (no shell, no entrypoint script) which keeps Step 21's runc-comm
 # filter from suppressing it.
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS build
-RUN apk add --no-cache gcc musl-dev
+# linux-headers provides <linux/perf_event.h> (the scenario-6 perf_event_open op);
+# musl-dev alone lacks the kernel uapi headers.
+RUN apk add --no-cache gcc musl-dev linux-headers
 WORKDIR /src
 COPY exerciser.c .
 RUN gcc -static -O2 -Wall -o /exerciser exerciser.c

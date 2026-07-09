@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-adversarial-perf smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -82,6 +82,12 @@ smoke-capadd: build
 # syscall name) must keep DAC_OVERRIDE, not suggest DAC_READ_SEARCH. Live/BPF.
 smoke-adversarial-dac: build
 	./scripts/smoke_adversarial_dac.sh
+
+# smoke-adversarial-perf (#349 scenario 6): the SOUND complement — SYS_ADMIN
+# observed only via perf_event_open IS safely narrowable to CAP_PERFMON, and csd
+# must offer that. Needs --cap-add SYS_ADMIN + perf_event_open. Live/BPF.
+smoke-adversarial-perf: build
+	./scripts/smoke_adversarial_perf.sh
 
 smoke-egress: build
 	./scripts/smoke_egress.sh

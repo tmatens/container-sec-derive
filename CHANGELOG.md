@@ -13,6 +13,15 @@ the relevant entry.
 
 ### Added
 
+- **deploy-check flags a possibly non-discriminating correctness check (#340 item
+  1).** When the derived minimum is **empty** but the service **declared** caps,
+  the verdict carries `suspect_nondiscriminating: true` and the stderr line warns:
+  this is either a real total over-grant or a rubber-stamp correctness check (the
+  netdata trap) that would derive `[]` for anything — so don't trust the "drop
+  all" without a discriminating (negative-control) check. The verdict/exit code is
+  unchanged (still `over_permissioned`/11); it's a caveat, not a new gate. The
+  compare step is split into `scripts/compose_verdict.py` so the verdict logic is
+  covered by `compose_derive_selftest.sh` (json-only, no docker).
 - **Egress provenance data model — `egress_destination_intel` sidecar block
   (#206).** A name-centric view of the observed egress that tags each destination
   with **provenance** (`confirmed` — an address was dialed — vs `resolved_only` —

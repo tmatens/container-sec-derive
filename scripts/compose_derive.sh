@@ -59,47 +59,6 @@ if ! PY="$PY" bash "$REPO/scripts/drop_test.sh" "$WORK/spec.yaml" > "$WORK/resul
 fi
 
 # --- compare the derived minimum to what the service declares ---------------
-"$PY" - "$WORK/result.json" "$WORK/declared.json" <<'PYEOF'
-import sys, json
-result = json.load(open(sys.argv[1]))
-declared = json.load(open(sys.argv[2]))
-minimum = set(result.get("minimum") or [])
-cap_add = set(declared.get("cap_add") or [])
-drops_all = "ALL" in {c.upper() for c in declared.get("cap_drop") or []}
-
-recommended = {"cap_drop": ["ALL"], "cap_add": sorted(minimum)}
-if drops_all:
-    over = sorted(cap_add - minimum)      # granted but not needed -> drop
-    add = sorted(minimum - cap_add)       # needed but not granted -> would break
-    verdict = ("under_permissioned" if add
-               else "over_permissioned" if over
-               else "matches")
-else:
-    over = sorted(cap_add)                # everything, since we recommend cap_drop: ALL
-    add = sorted(minimum - cap_add)
-    verdict = "not_minimized"
-
-result["deploy_check"] = {
-    "recommended": recommended,
-    "declared": {"cap_drop": sorted(declared.get("cap_drop") or []),
-                 "cap_add": sorted(cap_add)},
-    "verdict": verdict,
-    "drop": over,
-    "add": add,
-}
-print(json.dumps(result, indent=2))
-
-msg = {
-    "matches": "declared cap_add matches the derived minimum",
-    "over_permissioned": f"over-permissioned: drop {over} (declared, not needed)",
-    "under_permissioned": f"UNDER-permissioned: missing {add} (needed — would break); also drop {over}",
-    "not_minimized": f"no cap_drop: ALL — recommend cap_drop:[ALL] + cap_add:{sorted(minimum)}",
-}[verdict]
-print(f"compose_derive: {verdict} — {msg}", file=sys.stderr)
-
-# Exit codes make it a gate (mirrors csd verify): 0 matches, 10 not-minimized,
-# 11 over-permissioned, 12 under-permissioned (missing caps — would break, the
-# hard failure). A caller picks its threshold (e.g. fail >=12, warn on 10/11).
-sys.exit({"matches": 0, "not_minimized": 10,
-          "over_permissioned": 11, "under_permissioned": 12}[verdict])
-PYEOF
+# compose_verdict.py emits the deploy_check block and exits with the gate code
+# (0 matches / 10 not-minimized / 11 over / 12 under). Split out to be unit-tested.
+"$PY" "$REPO/scripts/compose_verdict.py" "$WORK/result.json" "$WORK/declared.json"

@@ -57,5 +57,30 @@ SPEC2="$("$PY" "$T2S" "$WORK/plain.yml" web check.sh "$WORK/d2.json" "$WORK/b2.j
 check "$SPEC2" 'run["read_only"] is False' "no read_only -> False (not applied to plain services)"
 check "$SPEC2" 'run["tmpfs"] == []'        "no tmpfs -> empty list"
 
+# --- verdict logic (#340 item 1): empty minimum but declared caps -> suspect ---
+# Pure json (no yaml), so this half runs even without PyYAML.
+V2S="${HERE}/compose_verdict.py"
+verdict() { # <minimum-json-array> <cap_add-json-array> -> sets VOUT, VRC
+  printf '{"minimum": %s}\n' "$1" > "$WORK/res.json"
+  printf '{"cap_add": %s, "cap_drop": ["ALL"]}\n' "$2" > "$WORK/dec.json"
+  VOUT="$("$PY" "$V2S" "$WORK/res.json" "$WORK/dec.json" 2>"$WORK/verr")"; VRC=$?
+}
+vcheck() { if [ "$1" = "$2" ]; then echo "ok: $3"; else echo "FAIL: $3 (got '$1' want '$2')"; FAIL=1; fi; }
+
+verdict '[]' '["CHOWN","SETUID"]'                 # declared caps, empty minimum
+case "$VOUT" in *'"suspect_nondiscriminating": true'*) echo "ok: empty-min+declared flags suspect";; *) echo "FAIL: suspect flag missing"; FAIL=1;; esac
+vcheck "$VRC" 11 "suspect stays over_permissioned (exit 11, not a new gate code)"
+if grep -q SUSPECT "$WORK/verr"; then echo "ok: suspect stderr caveat"; else echo "FAIL: no SUSPECT caveat"; FAIL=1; fi
+
+verdict '["CHOWN"]' '["CHOWN","SETUID"]'          # real over-grant (non-empty minimum)
+case "$VOUT" in *suspect*) echo "FAIL: non-empty minimum wrongly flagged suspect"; FAIL=1;; *) echo "ok: real over-grant not flagged suspect";; esac
+vcheck "$VRC" 11 "real over-grant -> over_permissioned exit 11"
+
+verdict '["CHOWN","SETUID"]' '["CHOWN","SETUID"]' # matches
+vcheck "$VRC" 0 "matches -> exit 0"
+
+verdict '[]' '[]'                                 # genuinely no caps declared
+case "$VOUT" in *suspect*) echo "FAIL: no-caps-declared wrongly flagged suspect"; FAIL=1;; *) echo "ok: empty declared -> not suspect (real no-caps service)";; esac
+
 if [ "$FAIL" = 0 ]; then echo "compose_derive_selftest: all assertions passed"; else echo "compose_derive_selftest: FAILURES"; fi
 exit "$FAIL"

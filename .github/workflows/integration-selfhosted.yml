@@ -87,7 +87,7 @@ jobs:
           DURATION: ${{ github.event.inputs.duration || '30s' }}
         run: |
           rc=0
-          for s in smoke_wsl2 smoke_fs smoke_device smoke_capadd smoke_egress closed_loop; do
+          for s in smoke_wsl2 smoke_fs smoke_device smoke_capadd smoke_egress smoke_adversarial_dac closed_loop; do
             echo "===== ${s} ====="
             sudo env "CSD=$PWD/csd" "DURATION=${DURATION}" "scripts/${s}.sh" || { echo "FAIL ${s} (exit $?)"; rc=1; }
           done

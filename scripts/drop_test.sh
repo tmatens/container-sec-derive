@@ -98,6 +98,12 @@
 # new container), so a real owner change fires and CHOWN derives correctly. The
 # confidence guard must therefore NOT treat "no mounts" as "nothing to exercise" —
 # a no-mount rootfs cold-start is high-confidence, not low.
+# Beyond mount state, a cap can hinge on the KERNEL SYSCTL POSTURE (csd#340 item 5):
+# NET_BIND_SERVICE for a low-port bind is needed only when
+# net.ipv4.ip_unprivileged_port_start >= the port, but docker defaults it to 0 (all
+# ports unprivileged), so the cap reads falsely-removable. run.sysctls pins the
+# hardened posture (e.g. ip_unprivileged_port_start=1024) for the trial, and the
+# posture is recorded in run_config so the profile is known to be valid only under it.
 #   run:
 #     seed_mounts:
 #       - target: /data          # mount point in the container
@@ -159,6 +165,13 @@ line("RUN_ENTRYPOINT", run.get("entrypoint", ""))
 line("FIXED", " ".join(map(str, s.get("fixed", []))))
 line("CANDIDATES", " ".join(map(str, s.get("candidates", []))))
 line("ENV", "\v".join(run.get("env", [])))
+# run.sysctls: kernel sysctls (`key=value`) the trial container is pinned under, so
+# a cap whose necessity depends on the host posture derives faithfully instead of
+# under docker's loose default (csd#340 item 5: NET_BIND_SERVICE hinges on
+# net.ipv4.ip_unprivileged_port_start, which docker defaults to 0 → any port
+# unprivileged → the cap reads falsely-removable). Recorded in run_config so the
+# derived profile carries the posture it is valid under.
+line("SYSCTLS", "\v".join(run.get("sysctls", [])))
 line("MOUNTS", "\v".join(run.get("mounts", [])))
 line("SECOPT", "\v".join(run.get("security_opt", [])))
 line("DEVICES", "\v".join(run.get("devices", [])))
@@ -236,6 +249,7 @@ if [ -n "$_fixed_nonempty" ]; then
   exit 5
 fi
 IFS=$'\v' read -ra RUN_ENV <<<"${F[ENV]}"
+IFS=$'\v' read -ra RUN_SYSCTLS <<<"${F[SYSCTLS]}"
 IFS=$'\v' read -ra RUN_MOUNTS <<<"${F[MOUNTS]}"
 IFS=$'\v' read -ra RUN_SECOPT <<<"${F[SECOPT]}"
 IFS=$'\v' read -ra RUN_DEVICES <<<"${F[DEVICES]}"
@@ -375,6 +389,10 @@ run_and_test() {
     args+=(-v "$sdir:$starget")
   done
   local so; for so in "${RUN_SECOPT[@]}"; do [ -n "$so" ] && args+=(--security-opt "$so"); done
+  # Pin the kernel sysctl posture the caps are derived under (item 5): a namespaced
+  # net.* sysctl (e.g. ip_unprivileged_port_start=1024) makes a low-port bind need
+  # NET_BIND_SERVICE, instead of docker's loose default (0) hiding it as removable.
+  local sc; for sc in "${RUN_SYSCTLS[@]}"; do [ -n "$sc" ] && args+=(--sysctl "$sc"); done
   local dv; for dv in "${RUN_DEVICES[@]}"; do [ -n "$dv" ] && args+=(--device "$dv"); done
   local e; for e in "${RUN_ENV[@]}"; do [ -n "$e" ] && args+=(-e "${e/__DOCKER_GID__/$DOCKER_GID}"); done
   # run.tmpfs: fixed writable dirs the container needs to run that are NOT part of
@@ -489,6 +507,7 @@ IMAGE="$IMAGE" TAG="$TAG" DIGEST="$DIGEST" DIM="$DIM" MINIMUM="$MINIMUM" \
   RUN_USER="${F[RUN_USER]}" RUN_PID="${F[RUN_PID]}" RUN_NET="${F[RUN_NET]}" \
   RUN_ENTRYPOINT="${F[RUN_ENTRYPOINT]}" RUN_CMD="${F[CMD]}" RUN_DEVICES="${F[DEVICES]}" \
   RUN_SECOPT="${F[SECOPT]}" RUN_MOUNTS="${F[MOUNTS]}" RUN_ENV="${F[ENV]}" \
+  RUN_SYSCTLS="${F[SYSCTLS]}" \
   RUN_DEPS="$DEPS_CSV" RUN_VOLUMES_FROM="${F[VOLUMES_FROM]}" \
   "$PY" - "$WORK/checks.tsv" <<'PYEOF'
 import os, sys, json
@@ -518,6 +537,13 @@ run_config = {
     "mounts": vsplit(os.environ.get("RUN_MOUNTS", "")),
     "env": [e.split("=", 1)[0] for e in vsplit(os.environ.get("RUN_ENV", ""))],
 }
+# The kernel sysctl posture the minimum was derived under — a load-bearing axis for
+# posture-dependent caps (NET_BIND_SERVICE hinges on ip_unprivileged_port_start), so
+# a consumer knows the profile is valid only under this posture. Emitted whole
+# (key=value): a sysctl value is not a secret.
+sysctls = vsplit(os.environ.get("RUN_SYSCTLS", ""))
+if sysctls:
+    run_config["sysctls"] = sysctls
 # In-stack context: the dependency services the minimum was derived alongside (the
 # target could not be exercised without them). Names only.
 deps = [x for x in os.environ.get("RUN_DEPS", "").split("\v") if x]

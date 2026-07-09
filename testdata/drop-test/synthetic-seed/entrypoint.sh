@@ -1,9 +1,10 @@
 #!/bin/sh
-# Synthetic drop-test fidelity target (csd#340 items 2/3/4/6). Demonstrates that a
-# capability's necessity depends on a dir's INITIAL STATE — content, ownership,
-# permission mode, or (for rootfs) the mere fact it is chowned — none of which the
-# default fresh-empty-dir staging reproduces on its own. Runs as root (uid 0), so
-# DAC applies only when the relevant CAP is dropped.
+# Synthetic drop-test fidelity target (csd#340 items 2/3/4/5/6). Demonstrates that
+# a capability's necessity depends on the run context the drop-test reproduces — a
+# dir's INITIAL STATE (content, ownership, permission mode, or the mere fact it is
+# chowned) or the kernel SYSCTL posture (item 5's low-port bind) — none of which the
+# default staging reproduces on its own. Runs as root (uid 0), so DAC/cap checks
+# apply only when the relevant CAP is dropped.
 #
 # CSD_SEED_OP selects the probe (default: read):
 #   read  (item 2): read ${DATA}/secret. When that file pre-exists owned by a
@@ -18,6 +19,25 @@ DATA="${CSD_SEED_DIR:-/data}"
 OP="${CSD_SEED_OP:-read}"
 
 case "$OP" in
+  bindlow)
+    # Bind a low (<1024) TCP port (item 5). Whether this needs
+    # CAP_NET_BIND_SERVICE depends on net.ipv4.ip_unprivileged_port_start: docker
+    # defaults it to 0 (every port unprivileged -> no cap, so the cap reads
+    # falsely-removable), but a hardened host sets 1024, where binding <1024 needs
+    # the cap even for root under cap_drop:ALL. The drop-test pins the sysctl via
+    # run.sysctls so the verdict reflects the hardened posture, not docker's loose
+    # default. busybox nc exits immediately if the bind is denied.
+    port="${CSD_BIND_PORT:-80}"
+    nc -l -p "$port" >/dev/null 2>&1 &
+    npid=$!
+    sleep 1
+    if kill -0 "$npid" 2>/dev/null; then
+      echo "bound :${port} OK (NET_BIND_SERVICE present, or unprivileged-port posture)"
+    else
+      echo "DENIED binding :${port} as root — need CAP_NET_BIND_SERVICE (hardened ip_unprivileged_port_start)"
+      exit 1
+    fi
+    ;;
   rootfs-chown)
     # No-mount ROOTFS cold-start (item 4/6 lock): a service with NO external
     # volume that mkdir+chowns a path on its own rootfs. The rootfs is fresh on

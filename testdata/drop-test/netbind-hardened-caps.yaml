@@ -1,0 +1,22 @@
+# drop-test sysctl-posture fidelity fixture (csd#340 item 5): NET_BIND_SERVICE for a
+# low-port bind hinges on net.ipv4.ip_unprivileged_port_start. Docker defaults it to
+# 0 (every port unprivileged), so a service binding :80 needs no cap and the
+# drop-test derives NET_BIND_SERVICE removable — even though a HARDENED host
+# (ip_unprivileged_port_start=1024) needs it (this is exactly caddy's
+# posture-bounded "drop NET_BIND_SERVICE" caveat). run.sysctls pins the hardened
+# posture for the trial, so the synthetic's :80 bind (bindlow op) requires the cap
+# and it derives NEEDED. The paired netbind-loose-caps.yaml pins =0 and derives it
+# removable — only the sysctl differs. The posture is recorded in run_config so the
+# profile is known to be valid only under it. Built by scripts/smoke_drop_netbind.sh.
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env: ["CSD_SEED_OP=bindlow"]
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]   # hardened host posture
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

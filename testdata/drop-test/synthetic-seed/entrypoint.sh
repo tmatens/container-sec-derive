@@ -18,6 +18,23 @@ DATA="${CSD_SEED_DIR:-/data}"
 OP="${CSD_SEED_OP:-read}"
 
 case "$OP" in
+  chown)
+    # Named-volume ownership-repair pattern (item 4): a root entrypoint chowns its
+    # data dir to the service uid on boot, but only when it is NOT already correct
+    # (the idempotent repair postgres/mariadb do). A docker named volume inits
+    # root-owned-empty and a hardened deploy pre-owns it to the service uid, so the
+    # repair is a no-op there; but a foreign-owned volume (worst case) needs
+    # CAP_CHOWN. The drop-test must stage the worst case, else CHOWN reads removable.
+    cur="$(stat -c '%u' "$DATA" 2>/dev/null || echo -1)"
+    if [ "$cur" = 1000 ]; then
+      echo "${DATA} already owned by 1000 — no repair, no CHOWN needed"
+    elif chown 1000:1000 "$DATA" 2>/dev/null; then
+      echo "repaired ${DATA} ownership ${cur}->1000 (CHOWN present)"
+    else
+      echo "DENIED chown of ${DATA} (owned by ${cur}) as root — need CAP_CHOWN"
+      exit 1
+    fi
+    ;;
   write)
     if (echo csd-probe > "${DATA}/csd-probe") 2>/dev/null; then
       echo "wrote into ${DATA} OK (dir mode permits, or DAC_OVERRIDE present)"

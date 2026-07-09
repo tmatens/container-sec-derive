@@ -31,10 +31,13 @@ CONTAINER="csd-adv-dac-smoke"
 command -v jq     >/dev/null 2>&1 || { echo "smoke-adversarial-dac: jq required" >&2; exit 2; }
 command -v docker >/dev/null 2>&1 || { echo "smoke-adversarial-dac: docker required" >&2; exit 2; }
 
-if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
-    echo "smoke-adversarial-dac: building synthetic exerciser image"
-    docker build -t "${IMAGE}" testdata/synthetic >/dev/null || { echo "FAIL: image build" >&2; exit 1; }
-fi
+# ALWAYS rebuild — do NOT skip-if-exists. The shared csd-synthetic-exerciser:0.1
+# tag persists across jobs on a non-ephemeral self-hosted runner, so a skip-if-
+# exists guard (as the other smokes use) would run this test against a STALE image
+# lacking the CSD_EXERCISE_DAC read probe — which is exactly the false-0-events
+# failure this smoke first hit. The exerciser source is what changed, so rebuild it.
+echo "smoke-adversarial-dac: (re)building synthetic exerciser image from current source"
+docker build -t "${IMAGE}" testdata/synthetic >/dev/null || { echo "FAIL: image build" >&2; exit 1; }
 
 WORKDIR="$(mktemp -d)"; trap 'rm -rf "${WORKDIR}"' EXIT
 WORKLOAD="$(pwd)/testdata/synthetic/workload.sh"

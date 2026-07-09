@@ -60,8 +60,12 @@ check "$SPEC2" 'run["tmpfs"] == []'        "no tmpfs -> empty list"
 # --- verdict logic (#340 item 1): empty minimum but declared caps -> suspect ---
 # Pure json (no yaml), so this half runs even without PyYAML.
 V2S="${HERE}/compose_verdict.py"
-verdict() { # <minimum-json-array> <cap_add-json-array> -> sets VOUT, VRC
-  printf '{"minimum": %s}\n' "$1" > "$WORK/res.json"
+verdict() { # <minimum-json-array> <cap_add-json-array> [fidelity-json] -> sets VOUT, VRC
+  if [ -n "${3:-}" ]; then
+    printf '{"minimum": %s, "fidelity": %s}\n' "$1" "$3" > "$WORK/res.json"
+  else
+    printf '{"minimum": %s}\n' "$1" > "$WORK/res.json"
+  fi
   printf '{"cap_add": %s, "cap_drop": ["ALL"]}\n' "$2" > "$WORK/dec.json"
   VOUT="$("$PY" "$V2S" "$WORK/res.json" "$WORK/dec.json" 2>"$WORK/verr")"; VRC=$?
 }
@@ -81,6 +85,33 @@ vcheck "$VRC" 0 "matches -> exit 0"
 
 verdict '[]' '[]'                                 # genuinely no caps declared
 case "$VOUT" in *suspect*) echo "FAIL: no-caps-declared wrongly flagged suspect"; FAIL=1;; *) echo "ok: empty declared -> not suspect (real no-caps service)";; esac
+
+# --- confidence guard (#340 capstone): suppress an unprovable chown-class drop ---
+UG='{"guaranteed": false, "unguaranteed_mounts": ["/var/lib/postgresql/data"]}'
+GD='{"guaranteed": true, "unguaranteed_mounts": []}'
+
+# immich-db shape: FOWNER declared, derived removable (not in minimum), against an
+# unguaranteed ${VAR} mount -> keep FOWNER, verdict flips over_permissioned->matches.
+verdict '["CHOWN","DAC_OVERRIDE","SETGID","SETUID"]' '["CHOWN","DAC_OVERRIDE","FOWNER","SETGID","SETUID"]' "$UG"
+case "$VOUT" in *'"low_confidence_keep"'*'FOWNER'*) echo "ok: unguaranteed chown-class drop kept (low_confidence_keep)";; *) echo "FAIL: FOWNER not kept under unguaranteed fidelity"; FAIL=1;; esac
+vcheck "$VRC" 0 "guard suppresses the drop -> matches (exit 0)"
+if grep -q "LOW-CONFIDENCE KEEP" "$WORK/verr"; then echo "ok: low-confidence stderr caveat"; else echo "FAIL: no low-confidence caveat"; FAIL=1; fi
+
+# Same shape but fidelity GUARANTEED -> the drop stands (real over-grant surfaced).
+verdict '["CHOWN","DAC_OVERRIDE","SETGID","SETUID"]' '["CHOWN","DAC_OVERRIDE","FOWNER","SETGID","SETUID"]' "$GD"
+case "$VOUT" in *low_confidence_keep*) echo "FAIL: guaranteed fidelity wrongly kept a cap"; FAIL=1;; *) echo "ok: guaranteed fidelity leaves the drop intact";; esac
+vcheck "$VRC" 11 "guaranteed over-grant -> over_permissioned (exit 11)"
+
+# A NON-chown cap (NET_RAW) removable under unguaranteed fidelity is NOT guarded
+# (fidelity governs chown-class necessity only) -> still dropped.
+verdict '["CHOWN"]' '["CHOWN","NET_RAW"]' "$UG"
+case "$VOUT" in *low_confidence_keep*NET_RAW*) echo "FAIL: NET_RAW wrongly guarded"; FAIL=1;; *) echo "ok: non-chown cap not guarded (NET_RAW still dropped)";; esac
+vcheck "$VRC" 11 "non-chown over-grant stays over_permissioned"
+
+# Guard never manufactures an under_permissioned: a genuinely missing NEEDED cap
+# still reds even under unguaranteed fidelity (the guard only suppresses drops).
+verdict '["CHOWN","FOWNER"]' '["CHOWN"]' "$UG"
+vcheck "$VRC" 12 "missing needed cap still under_permissioned under unguaranteed fidelity"
 
 if [ "$FAIL" = 0 ]; then echo "compose_derive_selftest: all assertions passed"; else echo "compose_derive_selftest: FAILURES"; fi
 exit "$FAIL"

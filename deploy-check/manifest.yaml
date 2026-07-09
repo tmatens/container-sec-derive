@@ -60,9 +60,16 @@ services:
   # dir is pre-owned by uid 999 and would MASK CHOWN/FOWNER), and the placeholder
   # credentials are read back from the container by the correctness check, which
   # runs the reference workload and asserts a non-root server uid. Derived minimum
-  # [CHOWN, DAC_OVERRIDE, SETGID, SETUID] → verdict over_permissioned, drop [FOWNER]
-  # (declared but not exercised even on a fresh foreign-owned data dir — a real,
-  # if minor, over-grant in immich's compose).
+  # [CHOWN, DAC_OVERRIDE, SETGID, SETUID]; FOWNER is declared but not exercised on
+  # the FRESH data dir the drop-test can stage. But the data dir is a ${VAR} mount,
+  # so the harness cannot reproduce its worst-case (pre-existing foreign-owned)
+  # state on the derive host — FOWNER-removable is therefore UNPROVEN. Since the
+  # #340 confidence guard, that unprovable chown-class drop is SUPPRESSED: verdict
+  # matches, with deploy_check.low_confidence_keep [FOWNER] + a caveat in the detail
+  # column (we don't recommend dropping a cap we can't prove droppable — a
+  # false-removable would break a re-deploy over existing data). To turn this into a
+  # real high-confidence FOWNER-drop, the spec would need seed_mounts pinning
+  # immich's actual data-dir initial state.
   - name: immich-db
     forgejo_repo: dad/immich
     compose_path: docker-compose.yaml

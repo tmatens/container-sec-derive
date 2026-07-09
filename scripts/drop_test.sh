@@ -104,6 +104,15 @@
 # ports unprivileged), so the cap reads falsely-removable. run.sysctls pins the
 # hardened posture (e.g. ip_unprivileged_port_start=1024) for the trial, and the
 # posture is recorded in run_config so the profile is known to be valid only under it.
+# CONFIDENCE GUARD (csd#340 capstone): the result carries a `fidelity` block
+# ({guaranteed, unguaranteed_mounts}) for the capabilities dimension. It is false
+# when a mount's worst-case initial state could NOT be reproduced — a ${VAR}
+# fresh-vol (foreign-owned but EMPTY, no pre-existing foreign content) or a
+# passed-through named volume (root-owned-empty). compose_verdict.py then SUPPRESSES
+# a chown-class (CHOWN/FOWNER/DAC_OVERRIDE/DAC_READ_SEARCH/FSETID) drop for such a
+# run — keeping the cap, low-confidence — rather than recommend a drop it cannot
+# prove. Guaranteed cases (real/staged binds, seed_mounts, tmpfs, no-mount rootfs)
+# are unaffected; the guard only ever makes a verdict MORE conservative.
 #   run:
 #     seed_mounts:
 #       - target: /data          # mount point in the container
@@ -258,6 +267,31 @@ IFS=$'\v' read -ra RUN_CMD <<<"${F[CMD]}"
 IFS=$'\v' read -ra RUN_VOLUMES_FROM <<<"${F[VOLUMES_FROM]}"
 # \v-joined dep alias names, for the evidence run_config.deps (see the emit below).
 DEPS_CSV=""; for (( _di=0; _di<${F[DEP_COUNT]:-0}; _di++ )); do DEPS_CSV+="${F[DEP_${_di}_NAME]}"$'\v'; done
+
+# Confidence-guard input (csd#340 capstone): classify each mount's initial-state
+# fidelity. A chown-class cap (CHOWN/FOWNER/DAC_OVERRIDE/DAC_READ_SEARCH/FSETID)
+# derived REMOVABLE is only trustworthy if every path the container chowns/writes
+# was in its worst-case initial state during the run. Two mount kinds are NOT:
+#   - a ${VAR} fresh-vol (foreign-owned but EMPTY — reproduces a first deploy, not
+#     a prior deploy's pre-existing foreign CONTENT), and
+#   - a passed-through named volume (root-owned-empty).
+# under either, a removable chown-class verdict is low-confidence (the #337 / item-2
+# blind spot). Binds (real content + ownership reproduced), seed_mounts /
+# worst_case_named_volumes (staged worst-case), tmpfs (fresh in prod too), and the
+# no-mount rootfs cold-start (fresh every trial — item 6) are all GUARANTEED.
+# Emitted as run-level `fidelity` so compose_verdict.py can suppress the drop.
+UNGUARANTEED_MOUNTS=()
+for _m in "${RUN_MOUNTS[@]:-}"; do
+  [ -n "$_m" ] || continue
+  _msrc="${_m%%:*}"; _mtgt="${_m#*:}"
+  if [[ "$_msrc" == *'$'* ]]; then
+    UNGUARANTEED_MOUNTS+=("$_mtgt")                                   # ${VAR} fresh-vol
+  elif [[ "$_msrc" != /* && "$_msrc" != .* ]] && [ "${F[WCNV]}" != true ]; then
+    UNGUARANTEED_MOUNTS+=("$_mtgt")                                   # passthrough named volume
+  fi
+done
+UNGUARANTEED_CSV=""; for _u in "${UNGUARANTEED_MOUNTS[@]:-}"; do [ -n "$_u" ] && UNGUARANTEED_CSV+="$_u"$'\v'; done
+
 IMAGE="${F[IMAGE]}"; TAG="${F[TAG]}"; DIM="${F[DIM]}"
 CORRECTNESS="${REPO}/${F[CORRECTNESS]}"
 DOCKER_GID="$(getent group docker | cut -d: -f3)"
@@ -507,7 +541,7 @@ IMAGE="$IMAGE" TAG="$TAG" DIGEST="$DIGEST" DIM="$DIM" MINIMUM="$MINIMUM" \
   RUN_USER="${F[RUN_USER]}" RUN_PID="${F[RUN_PID]}" RUN_NET="${F[RUN_NET]}" \
   RUN_ENTRYPOINT="${F[RUN_ENTRYPOINT]}" RUN_CMD="${F[CMD]}" RUN_DEVICES="${F[DEVICES]}" \
   RUN_SECOPT="${F[SECOPT]}" RUN_MOUNTS="${F[MOUNTS]}" RUN_ENV="${F[ENV]}" \
-  RUN_SYSCTLS="${F[SYSCTLS]}" \
+  RUN_SYSCTLS="${F[SYSCTLS]}" RUN_UNGUARANTEED="$UNGUARANTEED_CSV" \
   RUN_DEPS="$DEPS_CSV" RUN_VOLUMES_FROM="${F[VOLUMES_FROM]}" \
   "$PY" - "$WORK/checks.tsv" <<'PYEOF'
 import os, sys, json
@@ -559,5 +593,16 @@ out = {
     "run_config": run_config,
     "checks": checks,
 }
+# Confidence-guard input (csd#340 capstone): the mounts whose worst-case initial
+# state the drop-test could NOT guarantee (a ${VAR} fresh-vol or a passed-through
+# named volume — see the bash classification). A chown-class cap derived removable
+# is only trustworthy if there is no such mount; compose_verdict.py suppresses such
+# a drop (keeps the cap, low-confidence) when unguaranteed_mounts is non-empty.
+# `guaranteed` is true exactly when the list is empty (rootfs cold-start, staged/
+# real binds, tmpfs — all faithful). Capabilities dimension only: the fidelity
+# question is about the mount state caps are derived against.
+unguaranteed = [x for x in os.environ.get("RUN_UNGUARANTEED", "").split("\v") if x]
+if os.environ["DIM"] == "capabilities":
+    out["fidelity"] = {"guaranteed": not unguaranteed, "unguaranteed_mounts": unguaranteed}
 print(json.dumps(out, indent=2))
 PYEOF

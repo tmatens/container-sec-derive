@@ -60,9 +60,19 @@ services:
   # dir is pre-owned by uid 999 and would MASK CHOWN/FOWNER), and the placeholder
   # credentials are read back from the container by the correctness check, which
   # runs the reference workload and asserts a non-root server uid. Derived minimum
-  # [CHOWN, DAC_OVERRIDE, SETGID, SETUID] → verdict over_permissioned, drop [FOWNER]
-  # (declared but not exercised even on a fresh foreign-owned data dir — a real,
-  # if minor, over-grant in immich's compose).
+  # [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID] == the declared cap_add → verdict
+  # MATCHES. FOWNER derives NEEDED: the ${VAR} data dir is staged FRESH + foreign-
+  # owned per trial (owned by the non-container host user), and postgres's init
+  # touches file modes on that foreign-owned tree during setup — so on the faithful
+  # cold-start the caps fixidity work reproduces (#337/#338), all five caps are
+  # exercised. (An earlier manifest note here predicted over_permissioned drop
+  # [FOWNER]; that predated the tmpfs/data-dir fidelity fixes and is stale — the
+  # live derivation has been `matches` across runs.) The #340 confidence guard does
+  # NOT fire here (FOWNER is in the minimum, so there is no drop to suppress); it
+  # would only engage a chown-class cap that derived REMOVABLE against an
+  # unguaranteed ${VAR}/named-volume mount — none of the current manifest services
+  # hit that, so the guard is a regression tripwire, proven by the hermetic
+  # compose_derive_selftest cases, not a live red.
   - name: immich-db
     forgejo_repo: dad/immich
     compose_path: docker-compose.yaml

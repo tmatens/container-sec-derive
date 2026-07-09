@@ -64,6 +64,22 @@ static void exercise_device(void) {
     if (fd >= 0) close(fd);
 }
 
+/* Foreign-owned, mode-0600 file baked into the image (owned by uid 65534). Read
+ * as root it needs a DAC override: normal DAC denies (root is neither owner nor
+ * group), so the kernel checks CAP_DAC_OVERRIDE -> a cap_capable(DAC_OVERRIDE,
+ * syscall=openat) event. This drives the adversarial "does csd narrow soundly"
+ * test (#349 scenario 5): DAC_READ_SEARCH *would* also satisfy this read, but the
+ * openat syscall alone cannot prove the access is read-only (it could have been a
+ * write), so csd must NOT narrow DAC_OVERRIDE -> DAC_READ_SEARCH. Legacy-loop only
+ * (never counting mode), so it can't perturb the miss-rate 1:1 tally; and gated on
+ * CSD_EXERCISE_DAC so ONLY the scenario-5 smoke fires it — every other smoke that
+ * shares this image is byte-identical (no new DAC_OVERRIDE events). */
+static const char *DAC_FOREIGN_TARGET = "/csd-exerciser-foreign";
+static void exercise_read_foreign(void) {
+    int fd = open(DAC_FOREIGN_TARGET, O_RDONLY);
+    if (fd >= 0) { char b; if (read(fd, &b, 1) < 0) { /* ignore */ } close(fd); }
+}
+
 /* Each exercise_* returns the count of cap-invoking syscalls that
  * SUCCEEDED this call (one capable=true event per success). Legacy mode
  * ignores the returns; counting mode accumulates them. */
@@ -174,6 +190,7 @@ int main(void) {
         exercise_bind();
         exercise_setuid();
         exercise_device();
+        if (getenv("CSD_EXERCISE_DAC")) exercise_read_foreign();
         if (cycle % 5 == 0) {
             fprintf(stdout, "cycle=%d\n", cycle);
         }

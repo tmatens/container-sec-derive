@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -76,6 +76,12 @@ smoke-device: build
 # correlation (CHOWN used) and the unused->removable classification (SYS_MODULE).
 smoke-capadd: build
 	./scripts/smoke_capadd.sh
+
+# smoke-adversarial-dac (#349 scenario 5): csd must NOT unsoundly narrow — a
+# DAC_OVERRIDE observed only via openat (read-only intent unprovable from the
+# syscall name) must keep DAC_OVERRIDE, not suggest DAC_READ_SEARCH. Live/BPF.
+smoke-adversarial-dac: build
+	./scripts/smoke_adversarial_dac.sh
 
 smoke-egress: build
 	./scripts/smoke_egress.sh

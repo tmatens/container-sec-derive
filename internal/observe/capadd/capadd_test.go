@@ -217,6 +217,50 @@ func TestCapAdvice(t *testing.T) {
 	}
 }
 
+// TestNormalizeSyscall_LiveNaming locks the fix for #349 scenario 6: LIVE ig
+// v0.51.0 emits SYS_-prefixed uppercase syscall names ("SYS_PERF_EVENT_OPEN"),
+// while the KB + fixtures use the bare lowercase form ("perf_event_open"). Before
+// the fix, aggregation stored the raw ig name, so the KB lookup missed live and the
+// SYS_ADMIN->PERFMON substitution never fired in production (the lowercase fixtures
+// masked it). normalizeSyscall canonicalizes at ingestion so both match.
+func TestNormalizeSyscall_LiveNaming(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"SYS_PERF_EVENT_OPEN", "perf_event_open"}, // live ig
+		{"perf_event_open", "perf_event_open"},     // fixture / already canonical
+		{" SYS_OPEN ", "open"},                     // trimmed + de-prefixed
+		{"MOUNT", "mount"},
+		{"", ""},
+	} {
+		if got := normalizeSyscall(tc.in); got != tc.want {
+			t.Errorf("normalizeSyscall(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	// End-to-end: a live-style event (SYS_-prefixed) must aggregate under the
+	// canonical name AND yield the PERFMON substitution — the exact live path
+	// scenario 6 exercised. A raw-name lookup would have missed and returned nil.
+	const liveEvent = `{"timestamp":1,"syscall":"SYS_PERF_EVENT_OPEN","cap":"CAP_SYS_ADMIN","cap_raw":21,"capable":true,"proc":{"comm":"exerciser","pid":42},"runtime":{"runtimeName":"docker","containerId":"aabbccddeeff0011","containerName":"app-1","containerImageName":"myapp:1"}}` + "\n"
+	obs, err := AggregateCapadd(strings.NewReader(liveEvent), attrib.Opts{Container: "aabbccddeeff0011"}, ParseCapSet("SYS_ADMIN"))
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	sa := obs.Used["SYS_ADMIN"]
+	if sa == nil {
+		t.Fatal("SYS_ADMIN not observed from a live-named event")
+	}
+	if sa.syscalls["perf_event_open"] != 1 {
+		t.Errorf("normalized syscall count = %v, want perf_event_open:1", sa.syscalls)
+	}
+	syscalls := make([]string, 0, len(sa.syscalls))
+	for s := range sa.syscalls {
+		syscalls = append(syscalls, s)
+	}
+	_, finer := capAdvice("SYS_ADMIN", syscalls, nil)
+	if len(finer) != 1 || finer[0] != "PERFMON" {
+		t.Errorf("live SYS_ADMIN/perf finer = %v, want [PERFMON] (substitution must fire on live ig naming)", finer)
+	}
+}
+
 // TestCapaddValidation_GrantedVsDefault checks the two report modes: with a
 // granted set every cap appears (used or removable) and a recommendation is
 // synthesized; without one, only observed dangerous caps appear and no

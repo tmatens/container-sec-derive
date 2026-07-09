@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-drop-seed smoke-drop-mode smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -93,6 +93,13 @@ smoke-drop-seed:
 # discriminator. Docker + python + jq only (no csd build / no BPF).
 smoke-drop-mode:
 	./scripts/smoke_drop_mode.sh
+
+# smoke-drop-namedvol validates named-volume initial-ownership fidelity (csd#340
+# item 4): a declared named-volume mount is staged worst-case foreign-owned (CHOWN
+# needed for the boot-time ownership repair) vs a correctly-owned mount (repair is
+# a no-op, CHOWN removable). Docker + python + jq only (no csd build / no BPF).
+smoke-drop-namedvol:
+	./scripts/smoke_drop_namedvol.sh
 
 # apptier-immich runs the app-tier verify (docs/app-tier-verification.md): brings
 # up immich's released stack with the DERIVED DB hardening and drives its real API

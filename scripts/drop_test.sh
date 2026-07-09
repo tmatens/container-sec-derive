@@ -85,6 +85,14 @@
 # item 3): a cap driven by a restrictive mode — root writing into a foreign-owned
 # 0700 dir needs DAC_OVERRIDE, where 0777 needs nothing — is otherwise missed too,
 # since a fresh dir is created at the host umask, not the prod mode.
+# A declared NAMED-VOLUME mount (a run.mounts source that is neither a path nor a
+# ${VAR}) is passed through to docker's root-owned-EMPTY init by default, which
+# UNDER-derives the CHOWN/DAC_OVERRIDE needed against a foreign-owned volume from a
+# prior deploy (csd#340 item 4). Set run.worst_case_named_volumes: true to stage
+# such mounts worst-case foreign-owned instead — OPT-IN, because defaulting it on
+# would over-derive real root/self-owned named volumes into a false
+# under_permissioned (deferred to the #340 confidence guard). Or pin the exact
+# ownership/mode with run.seed_mounts when known.
 #   run:
 #     seed_mounts:
 #       - target: /data          # mount point in the container
@@ -167,6 +175,14 @@ line("VOLUMES_FROM", "\v".join(run.get("volumes_from", [])))
 # chown -R / read over a populated volume) derives faithfully instead of being
 # masked by the fresh-empty-dir staging. Emit each field on its OWN key (like
 # deps) so an empty field can't shift the record under bash `read`.
+# worst_case_named_volumes (csd#340 item 4): OPT-IN. When true, a declared
+# named-volume mount (a run.mounts source that is neither a path nor a ${VAR}) is
+# staged worst-case foreign-owned instead of passed through to docker's
+# root-owned-empty init. Default OFF: real services can legitimately run root/
+# self-owned named volumes, and defaulting this on would over-derive them into a
+# false under_permissioned — so it stays opt-in until the #340 confidence guard can
+# mark a fidelity-unguaranteed drop low-confidence rather than red a deploy-check.
+line("WCNV", "true" if run.get("worst_case_named_volumes") else "")
 seeds = run.get("seed_mounts", []) or []
 line("SEED_COUNT", str(len(seeds)))
 for i, sd in enumerate(seeds):
@@ -307,6 +323,24 @@ run_and_test() {
       # the next iteration.
       local tgt="${m#*:}" fv="$stageroot/freshvol.$vseq"; vseq=$((vseq + 1))
       mkdir -p "$fv"; STAGED_ANY=1; args+=(-v "$fv:$tgt")
+    elif [ "${F[WCNV]}" = true ] && [[ "${m%%:*}" != /* && "${m%%:*}" != .* ]]; then
+      # A NAMED-VOLUME mount (source is neither an absolute/relative path nor a
+      # ${VAR}), and run.worst_case_named_volumes is set. Docker would create it
+      # root-owned-EMPTY on first use — but a real deployment's named volume can be
+      # foreign-owned/populated (csd#340 item 4), so root-owned-empty UNDER-derives
+      # any cap needed to use a foreign-owned volume (a root write into it needs
+      # DAC_OVERRIDE; an ownership repair needs CHOWN) — the same masking class as
+      # #337. Stage the WORST CASE instead: a fresh dir per trial chowned to a
+      # foreign uid, mounted in place of the docker named volume (so no untrusted
+      # root-owned-empty volume is ever consulted, and nothing persists across
+      # trials/runs). OPT-IN (not the default) — see the WCNV note in the parser and
+      # the header; pin exact prod ownership/mode with run.seed_mounts when known.
+      local ntgt="${m#*:}" nv="$stageroot/namedvol.$vseq"; vseq=$((vseq + 1))
+      mkdir -p "$nv"; STAGED_ANY=1
+      docker run --rm --user 0:0 --entrypoint sh -v "$nv:/csd-nv" "${IMAGE}:${TAG}" \
+        -c "chown 9999:9999 /csd-nv" >/dev/null 2>&1 \
+        || echo "drop_test: could not stage named volume ${m%%:*} worst-case foreign-owned (image lacks sh/chown?); using it un-owned" >&2
+      args+=(-v "$nv:$ntgt")
     else
       args+=(-v "$(prep_mount "$m" "$stageroot")")
     fi

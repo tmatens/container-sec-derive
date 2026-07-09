@@ -1,0 +1,27 @@
+# drop-test named-volume fidelity fixture (csd#340 item 4): a DECLARED named-volume
+# mount whose initial ownership the drop-test must not trust to docker. The
+# synthetic entrypoint (chown op) repairs /data's ownership to the service uid on
+# boot — the idempotent chown postgres/mariadb do. A docker named volume inits
+# root-owned-EMPTY; if the drop-test passed that through, the repair on a
+# already-correctly-owned or root-owned dir could read CHOWN removable, and a
+# hardened deploy against a FOREIGN-owned volume would then break. With the opt-in
+# run.worst_case_named_volumes flag, drop_test.sh stages a declared named volume
+# (source `csdnv`, neither a path nor a ${VAR}) WORST-CASE foreign-owned (uid 9999),
+# so the repair fires and CHOWN derives needed. (The flag is opt-in — defaulting it
+# on would over-derive real root/self-owned named volumes; deferred to the #340
+# confidence guard.) The paired seed-namedvol-owned-caps.yaml pins the
+# correctly-owned state and derives CHOWN removable. Built by smoke_drop_namedvol.sh.
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env: ["CSD_SEED_OP=chown"]
+  worst_case_named_volumes: true   # opt-in: stage the named volume foreign-owned
+  mounts:
+    - "csdnv:/data"   # a declared named volume -> staged worst-case foreign-owned
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

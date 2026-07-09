@@ -69,6 +69,26 @@
 #
 #   sudo? no — needs only docker; the correctness check may need more.
 #   PY=python3 scripts/drop_test.sh <spec.yaml>
+#
+# STAGING FIDELITY (csd#340). A cap's necessity is only as truthful as the mount
+# STATE each trial reproduces. By default a mount whose source is absent here (a
+# `${VAR}` data dir) is staged FRESH + EMPTY — faithful to a first deploy (a
+# chown/chmod of the empty dir fires), but it UNDER-derives any cap exercised only
+# against PRE-EXISTING, foreign-owned content (a migration's `chown -R` over a
+# populated volume, a backup reader over another service's files) — that cap reads
+# removable and a "safe to drop" breaks prod. `run.seed_mounts` closes that class:
+# it stages a mount with pre-existing content owned by a foreign uid (+ a
+# restrictive file mode) before each trial, so the populated-data cap
+# (CHOWN/FOWNER/DAC_OVERRIDE) derives needed. Until a service uses seed_mounts,
+# fresh-only staging under-derives this class for it.
+#   run:
+#     seed_mounts:
+#       - target: /data          # mount point in the container
+#         owner: "9999:9999"     # foreign uid:gid the seeded content is chowned to
+#         file: secret           # optional pre-existing file created inside
+#         content: "..."         # its contents (default a marker string)
+#         dir_mode: "0755"       # optional; mount dir mode (default 0755)
+#         file_mode: "0600"      # optional; seeded file mode (default 0600)
 set -uo pipefail
 
 SPEC="${1:?usage: drop_test.sh <spec.yaml>}"
@@ -138,6 +158,20 @@ line("CMD", "\v".join(cmd if isinstance(cmd, list) else [cmd]))
 # In-stack: share a dependency's volumes with the target (e.g. a backup sidecar
 # reading the app's data dir). Values are dep NAMEs (mapped to csd-dep-<name>).
 line("VOLUMES_FROM", "\v".join(run.get("volumes_from", [])))
+# seed_mounts (csd#340 item 2): stage a mount with PRE-EXISTING, foreign-owned
+# content before each trial, so a cap exercised only against pre-existing data (a
+# chown -R / read over a populated volume) derives faithfully instead of being
+# masked by the fresh-empty-dir staging. Emit each field on its OWN key (like
+# deps) so an empty field can't shift the record under bash `read`.
+seeds = run.get("seed_mounts", []) or []
+line("SEED_COUNT", str(len(seeds)))
+for i, sd in enumerate(seeds):
+    line(f"SEED_{i}_TARGET", sd["target"])
+    line(f"SEED_{i}_OWNER", str(sd.get("owner", "9999:9999")))
+    line(f"SEED_{i}_DIRMODE", str(sd.get("dir_mode", "0755")))
+    line(f"SEED_{i}_FILE", str(sd.get("file", "")))
+    line(f"SEED_{i}_FILEMODE", str(sd.get("file_mode", "0600")))
+    line(f"SEED_{i}_CONTENT", str(sd.get("content", "csd-preexisting-foreign-owned")))
 # Dependencies to bring up before the drop-test. Emit each field on its OWN key
 # (DEP_<i>_*), not one packed record: bash `read` treats \v as whitespace and would
 # collapse an empty field (e.g. no command override), shifting every later field.
@@ -272,6 +306,30 @@ run_and_test() {
     else
       args+=(-v "$(prep_mount "$m" "$stageroot")")
     fi
+  done
+  # seed_mounts (csd#340 item 2): stage a mount with PRE-EXISTING, foreign-owned
+  # content. The default fresh-empty-dir staging masks any cap only exercised
+  # against already-populated, other-uid data (a migration's `chown -R`, a backup
+  # reader over another service's files, a restart that repairs existing state) —
+  # the inverse of the #337 fresh-masked-as-pre-owned bug. Each trial gets its own
+  # freshly-seeded copy (under the per-trial stageroot) so state can't leak. The
+  # chown-to-a-foreign-uid + restrictive file mode are applied via a root-in-
+  # container helper (the target image), keeping drop_test sudo-free; STAGED_ANY
+  # arms the cleanup reclaim that chowns $WORK back to this host user on exit.
+  local si
+  for (( si=0; si<${F[SEED_COUNT]:-0}; si++ )); do
+    local starget="${F[SEED_${si}_TARGET]}" sowner="${F[SEED_${si}_OWNER]}"
+    local sdirmode="${F[SEED_${si}_DIRMODE]}" sfile="${F[SEED_${si}_FILE]}"
+    local sfilemode="${F[SEED_${si}_FILEMODE]}" scontent="${F[SEED_${si}_CONTENT]}"
+    local sdir="$stageroot/seed.$si"
+    mkdir -p "$sdir"
+    [ -n "$sfile" ] && printf '%s' "$scontent" > "$sdir/$sfile"
+    STAGED_ANY=1
+    if ! docker run --rm --user 0:0 --entrypoint sh -v "$sdir:/csd-seed" "${IMAGE}:${TAG}" -c \
+          "chown -R ${sowner} /csd-seed && chmod ${sdirmode} /csd-seed${sfile:+ && chmod ${sfilemode} /csd-seed/${sfile}}" >/dev/null 2>&1; then
+      echo "drop_test: could not seed foreign-owned content for ${starget} (image lacks sh/chown?); using it un-owned" >&2
+    fi
+    args+=(-v "$sdir:$starget")
   done
   local so; for so in "${RUN_SECOPT[@]}"; do [ -n "$so" ] && args+=(--security-opt "$so"); done
   local dv; for dv in "${RUN_DEVICES[@]}"; do [ -n "$dv" ] && args+=(--device "$dv"); done

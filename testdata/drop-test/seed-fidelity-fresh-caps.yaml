@@ -1,0 +1,16 @@
+# Negative control for csd#340 item 2 (see seed-fidelity-caps.yaml): the SAME
+# synthetic image with NO seeded content — the entrypoint finds no pre-existing
+# file (no /data mount at all), takes its "fresh" branch, and nothing requires
+# CAP_DAC_OVERRIDE, so the drop-test derives it REMOVABLE. This is exactly the
+# fresh-only under-derivation the seeded fixture exists to catch: identical image
+# and correctness check, only the mount's initial state differs. The smoke asserts
+# DAC_OVERRIDE is PRESENT in the seeded minimum and ABSENT here.
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

@@ -1,0 +1,30 @@
+# drop-test fidelity fixture (csd#340 item 2): a capability exercised ONLY against
+# pre-existing, foreign-owned content. The synthetic entrypoint reads a mode-0600
+# file owned by uid 9999 on /data — as root that read REQUIRES CAP_DAC_OVERRIDE.
+# `run.seed_mounts` stages the mount with that foreign-owned content BEFORE each
+# trial (fresh per trial, so state can't leak), so the drop-test faithfully
+# derives DAC_OVERRIDE as needed. The paired seed-fidelity-fresh-caps.yaml runs
+# the SAME image with a fresh empty mount and derives DAC_OVERRIDE removable — the
+# fresh-only bias this seeding closes. Both are exercised by
+# scripts/smoke_drop_seed.sh, which builds the local image (no registry
+# counterpart, hence no_pull).
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  # Seed /data with pre-existing content owned by a foreign uid before each trial.
+  # owner: the uid:gid the staged content is chowned to (a "foreign" owner the
+  #   container's root does not match). file/content: a pre-existing regular file
+  #   created inside, left mode 0600 so reading it gates on DAC_OVERRIDE. The mount
+  #   dir stays 0755 so the entrypoint can traverse it (see the entrypoint header).
+  seed_mounts:
+    - target: /data
+      owner: "9999:9999"
+      file: secret
+      content: "csd seed: pre-existing foreign-owned content"
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

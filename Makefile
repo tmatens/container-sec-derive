@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-egress smoke-drop-seed smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -79,6 +79,13 @@ smoke-capadd: build
 
 smoke-egress: build
 	./scripts/smoke_egress.sh
+
+# smoke-drop-seed validates the pre-existing-foreign-owned-data staging fidelity
+# (csd#340 item 2): a synthetic image whose entrypoint reads a foreign-owned 0600
+# file derives DAC_OVERRIDE needed when seed_mounts stages that content, removable
+# when the mount is fresh/empty. Docker + python + jq only (no csd build / no BPF).
+smoke-drop-seed:
+	./scripts/smoke_drop_seed.sh
 
 # apptier-immich runs the app-tier verify (docs/app-tier-verification.md): brings
 # up immich's released stack with the DERIVED DB hardening and drives its real API

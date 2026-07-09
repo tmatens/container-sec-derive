@@ -263,6 +263,45 @@ other deployments. So:
 
 ---
 
+## Consumption track — deploy-check / re-derive-at-deploy — issue #355 [shipped as scripts; productization proposed]
+
+> **Thesis (issue #355):** the strongest consumption surface csd has is not the
+> one-shot `csd observe` run — it is **re-deriving a service's minimum against
+> its real committed compose file at deploy time and failing the pipeline on
+> drift**. It removes one-shot observation's biggest adoption tax (authoring a
+> representative `--workload` — here the service's own startup under its real
+> invocation *is* the workload), it is correct per-deployment where name-matched
+> catalog profiles structurally are not (same image, different `user:`/`build:`
+> ⇒ different minimum — see `docs/re-derive-at-deploy.md` for the postgres and
+> caddy proofs), and it converts csd from one-time audit value into recurring
+> per-deploy verification value.
+
+**Status: the pipeline exists and is enforced, but as repo-internal plumbing** —
+`scripts/compose_derive.sh` (compose service → run-config-faithful derivation
+spec), `scripts/deploy_check.sh` + `deploy-check/manifest.yaml` +
+`deploy-check.yml` (scheduled re-derive vs. declared `cap_add`, ENFORCED on
+`under_permissioned` with a cannot-run/security exit-code split and a PR-comment
+verdict table), and the in-stack dependent-tier model in `drop_test.sh`. The
+model doc is [docs/re-derive-at-deploy.md](docs/re-derive-at-deploy.md); the
+mc-backup/minecraft reverts are the cautionary lesson (hand-authored specs
+drift; derivation from committed source doesn't).
+
+**The productization gap (issue #355):** none of this is reachable from the
+`csd` binary — a user who doesn't read `scripts/` never finds the product's
+best mode. Proposed end state is a first-class subcommand:
+
+```sh
+csd deploy-check --compose docker-compose.yml --service immich-db
+```
+
+with the manifest as a documented input format, the correctness scripts as
+optional app-tier deepeners (never the price of entry), and the derivation-host
+requirements stated (`docs/self-hosted-runner.md`). Scope, open questions
+(boundary with `csd verify`, how much bash ports to Go), and acceptance
+checklist live in **issue #355**.
+
+---
+
 ## Stretch — beyond the named rules
 
 - **Resource baselines.** Observe peak memory / CPU usage; emit `mem_limit:` / `cpus:` recommendations. Could justify a new compose-lint rule.

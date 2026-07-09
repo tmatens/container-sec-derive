@@ -14,6 +14,22 @@ so the hermetic tests prove the *transform* is correct. They cannot prove:
 1. that `ig` + eBPF actually **produces** that stream for a real workload — i.e.
    that attach + container attribution work on a real kernel, and that our
    committed fixtures match what the pinned `ig` really emits;
+
+   > **Fixture-vs-live naming (learned the hard way, #349 scenario 6).** The
+   > committed NDJSON fixtures were hand-authored with *idealized* field values that
+   > did **not** match real pinned-ig output — e.g. syscall names as the bare
+   > lowercase `perf_event_open`/`openat`, whereas live ig v0.51.0 emits
+   > `SYS_PERF_EVENT_OPEN` and (note) surfaces a libc `open()`/`openat()` as
+   > `SYS_OPEN`. Logic keyed on the raw name (the capadd finer-cap KB) therefore
+   > matched the fixtures but silently **missed live**, shipping a dead code path a
+   > fixture-only test could never catch. csd now canonicalizes at the parse
+   > boundary (`ig.NormalizeSyscall`, applied in `CapEvent`/`FileEvent`), and the
+   > fixtures carry the real `SYS_`-prefixed names. **When authoring or bumping a
+   > fixture, capture the real shape** — `scripts/capture_ig_naming.sh` dumps live
+   > cap/syscall naming from the synthetic exerciser on the self-hosted runner — and
+   > do not hand-idealize field values. (Sibling divergences already handled
+   > leniently in `CapEvent`: `timestamp` is an RFC3339 *string* + `timestamp_raw`
+   > ns int, not the fixtures' int-ms `timestamp`; `capable` is always present live.)
 2. that a **derived config actually works** when applied to the container — the
    ultimate "meets intent" check;
 3. behavior across **kernel versions** or against **real hardware devices**.

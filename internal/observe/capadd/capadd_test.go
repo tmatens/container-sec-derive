@@ -222,20 +222,9 @@ func TestCapAdvice(t *testing.T) {
 // while the KB + fixtures use the bare lowercase form ("perf_event_open"). Before
 // the fix, aggregation stored the raw ig name, so the KB lookup missed live and the
 // SYS_ADMIN->PERFMON substitution never fired in production (the lowercase fixtures
-// masked it). normalizeSyscall canonicalizes at ingestion so both match.
+// masked it). ig.NormalizeSyscall canonicalizes at the CapEvent parse boundary so
+// every observer — and the KB — sees one form regardless of fixture-vs-live naming.
 func TestNormalizeSyscall_LiveNaming(t *testing.T) {
-	for _, tc := range []struct{ in, want string }{
-		{"SYS_PERF_EVENT_OPEN", "perf_event_open"}, // live ig
-		{"perf_event_open", "perf_event_open"},     // fixture / already canonical
-		{" SYS_OPEN ", "open"},                     // trimmed + de-prefixed
-		{"MOUNT", "mount"},
-		{"", ""},
-	} {
-		if got := normalizeSyscall(tc.in); got != tc.want {
-			t.Errorf("normalizeSyscall(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-
 	// End-to-end: a live-style event (SYS_-prefixed) must aggregate under the
 	// canonical name AND yield the PERFMON substitution — the exact live path
 	// scenario 6 exercised. A raw-name lookup would have missed and returned nil.

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/ig"
 	"github.com/tmatens/container-sec-derive/internal/observe"
 )
 
@@ -86,7 +87,7 @@ func (e *FileEvent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	e.Syscall = wire.Syscall
+	e.Syscall = ig.NormalizeSyscall(wire.Syscall)
 	if wire.FlagsRaw != nil {
 		e.FlagsRaw = *wire.FlagsRaw
 		e.HasFlagsRaw = true

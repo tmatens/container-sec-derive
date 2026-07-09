@@ -32,17 +32,6 @@ type capKBEntry struct {
 	finerBySyscall map[string]string
 }
 
-// normalizeSyscall canonicalizes an ig syscall name to the bare lowercase form the
-// KB (finerBySyscall) and the fixtures use. Live ig v0.51.0 emits SYS_-prefixed
-// uppercase names ("SYS_PERF_EVENT_OPEN"), while the hand-authored fixtures use the
-// bare lowercase name ("perf_event_open") — so a KB lookup keyed on the raw ig name
-// matched the fixtures but MISSED live, and the finer-cap substitution never fired
-// in production (#349 scenario 6). Normalizing at ingestion makes the KB match both.
-func normalizeSyscall(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	return strings.TrimPrefix(s, "sys_")
-}
-
 // capKB is the curated dangerous-capability knowledge base. Entries are honest:
 // where no finer capability exists the advice says so. Names are normalized
 // (no CAP_ prefix). Caps absent from the table get a generic advisory.

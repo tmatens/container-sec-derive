@@ -143,7 +143,7 @@ func AggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 			// they can't inflate the derived set), but we retain the attempted
 			// syscall as an L10 signal so the decision layer won't drop or
 			// finer-substitute a cap the workload tried — and was denied — to use.
-			if sc := normalizeSyscall(ev.Syscall); sc != "" {
+			if sc := ev.Syscall; sc != "" {
 				if denied[cap] == nil {
 					denied[cap] = map[string]int{}
 				}
@@ -161,7 +161,7 @@ func AggregateCapadd(r io.Reader, opts attrib.Opts, activeSet map[string]struct{
 			used[cap] = u
 		}
 		u.events++
-		if sc := normalizeSyscall(ev.Syscall); sc != "" {
+		if sc := ev.Syscall; sc != "" {
 			u.syscalls[sc]++
 		}
 		if comm := strings.TrimSpace(ev.Proc.Comm); comm != "" {

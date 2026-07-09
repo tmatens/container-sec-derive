@@ -82,7 +82,7 @@ func (e *CapEvent) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	e.Syscall = wire.Syscall
+	e.Syscall = ig.NormalizeSyscall(wire.Syscall)
 	e.CapName = wire.CapName
 	if wire.Capable == nil {
 		e.Capable = true

@@ -11,11 +11,23 @@
      package pulls) would render broken or leak existence. Swap to dynamic
      badges when the project goes public. -->
 
-**Derive the minimum security config a container actually needs — by watching it run, not by guessing.**
+**`csd` watches a container run (eBPF) and emits the minimum security config it actually needed — with evidence.**
+
+```sh
+sudo csd observe --container my-postgres --duration 30s --workload ./exercise.sh
+```
+```yaml
+cap_drop: [ALL]
+cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+```
+
+One CLI, six dimensions — capabilities, read-only rootfs + `tmpfs`, `devices:`, `privileged: true` decomposition, dangerous-`cap_add` validation, network egress — emitted as Compose, `docker run`, k8s, OCI, or JSON, each with a JSON evidence sidecar. The headline move: replace a hand-waved **`privileged: true`** with the **`--device /dev/dri` + `cap_add: [SYS_NICE]`** it actually used. The honest caveat: output is a floor on *observed* behavior, not a proof — exercise the container representatively, then check the result with [`csd verify`](#csd-verify).
+
+**Consuming profiles in CI instead of deriving one-shot?** [Re-derive at deploy](docs/re-derive-at-deploy.md) derives against your real committed compose file on every deploy — the service's own startup is the workload, and drift between granted and needed fails the pipeline ([#355](https://github.com/tmatens/container-sec-derive/issues/355) tracks promoting it to `csd deploy-check`).
+
+## Why
 
 Container hardening (capabilities, read-only rootfs, devices, `privileged`, egress) is hard to get right statically, so the usual workflow is trial-and-error: drop a setting, run it, see what breaks, add it back, repeat. `csd` replaces that loop with eBPF observation: point it at a running container, exercise it, and it emits the **minimum config that would have satisfied the observed behavior** — with a signed evidence sidecar so the recommendation is auditable, not a guess.
-
-The headline case: turn a hand-waved **`privileged: true`** into the evidence-backed **`--device /dev/dri` + `cap_add: [SYS_NICE]`** it actually used.
 
 ## What it derives today
 
@@ -311,6 +323,7 @@ CI integrators read these from `$?`. The full table lives in [PLAN.md §Exit cod
 - [docs/comparison.md](docs/comparison.md) — how csd compares to related runtime-derived and static hardening tools (IG `advise`, Security Profiles Operator, Kubescape, SlimToolkit, Cilium/Hubble, …), with a summary matrix.
 - [docs/RELEASING.md](docs/RELEASING.md) — the release checklist (version bumps, changelog, tagging, the signed pipeline).
 - [docs/architecture.md](docs/architecture.md) — diagrams of the four-layer pipeline, the three-phase workflow, the workload-coverage cross-checks, and the privilege/supply-chain posture.
+- [docs/re-derive-at-deploy.md](docs/re-derive-at-deploy.md) — the deploy-time consumption model: derive against the actual committed compose invocation instead of loose-matching a catalog profile by image name, and fail the deploy on drift ([#355](https://github.com/tmatens/container-sec-derive/issues/355)).
 - [docs/dev-setup.md](docs/dev-setup.md) — local development prerequisites, installing `ig`, smoke-running `csd observe`, bisecting a new reference image.
 - [docs/known-deltas.md](docs/known-deltas.md) — every documented difference between observed cap sets and bisected ground truth, with cause and disposition.
 - [docs/LIMITATIONS.md](docs/LIMITATIONS.md) — the structural limits on what csd can derive (dynamic-only floor, the `security_opt` blind spot, inverted-risk derivations, signal-blocked dimensions) and why.

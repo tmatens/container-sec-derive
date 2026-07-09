@@ -101,8 +101,11 @@ jobs:
       # REMOVABLE on a fresh mount — the #337-inverse fidelity guard.
       - name: Drop-test staging-fidelity smoke (csd#340)
         run: |
-          PY=python3 scripts/smoke_drop_seed.sh > smoke_drop_seed.txt 2>&1 && rc=0 || rc=$?
+          rc=0
+          PY=python3 scripts/smoke_drop_seed.sh > smoke_drop_seed.txt 2>&1 || { echo "FAIL smoke_drop_seed"; rc=1; }
           cat smoke_drop_seed.txt
+          PY=python3 scripts/smoke_drop_mode.sh > smoke_drop_mode.txt 2>&1 || { echo "FAIL smoke_drop_mode"; rc=1; }
+          cat smoke_drop_mode.txt
           exit $rc
 
       # The real-hardware device test — only this self-hosted job can run it
@@ -127,6 +130,7 @@ jobs:
             cat preflight_sh.txt 2>/dev/null || true;
             echo '-- drop-test staging fidelity (csd#340) --';
             grep -hE '^(PASS|FAIL|smoke-drop-seed:)' smoke_drop_seed.txt 2>/dev/null || true;
+            grep -hE '^(PASS|FAIL|smoke-drop-mode:)' smoke_drop_mode.txt 2>/dev/null || true;
             echo '-- hardware-ful devices --';
             grep -hE '^(PASS|FAIL|INFO|smoke-device-hw:)' smoke_device_hw.txt 2>/dev/null || true;
             echo '```';

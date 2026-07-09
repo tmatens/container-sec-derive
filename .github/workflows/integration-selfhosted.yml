@@ -93,6 +93,18 @@ jobs:
           done
           exit $rc
 
+      # Drop-test staging-fidelity smoke (csd#340 item 2). NOT a BPF test — the
+      # drop-test uses no eBPF, only docker + python + jq — so it runs un-sudo'd as
+      # the runner user (the same context derive-profiles.yml runs drop_test in). It
+      # proves a cap exercised only against pre-existing foreign-owned content
+      # (DAC_OVERRIDE) derives NEEDED when seed_mounts stages that content and
+      # REMOVABLE on a fresh mount — the #337-inverse fidelity guard.
+      - name: Drop-test staging-fidelity smoke (csd#340)
+        run: |
+          PY=python3 scripts/smoke_drop_seed.sh > smoke_drop_seed.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_drop_seed.txt
+          exit $rc
+
       # The real-hardware device test — only this self-hosted job can run it
       # (hosted runners have no GPU/tun/kvm to pass through). Host-adaptive: tests
       # whatever real /dev nodes are present, skips the rest.
@@ -113,6 +125,8 @@ jobs:
             echo "### Self-hosted live-BPF + hardware report";
             echo '```';
             cat preflight_sh.txt 2>/dev/null || true;
+            echo '-- drop-test staging fidelity (csd#340) --';
+            grep -hE '^(PASS|FAIL|smoke-drop-seed:)' smoke_drop_seed.txt 2>/dev/null || true;
             echo '-- hardware-ful devices --';
             grep -hE '^(PASS|FAIL|INFO|smoke-device-hw:)' smoke_device_hw.txt 2>/dev/null || true;
             echo '```';

@@ -1,0 +1,25 @@
+# drop-test MODE-fidelity fixture (csd#340 item 3): a capability driven by a mount
+# dir's permission MODE, not just its ownership. The synthetic entrypoint (run in
+# write mode) creates a file inside /data. Here /data is staged foreign-owned
+# (uid 9999) at a RESTRICTIVE mode 0700 — so root, not the owner and with no other
+# permission bits, needs CAP_DAC_OVERRIDE to write. The paired
+# seed-mode-permissive-caps.yaml stages the SAME foreign-owned dir at 0777, where
+# the write needs no cap: ownership is held constant, only dir_mode differs, so the
+# derived-needed vs derived-removable split isolates MODE as the trigger. #337
+# fixed ownership fidelity; this closes the sibling permission-bit class.
+# Built locally by scripts/smoke_drop_mode.sh (no registry counterpart).
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env: ["CSD_SEED_OP=write"]
+  seed_mounts:
+    - target: /data
+      owner: "9999:9999"
+      dir_mode: "0700"   # restrictive: root (non-owner) needs DAC_OVERRIDE to write
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

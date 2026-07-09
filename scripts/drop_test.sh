@@ -80,7 +80,11 @@
 # it stages a mount with pre-existing content owned by a foreign uid (+ a
 # restrictive file mode) before each trial, so the populated-data cap
 # (CHOWN/FOWNER/DAC_OVERRIDE) derives needed. Until a service uses seed_mounts,
-# fresh-only staging under-derives this class for it.
+# fresh-only staging under-derives this class for it. seed_mounts also reproduces
+# the mount's permission MODE (dir_mode/file_mode), not just ownership (csd#340
+# item 3): a cap driven by a restrictive mode — root writing into a foreign-owned
+# 0700 dir needs DAC_OVERRIDE, where 0777 needs nothing — is otherwise missed too,
+# since a fresh dir is created at the host umask, not the prod mode.
 #   run:
 #     seed_mounts:
 #       - target: /data          # mount point in the container

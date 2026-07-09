@@ -1,0 +1,22 @@
+# Permissive control for csd#340 item 3 (see seed-mode-caps.yaml): the SAME
+# synthetic image, SAME foreign owner (uid 9999), SAME write probe — but /data is
+# staged at mode 0777, so a root write needs NO capability and the drop-test
+# derives DAC_OVERRIDE REMOVABLE. Only dir_mode differs from the restrictive spec
+# (0777 here vs 0700 there); the needed-vs-removable split between the two proves
+# the harness reproduces the mount MODE and that mode drives the cap. The smoke
+# asserts DAC_OVERRIDE is PRESENT under 0700 and ABSENT here.
+image: csd-seed-fidelity
+tag: "0.1"
+no_pull: true
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env: ["CSD_SEED_OP=write"]
+  seed_mounts:
+    - target: /data
+      owner: "9999:9999"
+      dir_mode: "0777"   # world-writable: no cap needed even though foreign-owned
+correctness: testdata/drop-test/correctness/seed-fidelity.sh

@@ -11,11 +11,11 @@
 # refuses when it can't. A future KB edit that mapped openat->DAC_READ_SEARCH would
 # be unsound and this smoke would fail loudly.
 #
-# The synthetic exerciser (CSD_EXERCISE_DAC=1) reads a foreign-owned mode-0600 file
-# as root every cycle — a read that needs CAP_DAC_OVERRIDE (root is not the owner).
-# We grant DAC_OVERRIDE and validate it: the finding must be used=true with an
-# EMPTY finer_caps (not narrowed) and advice that does not offer DAC_READ_SEARCH as
-# a substitute.
+# The synthetic exerciser (CSD_EXERCISE_DAC=1) reads a mode-0000 file as root every
+# cycle — a read DAC-denied to everyone (no read bit for any class), so it must
+# invoke CAP_DAC_OVERRIDE regardless of ownership. We grant DAC_OVERRIDE and
+# validate it: the finding must be used=true with an EMPTY finer_caps (not narrowed)
+# and advice that does not offer DAC_READ_SEARCH as a substitute.
 #
 # Requires: docker, csd (built; pass CSD=/path), jq, the pinned ig on PATH.
 #   make smoke-adversarial-dac   |   ./scripts/smoke_adversarial_dac.sh

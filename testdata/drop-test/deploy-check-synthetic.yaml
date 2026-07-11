@@ -1,16 +1,22 @@
 # Synthetic compose fixture for the `csd deploy-check` live smoke (#355).
 #
-# Three services share the csd-seed-fidelity image (built by
-# scripts/smoke_deploy_check.sh) running its `rootfs-chown` op: a root entrypoint
-# that mkdir+chowns a path on its OWN rootfs to uid 999. That chown REQUIRES
-# CAP_CHOWN and — unlike the mount/sysctl-dependent ops — needs no seeded mount
-# and no pinned sysctl (compose_to_spec.py carries neither), so the derived
-# minimum is deterministically [CHOWN] on any docker host. The three services
-# differ ONLY in their declared cap_add, exercising each deploy-check verdict:
+# Three services build the csd-seed-fidelity image from ./synthetic-seed and run
+# its `rootfs-chown` op: a root entrypoint that mkdir+chowns a path on its OWN
+# rootfs to uid 999. That chown REQUIRES CAP_CHOWN and — unlike the mount/sysctl-
+# dependent ops — needs no seeded mount and no pinned sysctl (compose_to_spec.py
+# carries neither), so the derived minimum is deterministically [CHOWN] on any
+# docker host. The three services differ ONLY in their declared cap_add,
+# exercising each deploy-check verdict:
 #
 #   matches: cap_add [CHOWN]          -> derived [CHOWN] == declared  -> exit 0
 #   over:    cap_add [CHOWN, NET_RAW] -> NET_RAW declared, unused      -> exit 11
 #   under:   no cap_add               -> CHOWN needed, undeclared      -> exit 12
+#
+# A `build:` service (not a pulled `image:`) is deliberate: the synthetic image
+# has no registry, and only a build service gets `no_pull: true` in the derived
+# spec — a pulled image would make drop_test.sh attempt a `docker pull` that
+# fails (exit 2 -> cannot-run). This also mirrors the homelab caddy `build:`
+# case deploy-check must handle, so the build path is exercised too.
 #
 # This is the end-to-end proof that `csd deploy-check` drives the real
 # compose->spec->derive->diff pipeline and maps the verdict to the right exit
@@ -18,6 +24,7 @@
 # live half, self-hosted-runner only (drop_test restarts real containers).
 services:
   deploy-check-matches:
+    build: ./synthetic-seed
     image: csd-seed-fidelity:0.1
     environment:
       - CSD_SEED_OP=rootfs-chown
@@ -25,6 +32,7 @@ services:
     cap_add: [CHOWN]
 
   deploy-check-over:
+    build: ./synthetic-seed
     image: csd-seed-fidelity:0.1
     environment:
       - CSD_SEED_OP=rootfs-chown
@@ -32,6 +40,7 @@ services:
     cap_add: [CHOWN, NET_RAW]
 
   deploy-check-under:
+    build: ./synthetic-seed
     image: csd-seed-fidelity:0.1
     environment:
       - CSD_SEED_OP=rootfs-chown

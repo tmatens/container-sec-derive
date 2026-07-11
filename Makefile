@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-adversarial-perf smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-adversarial-perf smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-deploy-check smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -126,6 +126,15 @@ smoke-drop-rootfs:
 # hardened posture. Docker + python + jq only (no csd build / no BPF).
 smoke-drop-netbind:
 	./scripts/smoke_drop_netbind.sh
+
+# smoke-deploy-check is the live end-to-end proof of the `csd deploy-check`
+# subcommand (#355): drives the REAL binary through the compose->spec->derive->diff
+# pipeline against a synthetic compose (deterministic [CHOWN] minimum) and asserts
+# both the pipeline verdict and the wrapper exit-code policy (under=12 always;
+# over advisory by default, 11 under --enforce). Needs a built csd + docker +
+# python + jq (no BPF).
+smoke-deploy-check: build
+	CSD=$(PWD)/csd ./scripts/smoke_deploy_check.sh
 
 # apptier-immich runs the app-tier verify (docs/app-tier-verification.md): brings
 # up immich's released stack with the DERIVED DB hardening and drives its real API

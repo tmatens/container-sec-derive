@@ -114,6 +114,19 @@ jobs:
           cat smoke_drop_netbind.txt
           exit $rc
 
+      # Live end-to-end smoke for the `csd deploy-check` subcommand (#355). Drives
+      # the REAL binary through the compose->spec->derive->diff pipeline against a
+      # synthetic compose (deterministic [CHOWN] minimum), asserting both the
+      # pipeline verdict and the wrapper exit-code policy. The hermetic
+      # internal/deploycheck tests stub the child script; this is the live half.
+      # Not a BPF test (docker + python + jq only) but needs the built csd, so it
+      # runs as the runner user with CSD pointed at the build above.
+      - name: deploy-check subcommand live smoke (#355)
+        run: |
+          CSD="$PWD/csd" PY=python3 scripts/smoke_deploy_check.sh > smoke_deploy_check.txt 2>&1 && rc=0 || rc=$?
+          cat smoke_deploy_check.txt
+          exit "$rc"
+
       # The real-hardware device test — only this self-hosted job can run it
       # (hosted runners have no GPU/tun/kvm to pass through). Host-adaptive: tests
       # whatever real /dev nodes are present, skips the rest.
@@ -140,6 +153,8 @@ jobs:
             grep -hE '^(PASS|FAIL|smoke-drop-namedvol:)' smoke_drop_namedvol.txt 2>/dev/null || true;
             grep -hE '^(PASS|FAIL|smoke-drop-rootfs:)' smoke_drop_rootfs.txt 2>/dev/null || true;
             grep -hE '^(PASS|FAIL|smoke-drop-netbind:)' smoke_drop_netbind.txt 2>/dev/null || true;
+            echo '-- deploy-check subcommand (#355) --';
+            grep -hE '^(PASS|FAIL|smoke-deploy-check:)' smoke_deploy_check.txt 2>/dev/null || true;
             echo '-- hardware-ful devices --';
             grep -hE '^(PASS|FAIL|INFO|smoke-device-hw:)' smoke_device_hw.txt 2>/dev/null || true;
             echo '```';

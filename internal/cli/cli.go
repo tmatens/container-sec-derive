@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tmatens/container-sec-derive/internal/attrib"
+	"github.com/tmatens/container-sec-derive/internal/deploycheck"
 	"github.com/tmatens/container-sec-derive/internal/exit"
 	"github.com/tmatens/container-sec-derive/internal/format"
 	"github.com/tmatens/container-sec-derive/internal/observe"
@@ -164,6 +165,13 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	// no match.
 	if len(args) > 0 && args[0] == "verify" {
 		return verify.RunVerify(args[1:], stdout, stderr)
+	}
+	// deploy-check re-derives a service's minimum from its committed compose and
+	// diffs it against the declared cap_add (issue #355). Like verify it owns its
+	// own flagset and returns coded errors, so it dispatches before the observe
+	// flag parser.
+	if len(args) > 0 && args[0] == "deploy-check" {
+		return deploycheck.RunDeployCheck(args[1:], stdout, stderr)
 	}
 	// --version short-circuits all flag parsing; `csd --version` and
 	// `csd version` both work. Image/binary smoke tests parse this

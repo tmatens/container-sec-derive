@@ -92,6 +92,10 @@ One table so CI integrators don't have to reverse-engineer the behavior:
 | 0 | Verify outcome `consistent` | `csd verify` PASS |
 | 10 | Verify outcome `insufficient` (new denial) | `csd verify` FAIL |
 | 11 | Verify outcome `over_permissioned` (unused caps) | `csd verify` WARN — surfaced as nonzero so CI catches it |
+| 3 | Could not derive (build / drop-test failure) — distinct from a verdict | `csd deploy-check` cannot-run |
+| 10 | deploy-check `not_minimized` (a stricter posture is available) | `csd deploy-check` — advisory (exit 0) unless `--enforce` |
+| 11 | deploy-check `over_permissioned` (compose grants an unused cap) | `csd deploy-check` — advisory (exit 0) unless `--enforce` |
+| 12 | deploy-check `under_permissioned` (a needed cap is undeclared) | `csd deploy-check` — always nonzero: the hardened deploy would break |
 | 20 | Target exited early | `csd observe` |
 | 21 | Drop rate ≥ 10% | `csd observe` — profile not trustworthy |
 | 30 | IG schema/version mismatch (`SchemaMismatch`) | startup guard |

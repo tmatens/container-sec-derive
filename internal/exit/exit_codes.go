@@ -35,6 +35,21 @@ const (
 	Usage                  = 64 // EX_USAGE
 )
 
+// `csd deploy-check` verdict codes. The subcommand wraps
+// scripts/compose_derive.sh, which emits these on stdout alongside the
+// deploy_check evidence block; the integers are the script's existing
+// contract (compose_verdict.py) and MUST NOT be renumbered -- CI integrators
+// that read `$?` from scripts/deploy_check.sh today keep the same numbers when
+// they move to the subcommand. Distinct names (not reused VerifyInsufficient /
+// VerifyOverPermissioned) keep the two verdict spaces legible even though
+// 10/11 coincide by design.
+const (
+	DeployCheckCannotRun         = 3  // could not derive (build / drop-test / spec failure) -- distinct from a security verdict
+	DeployCheckNotMinimized      = 10 // derived minimum matches, but a stricter posture is available
+	DeployCheckOverPermissioned  = 11 // the compose grants a capability the service never used
+	DeployCheckUnderPermissioned = 12 // a needed capability is undeclared -- the hardened deploy would break
+)
+
 // DropRateAbort is the trace-health drop rate at or above which the
 // observation is considered untrustworthy. PLAN.md §Exit codes requires
 // a DropRateExcessive return *after* the artifact-with-caveat is still

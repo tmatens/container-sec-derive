@@ -23,7 +23,13 @@ cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
 
 One CLI, six dimensions — capabilities, read-only rootfs + `tmpfs`, `devices:`, `privileged: true` decomposition, dangerous-`cap_add` validation, network egress — emitted as Compose, `docker run`, k8s, OCI, or JSON, each with a JSON evidence sidecar. The headline move: replace a hand-waved **`privileged: true`** with the **`--device /dev/dri` + `cap_add: [SYS_NICE]`** it actually used. The honest caveat: output is a floor on *observed* behavior, not a proof — exercise the container representatively, then check the result with [`csd verify`](#csd-verify).
 
-**Consuming profiles in CI instead of deriving one-shot?** [Re-derive at deploy](docs/re-derive-at-deploy.md) derives against your real committed compose file on every deploy — the service's own startup is the workload, and drift between granted and needed fails the pipeline ([#355](https://github.com/tmatens/container-sec-derive/issues/355) tracks promoting it to `csd deploy-check`).
+**Consuming profiles in CI instead of deriving one-shot?** [Re-derive at deploy](docs/re-derive-at-deploy.md) derives against your real committed compose file on every deploy — the service's own startup is the workload, so no `--workload` script to author, and drift between granted and needed fails the pipeline:
+
+```sh
+csd deploy-check --compose docker-compose.yml --service immich-db
+```
+
+Verdict + evidence JSON out, with exit codes that separate "couldn't derive" from a security verdict (a needed cap left undeclared fails the pipeline).
 
 ## Why
 

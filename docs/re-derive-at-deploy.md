@@ -266,10 +266,33 @@ fails on `under_permissioned`) — off the deploy critical path, on image-digest
 bumps and on a schedule. `deploy.sh` stays fast; the security check runs beside
 it, not within it.
 
+## Invoking it
+
+Per service, as a first-class subcommand (#355):
+
+```sh
+csd deploy-check --compose docker-compose.yml --service immich-db
+```
+
+Evidence JSON (with the `deploy_check` block) on stdout, the one-line verdict +
+progress on stderr. Exit codes separate **couldn't derive** from a **security
+verdict**: `3` cannot-run (build/drop-test failed), `12` under_permissioned (a
+needed cap is undeclared — the hardened deploy would break; always non-zero),
+and `10`/`11` not_minimized/over_permissioned (advisory by default, non-zero
+under `--enforce`). `--correctness <path>` supplies a per-service app-tier
+oracle; `--out <path>` also writes the evidence JSON; `--script-dir` points at
+csd's `scripts/` (the subcommand runs from a repo checkout on the BPF derive
+host, as `deploy-check.yml` does via `actions/checkout`). The subcommand is a
+thin Go wrapper over `scripts/compose_derive.sh` — the live drop-test trials and
+the hermetically-tested compose parse/verdict stay in shell/python. The fleet
+driver (`scripts/deploy_check.sh`, driven by `deploy-check.yml`) is the
+multi-service equivalent, iterating `deploy-check/manifest.yaml`.
+
 ## Status
 
-Prototype, **capabilities dimension**. Handles a pulled `image:` or a `build:`
-image (built locally, derived against the actual artifact), with unresolved
-`${VAR}` env replaced by a placeholder. Follow-ups: the filesystem dimension
-(derive `read_only`/`tmpfs` from the service), a growing library of per-service
-correctness checks, and the deploy-pipeline integration itself.
+**Capabilities dimension**, first-class as `csd deploy-check` (#355). Handles a
+pulled `image:` or a `build:` image (built locally, derived against the actual
+artifact), with unresolved `${VAR}` env replaced by a placeholder. Follow-ups:
+the filesystem dimension (derive `read_only`/`tmpfs` from the service), a growing
+library of per-service correctness checks, and the deploy-pipeline integration
+itself.

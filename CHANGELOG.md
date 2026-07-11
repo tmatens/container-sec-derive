@@ -13,6 +13,28 @@ the relevant entry.
 
 ### Added
 
+- **`csd deploy-check` — first-class re-derive-at-deploy subcommand (#355).** The
+  re-derive-at-deploy pipeline that shipped as repo-internal `scripts/` plumbing
+  (`compose_derive.sh` + `compose_to_spec.py` + `compose_verdict.py`) is now a
+  first-class command:
+
+      csd deploy-check --compose docker-compose.yml --service immich-db
+
+  Compose file + service in; the drop-test evidence JSON with its `deploy_check`
+  block (recommended / declared / verdict / drop / add) out on stdout, and the
+  one-line verdict + progress on stderr. Exit codes distinguish **cannot-run**
+  (`3` — build/drop-test failed, couldn't derive) from a **security verdict**:
+  `12` under_permissioned (a needed cap is undeclared — the hardened deploy would
+  break; always non-zero), and `10`/`11` not_minimized/over_permissioned
+  (advisory by default, non-zero under `--enforce`). The integers are the
+  existing `compose_verdict.py` contract, unchanged, so CI reading `$?` from the
+  scripts keeps the same numbers. `--correctness <path>` supplies a per-service
+  app-tier oracle; `--out <path>` also writes the evidence JSON (`0600`);
+  `--script-dir` locates the pipeline scripts (deploy-check runs from a repo
+  checkout on the BPF derive host). Thin wrapper by design (#355): the Go command
+  owns flags → invoke → exit-code map + evidence passthrough; the live drop-test
+  trials and the hermetically-tested compose parse/verdict stay in shell/python.
+  No sidecar `schema_version` change (a new command surface, not a schema change).
 - **deploy-check flags a possibly non-discriminating correctness check (#340 item
   1).** When the derived minimum is **empty** but the service **declared** caps,
   the verdict carries `suspect_nondiscriminating: true` and the stderr line warns:

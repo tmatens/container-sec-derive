@@ -25,19 +25,16 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-python3}"
 CSD="${CSD:-$REPO/csd}"
-IMAGE="csd-seed-fidelity:0.1"
 COMPOSE="$REPO/testdata/drop-test/deploy-check-synthetic.yaml"
 
 command -v docker >/dev/null 2>&1 || { echo "smoke-deploy-check: docker required" >&2; exit 2; }
 command -v jq     >/dev/null 2>&1 || { echo "smoke-deploy-check: jq required" >&2; exit 2; }
 [ -x "$CSD" ] || { echo "smoke-deploy-check: csd binary not found/executable at '$CSD' (build it or set CSD=)" >&2; exit 2; }
 
-echo "smoke-deploy-check: building synthetic image ${IMAGE}"
-if ! docker build -t "${IMAGE}" "${REPO}/testdata/drop-test/synthetic-seed" >/dev/null; then
-  echo "FAIL smoke-deploy-check: synthetic image build failed" >&2
-  exit 1
-fi
-
+# No explicit image build here: the fixture's services declare `build:
+# ./synthetic-seed`, so compose_derive.sh builds csd-seed-fidelity:0.1 itself
+# (and the derived spec carries no_pull:true, so drop_test uses the local image
+# instead of attempting a registry pull). That exercises the real build path.
 rc=0
 # check <service> <want_exit> <want_verdict> [--enforce]
 # Runs csd deploy-check, captures stdout (evidence JSON) + exit code, and asserts

@@ -1,5 +1,5 @@
 name: derive-profiles
-# Re-derivation loop (compose-lint#360 step 4). On a schedule (and on demand),
+# Re-derivation loop (compose-lint#360 step 4). On demand (workflow_dispatch),
 # re-derive the container-security-profiles catalog against each image's CURRENT
 # digest and, when the recommendation is unchanged, open a PR bumping the pinned
 # digest + validated_date. A changed recommendation is surfaced for review, never
@@ -20,9 +20,10 @@ name: derive-profiles
 #     Go + docker + the pinned `ig` + passwordless sudo.
 #   - a repo secret CATALOG_PAT: a fine-grained PAT with contents:write +
 #     pull-requests:write on tmatens/container-security-profiles ONLY.
+# Dispatch-only, no cron: the `csd` runner is ephemeral / on-demand, so a scheduled
+# run would just queue and get auto-cancelled whenever no runner is online (it did,
+# 2026-07-13). Bring a runner up (docs/self-hosted-runner.md), then Run workflow.
 on:
-  schedule:
-    - cron: "23 4 * * 1"   # Mondays 04:23 UTC (after the catalog staleness check)
   workflow_dispatch:
     inputs:
       force:

@@ -25,7 +25,7 @@ name: deploy-check
 #     in-scope dad/* service repos on git.matens.xyz.
 on:
   schedule:
-    - cron: "43 4 * * 1"   # Mondays 04:43 UTC (after derive-profiles at 04:23)
+    - cron: "43 4 * * 1"   # Mondays 04:43 UTC
   workflow_dispatch:
 permissions:
   contents: read

@@ -95,8 +95,8 @@ hosted runner. Spin the runner on different VM kernels over time to widen it.
 ## Profile re-derivation (`derive-profiles.yml`, compose-lint#360 step 4)
 
 A second workflow targets the same `csd` runner: it keeps the external
-`container-security-profiles` catalog current. On demand (`workflow_dispatch`),
-`scripts/derive_profiles.sh` reads the catalog's `derivation/manifest.yaml` and,
+`container-security-profiles` catalog current. On a weekly schedule (and on
+`workflow_dispatch`), `scripts/derive_profiles.sh` reads the catalog's `derivation/manifest.yaml` and,
 per entry `method`, re-derives against each image's **current** digest —
 `drop-test` entries via `scripts/drop_test.sh` (docker only), `bpf-observation`
 entries via `csd --observe` under sudo. When a digest has moved and the
@@ -108,10 +108,10 @@ Extra prerequisite beyond the smoke suite above: a repo secret **`CATALOG_PAT`**
 — a fine-grained PAT scoped to `contents:write` + `pull-requests:write` on
 `tmatens/container-security-profiles` **only** (it clones the catalog and opens
 the PR/issue). No other secret is needed; git operations against `csd` itself use
-the workflow's `GITHUB_TOKEN`. It triggers **only on `workflow_dispatch`** (never
-on a schedule or PR), so it always runs reviewed `main` code — and because the
-`csd` runner is ephemeral/on-demand, a cron would only queue and auto-cancel when
-no runner is online. Bring a runner up, then Run workflow to re-derive.
+the workflow's `GITHUB_TOKEN`. It triggers on `schedule` + `workflow_dispatch`
+(never on a PR), so it always runs reviewed `main` code. The weekly cron runs
+unattended because the `csd` runner is an **always-on, autostarted** VM (so it is
+online at cron time); it can also be run on demand any time.
 
 ## Matching the target's security posture (for MAC/BPF-class caps)
 

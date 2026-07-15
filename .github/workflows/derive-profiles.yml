@@ -8,7 +8,8 @@ name: derive-profiles
 # One manifest-driven loop (scripts/derive_profiles.sh) dispatches per entry
 # `method`: drop-test entries run scripts/drop_test.sh (docker only); the
 # bpf-observation path runs csd under sudo (CAP_BPF/CAP_PERFMON + --pid=host + the
-# pinned ig). Both current catalog entries are drop-test.
+# pinned ig). All current catalog entries are drop-test; the bpf-observation path
+# is wired for future runtime-only dimensions.
 #
 # MUST run on the self-hosted BPF runner (docs/self-hosted-runner.md): the
 # observation path needs root + BPF, and drop-test restarts real containers.
@@ -58,9 +59,17 @@ jobs:
       - name: open PR for re-validated profiles / issue for changes
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.CATALOG_PAT }}
+          CATALOG_PAT: ${{ secrets.CATALOG_PAT }}
+          DERIVE_RC: ${{ steps.derive.outputs.rc }}
+          CATALOG_REPO: tmatens/container-security-profiles
         run: |
+          set -uo pipefail
           cd catalog
+          # git push authenticates via the token embedded in the clone URL; the PR
+          # and review-issue calls go over api.github.com (python3 + urllib — no `gh`
+          # on the self-hosted runner; matches deploy-check.yml). The token is read
+          # from the environment, never a command line, and the log body from a file.
+          branch=""
           if git diff --quiet; then
             echo "no profile changes to propose"
           else
@@ -70,18 +79,39 @@ jobs:
             git switch -C "$branch"
             git commit -aqm "Re-validate profiles against current digests (automated)"
             git push -u origin "$branch"
-            gh pr create --repo tmatens/container-security-profiles --base main --head "$branch" \
-              --title "Re-validate catalog profiles against current digests" \
-              --body "$(cat ../derive.log)"
           fi
+          BRANCH="$branch" LOG="${GITHUB_WORKSPACE}/derive.log" python3 - <<'PY'
+          import json, os, urllib.request as U, urllib.error
+          api="https://api.github.com"
+          repo=os.environ["CATALOG_REPO"]; tok=os.environ["CATALOG_PAT"]
+          branch=os.environ.get("BRANCH",""); rc=os.environ.get("DERIVE_RC","0")
+          logp=os.environ["LOG"]; log=open(logp).read() if os.path.exists(logp) else ""
+          H={"Authorization":"Bearer "+tok,"Accept":"application/vnd.github+json",
+             "User-Agent":"csd-derive-bot"}
+          def req(method, path, body=None):
+              data=json.dumps(body).encode() if body is not None else None
+              try:
+                  with U.urlopen(U.Request(api+path, data=data, method=method, headers=H)) as r:
+                      return json.load(r)
+              except urllib.error.HTTPError as e:
+                  raise SystemExit("GitHub %s %s -> %s: %s" %
+                                   (method, path, e.code, e.read().decode()[:400]))
+          # A digest bump (working tree changed) -> open a PR bumping validated_image/date.
+          if branch:
+              pr=req("POST", f"/repos/{repo}/pulls",
+                     {"title":"Re-validate catalog profiles against current digests",
+                      "head":branch, "base":"main", "body":log})
+              print("opened PR", pr.get("html_url"))
           # A CHANGED recommendation (driver rc!=0) is a review signal, not a digest bump.
-          if [ "${{ steps.derive.outputs.rc }}" != "0" ]; then
-            title="Profile recommendation changed on re-derivation — review"
-            num=$(gh issue list --repo tmatens/container-security-profiles --state open \
-              --json number,title --jq '.[] | select(.title=="'"$title"'") | .number' | head -1)
-            if [ -n "$num" ]; then
-              gh issue comment "$num" --repo tmatens/container-security-profiles --body "$(cat ../derive.log)"
-            else
-              gh issue create --repo tmatens/container-security-profiles --title "$title" --body "$(cat ../derive.log)"
-            fi
-          fi
+          if rc != "0":
+              title="Profile recommendation changed on re-derivation — review"
+              issues=req("GET", f"/repos/{repo}/issues?state=open&per_page=100")
+              num=next((i["number"] for i in issues
+                        if i.get("title")==title and "pull_request" not in i), None)
+              if num is not None:
+                  req("POST", f"/repos/{repo}/issues/{num}/comments", {"body":log})
+                  print("commented on issue", num)
+              else:
+                  iss=req("POST", f"/repos/{repo}/issues", {"title":title, "body":log})
+                  print("opened issue", iss.get("html_url"))
+          PY

@@ -38,6 +38,11 @@ type PrivilegedPipelineOpts struct {
 	RuntimeBin     string // container CLI for inspect/history (internal/runtime); empty → docker
 	Duration       time.Duration
 	Workload       string
+	// GadgetFilter pushes an in-gadget --containername filter for a
+	// --container target (see observe.GadgetContainerFilter). Opt-in: on
+	// some runtime/ig combinations the filter matches nothing and the run
+	// observes zero events.
+	GadgetFilter bool
 }
 
 // ProducePrivilegedObservation runs the capability and device observers
@@ -104,7 +109,10 @@ func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer)
 		defer timeoutCancel()
 
 		// Resolved once and shared: both gadgets filter to the same target.
-		filter := observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		var filter []string
+		if opts.GadgetFilter {
+			filter = observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		}
 		var (
 			wg             sync.WaitGroup
 			capErr, devErr error

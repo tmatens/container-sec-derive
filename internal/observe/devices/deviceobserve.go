@@ -30,6 +30,11 @@ type DevicePipelineOpts struct {
 	Duration      time.Duration
 	Workload      string // --workload path recorded on the sidecar + fed to device confidence
 	RuntimeBin    string // container CLI for the image-digest lookup (internal/runtime); empty → docker
+	// GadgetFilter pushes an in-gadget --containername filter for a
+	// --container target (see observe.GadgetContainerFilter). Opt-in: on
+	// some runtime/ig combinations the filter matches nothing and the run
+	// observes zero events.
+	GadgetFilter bool
 }
 
 // ProduceDeviceObservation runs the fixture-or-live device observe path
@@ -58,7 +63,10 @@ func ProduceDeviceObservation(opts DevicePipelineOpts, stderr io.Writer) (*sidec
 		}
 		// Resolve the in-gadget filter BEFORE the observation window opens:
 		// the runtime inspect must not spend the caller's --duration.
-		filter := observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		var filter []string
+		if opts.GadgetFilter {
+			filter = observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)

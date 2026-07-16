@@ -13,6 +13,16 @@ the relevant entry.
 
 ### Added
 
+- **drop-test `run.seed_mounts[].read_only` — read-only config fixtures.** A
+  `seed_mount` can now be mounted `:ro`, and its seeded `file`/`content` may be
+  multi-line (base64 over the internal spec protocol). Together these turn
+  `seed_mounts` into a read-only CONFIG-fixture mechanism: a config file injected
+  at the path a service reads but never writes. This lets a **filesystem**
+  derivation of a config-file-driven proxy (traefik, haproxy) supply its config
+  on a read-only mount instead of writing it into a writable `/tmp` — which under
+  `--read-only` would falsely require a `/tmp` tmpfs a production read-only config
+  mount does not. Fully backward compatible (content round-trips byte-identically).
+
 - **`csd deploy-check` — first-class re-derive-at-deploy subcommand (#355).** The
   re-derive-at-deploy pipeline that shipped as repo-internal `scripts/` plumbing
   (`compose_derive.sh` + `compose_to_spec.py` + `compose_verdict.py`) is now a

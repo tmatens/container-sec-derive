@@ -1,0 +1,46 @@
+# drop-test spec: traefik read-only-filesystem tmpfs minimum, reverse proxy.
+# traefik writes NOTHING to its rootfs when proxying — the fs minimum is
+# read_only:true, tmpfs:[]. The wrinkle vs. the caps derivation: traefik's
+# dynamic routing config is injected as a READ-ONLY config fixture
+# (run.seed_mounts read_only:true) at the file-provider directory, instead of
+# being docker-cp'd into a writable /tmp. Under --read-only, /tmp is drop-tested
+# and comes out NOT required (traefik reads its config from the read-only mount
+# and writes nowhere). Minimum: read_only:true, tmpfs:[].
+#
+# Derived under the default docker cap set. The `backend` dep (pinned caddy) is
+# the proxy target; correctness = a request on :80 routed to it.
+image: docker.io/library/traefik
+tag: "v3.7"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+deps:
+  - name: backend
+    image: docker.io/library/caddy
+    tag: "2"
+    ready: wget -qO- http://localhost:80
+run:
+  command: ["--entrypoints.web.address=:80",
+            "--providers.file.directory=/etc/traefik/dynamic",
+            "--providers.file.watch=false",
+            "--api=false", "--log.level=INFO"]
+  seed_mounts:
+    - target: /etc/traefik/dynamic
+      file: dynamic.yml
+      read_only: true
+      owner: "0:0"
+      dir_mode: "0755"
+      file_mode: "0444"
+      content: |
+        http:
+          routers:
+            csd:
+              rule: PathPrefix(`/`)
+              service: backend
+          services:
+            backend:
+              loadBalancer:
+                servers:
+                  - url: http://backend:80
+correctness: testdata/drop-test/correctness/traefik-fs.sh

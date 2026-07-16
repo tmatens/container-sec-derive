@@ -121,6 +121,15 @@
 #         content: "..."         # its contents (default a marker string)
 #         dir_mode: "0755"       # optional; mount dir mode (default 0755)
 #         file_mode: "0600"      # optional; seeded file mode (default 0600)
+#         read_only: true        # optional; mount the fixture :ro (default false)
+#
+# read_only seed_mounts double as a READ-ONLY CONFIG FIXTURE: seed the config
+# file (file:/content:) at the path the service reads, mount it :ro, and the
+# service runs off it without writing. This is what a filesystem derivation of a
+# config-file-driven proxy needs — traefik/haproxy would otherwise have their
+# config docker-cp'd or entrypoint-written into a writable /tmp, which under
+# --read-only falsely derives a /tmp tmpfs a production read-only config mount
+# would not need.
 set -uo pipefail
 
 SPEC="${1:?usage: drop_test.sh <spec.yaml>}"
@@ -154,7 +163,7 @@ trap cleanup EXIT
 # --- parse spec (TSV; arrays are space/newline-joined, safe for caps/paths) ----
 declare -A F
 while IFS=$'\t' read -r k v; do F["$k"]="$v"; done < <("$PY" - "$SPEC" <<'PYEOF'
-import sys, yaml
+import sys, yaml, base64
 s = yaml.safe_load(open(sys.argv[1])) or {}
 run = s.get("run", {}) or {}
 def line(k, v): print(f"{k}\t{v}")
@@ -218,7 +227,17 @@ for i, sd in enumerate(seeds):
     line(f"SEED_{i}_DIRMODE", str(sd.get("dir_mode", "0755")))
     line(f"SEED_{i}_FILE", str(sd.get("file", "")))
     line(f"SEED_{i}_FILEMODE", str(sd.get("file_mode", "0600")))
-    line(f"SEED_{i}_CONTENT", str(sd.get("content", "csd-preexisting-foreign-owned")))
+    # base64 so multi-line content (a seeded CONFIG file) survives the TSV
+    # line protocol — a raw newline would be mis-read as a new key.
+    line(f"SEED_{i}_CONTENT_B64",
+         base64.b64encode(str(sd.get("content", "csd-preexisting-foreign-owned")).encode()).decode())
+    # read_only: mount the staged fixture :ro. Turns seed_mounts into a read-only
+    # CONFIG-fixture mechanism (a config file injected at a path the service reads
+    # but never writes) as well as its original foreign-owned-content role — so a
+    # filesystem derivation of a config-file-driven service (traefik/haproxy) does
+    # not have to write the config to a writable /tmp, which would falsely require
+    # a /tmp tmpfs a read-only config mount in production would not.
+    line(f"SEED_{i}_RO", "true" if sd.get("read_only") else "")
 # Dependencies to bring up before the drop-test. Emit each field on its OWN key
 # (DEP_<i>_*), not one packed record: bash `read` treats \v as whitespace and would
 # collapse an empty field (e.g. no command override), shifting every later field.
@@ -411,16 +430,19 @@ run_and_test() {
   for (( si=0; si<${F[SEED_COUNT]:-0}; si++ )); do
     local starget="${F[SEED_${si}_TARGET]}" sowner="${F[SEED_${si}_OWNER]}"
     local sdirmode="${F[SEED_${si}_DIRMODE]}" sfile="${F[SEED_${si}_FILE]}"
-    local sfilemode="${F[SEED_${si}_FILEMODE]}" scontent="${F[SEED_${si}_CONTENT]}"
+    local sfilemode="${F[SEED_${si}_FILEMODE]}" scontent_b64="${F[SEED_${si}_CONTENT_B64]}"
+    local sro="${F[SEED_${si}_RO]:-}"
     local sdir="$stageroot/seed.$si"
     mkdir -p "$sdir"
-    [ -n "$sfile" ] && printf '%s' "$scontent" > "$sdir/$sfile"
+    [ -n "$sfile" ] && printf '%s' "$scontent_b64" | base64 -d > "$sdir/$sfile"
     STAGED_ANY=1
     if ! docker run --rm --user 0:0 --entrypoint sh -v "$sdir:/csd-seed" "${IMAGE}:${TAG}" -c \
           "chown -R ${sowner} /csd-seed && chmod ${sdirmode} /csd-seed${sfile:+ && chmod ${sfilemode} /csd-seed/${sfile}}" >/dev/null 2>&1; then
       echo "drop_test: could not seed foreign-owned content for ${starget} (image lacks sh/chown?); using it un-owned" >&2
     fi
-    args+=(-v "$sdir:$starget")
+    # read_only seed -> mount :ro (a read-only config fixture); else writable (the
+    # foreign-owned-content case that tests chown-class caps).
+    args+=(-v "$sdir:$starget${sro:+:ro}")
   done
   local so; for so in "${RUN_SECOPT[@]}"; do [ -n "$so" ] && args+=(--security-opt "$so"); done
   # Pin the kernel sysctl posture the caps are derived under (item 5): a namespaced

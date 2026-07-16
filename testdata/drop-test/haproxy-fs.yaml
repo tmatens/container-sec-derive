@@ -1,0 +1,43 @@
+# drop-test spec: haproxy read-only-filesystem tmpfs minimum, reverse proxy.
+# haproxy is a static-binary proxy that writes NOTHING to its rootfs when
+# running — the fs minimum is read_only:true, tmpfs:[]. The wrinkle vs. the caps
+# derivation: the config is supplied as a READ-ONLY config fixture
+# (run.seed_mounts read_only:true) at haproxy's default config path
+# /usr/local/etc/haproxy/haproxy.cfg, so the default entrypoint loads it with no
+# runtime config write — instead of the caps spec's entrypoint that writes the
+# config to a writable /tmp. Under --read-only, /tmp is drop-tested and comes out
+# NOT required. Minimum: read_only:true, tmpfs:[].
+#
+# Derived under the default docker cap set. The `backend` dep (pinned caddy) is
+# the proxy target; correctness = a request on :8080 proxied to it.
+image: docker.io/library/haproxy
+tag: "3.2"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+deps:
+  - name: backend
+    image: docker.io/library/caddy
+    tag: "2"
+    ready: wget -qO- http://localhost:80
+run:
+  seed_mounts:
+    - target: /usr/local/etc/haproxy
+      file: haproxy.cfg
+      read_only: true
+      owner: "0:0"
+      dir_mode: "0755"
+      file_mode: "0444"
+      content: |
+        defaults
+          mode http
+          timeout connect 5s
+          timeout client 30s
+          timeout server 30s
+        frontend f
+          bind :8080
+          default_backend b
+        backend b
+          server s1 backend:80
+correctness: testdata/drop-test/correctness/haproxy.sh

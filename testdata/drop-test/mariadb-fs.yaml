@@ -1,0 +1,21 @@
+# drop-test spec: mariadb read-only-filesystem tmpfs minimum. Its data dir
+# /var/lib/mysql is a declared VOLUME (auto-mounted writable). Under --read-only
+# mariadbd additionally needs /run/mysqld writable — it creates its unix socket +
+# pid there at startup. /tmp is drop-tested and comes out NOT required. Minimum:
+# read_only:true, tmpfs:[/run/mysqld].
+#
+# Derived under the default docker cap set (so the entrypoint find-chown + gosu
+# drop fire on the fresh data volume). Correctness reuses mariadb.sh.
+image: docker.io/library/mariadb
+tag: "11.4"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/run/mysqld", "/tmp"]
+run:
+  env:
+    - MARIADB_ROOT_PASSWORD=csdprobe-pw-12345
+    - MARIADB_DATABASE=probe
+    - MARIADB_USER=csd
+    - MARIADB_PASSWORD=csdprobe-pw-12345
+correctness: testdata/drop-test/correctness/mariadb.sh

@@ -1,0 +1,15 @@
+# drop-test spec: mongo read-only-filesystem tmpfs minimum. Its data dirs
+# /data/db and /data/configdb are declared VOLUMEs (auto-mounted writable). Under
+# --read-only mongod additionally needs /tmp writable — it creates its unix
+# socket (/tmp/mongodb-27017.sock) there. Minimum expected: read_only:true,
+# tmpfs:[/tmp].
+#
+# Derived under the default docker cap set. Correctness reuses mongo.sh.
+image: docker.io/library/mongo
+tag: "8.0"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run: {}
+correctness: testdata/drop-test/correctness/mongo.sh

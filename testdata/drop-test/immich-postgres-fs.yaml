@@ -1,0 +1,23 @@
+# drop-test spec: immich's postgres read-only-filesystem tmpfs minimum. Same
+# similar to the library postgres fs profile but with an extra write: postgres
+# creates its lock + unix socket in /var/run/postgresql at startup, AND immich's
+# custom entrypoint copies a tuned postgresql.conf into /etc/postgresql — both
+# dirs must be writable under a read-only rootfs. The data dir
+# /var/lib/postgresql/data is a persistent VOLUME (supplied via run.tmpfs as a
+# writable stand-in, NOT part of the tmpfs minimum). /tmp is drop-tested and comes
+# out NOT required. Minimum derived below (expect
+# tmpfs:[/etc/postgresql,/var/run/postgresql]).
+#
+# Derived under the default docker cap set (so initdb's data-dir chown fires on
+# the fresh volume). Correctness reuses postgres.sh (CREATE/INSERT/SELECT + a
+# SIGHUP reload).
+image: ghcr.io/immich-app/postgres
+tag: "14-vectorchord0.4.3-pgvectors0.2.0"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/var/run/postgresql", "/etc/postgresql", "/tmp"]
+run:
+  env: ["POSTGRES_PASSWORD=postgres"]
+  tmpfs: ["/var/lib/postgresql/data"]
+correctness: testdata/drop-test/correctness/postgres.sh

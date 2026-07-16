@@ -90,22 +90,55 @@ func inspectRepoDigests(ctx context.Context, ref, runtimeBin string) ([]string, 
 // We strip the "<repo>@" prefix so the value lines up with the format
 // the compose-lint contribution flow expects (`validated_image:
 // postgres:16@sha256:...` is built by appending "@" + ImageDigest).
+//
+// Both sides are compared in canonical registry/namespace/name form:
+// RepoDigests entries elide the docker.io default (`netdata/netdata@...`)
+// while the attributed image name may carry it (`docker.io/netdata/netdata`),
+// and a literal comparison left every registry-qualified target un-pinned.
 func PickRepoDigest(imageRef string, repoDigests []string) string {
 	repo := imageRef
 	if at := strings.Index(repo, "@"); at >= 0 {
 		repo = repo[:at]
 	}
-	if col := strings.LastIndex(repo, ":"); col >= 0 {
-		repo = repo[:col]
+	// A tag is a ':' in the final path segment, so a registry port
+	// (localhost:5000/foo) is left intact.
+	slash := strings.LastIndex(repo, "/")
+	if col := strings.LastIndex(repo[slash+1:], ":"); col >= 0 {
+		repo = repo[:slash+1+col]
 	}
+	repo = canonicalRepo(repo)
 	for _, d := range repoDigests {
 		i := strings.Index(d, "@")
 		if i < 0 {
 			continue
 		}
-		if d[:i] == repo {
+		if canonicalRepo(d[:i]) == repo {
 			return d[i+1:]
 		}
 	}
 	return ""
+}
+
+// canonicalRepo expands a repository reference (no tag/digest) to its
+// canonical registry/namespace/name: `postgres` -> docker.io/library/postgres,
+// `netdata/netdata` -> docker.io/netdata/netdata, explicit registries
+// (lscr.io/..., localhost:5000/...) pass through. Twin of the format
+// package's normalizeRepository (which mirrors compose-lint's
+// normalize_repository); duplicated because observe cannot import format
+// sideways — keep the two in sync.
+func canonicalRepo(name string) string {
+	if name == "" {
+		return name
+	}
+	first, rest, hasSlash := strings.Cut(name, "/")
+	var registry, path string
+	if hasSlash && (strings.ContainsAny(first, ".:") || first == "localhost") {
+		registry, path = strings.ToLower(first), rest
+	} else {
+		registry, path = "docker.io", name
+	}
+	if registry == "docker.io" && !strings.Contains(path, "/") {
+		path = "library/" + path
+	}
+	return registry + "/" + path
 }

@@ -30,6 +30,11 @@ type DevicePipelineOpts struct {
 	Duration      time.Duration
 	Workload      string // --workload path recorded on the sidecar + fed to device confidence
 	RuntimeBin    string // container CLI for the image-digest lookup (internal/runtime); empty → docker
+	// GadgetFilter pushes an in-gadget --containername filter for a
+	// --container target (see observe.GadgetContainerFilter). Opt-in: on
+	// some runtime/ig combinations the filter matches nothing and the run
+	// observes zero events.
+	GadgetFilter bool
 }
 
 // ProduceDeviceObservation runs the fixture-or-live device observe path
@@ -56,11 +61,17 @@ func ProduceDeviceObservation(opts DevicePipelineOpts, stderr io.Writer) (*sidec
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
+		// Resolve the in-gadget filter BEFORE the observation window opens:
+		// the runtime inspect must not spend the caller's --duration.
+		var filter []string
+		if opts.GadgetFilter {
+			filter = observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
 		defer timeoutCancel()
-		dev, err = ObserveDevices(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+		dev, err = ObserveDevices(ctx, opts.IGBin, filter, opts.AggregateOpts, stderr)
 	}
 	if err != nil {
 		var amb *exit.AmbiguousSelectionError
@@ -167,8 +178,9 @@ func ApplyDeviceFields(s *sidecar.Sidecar, dev *DeviceObservation) {
 // AggregateDevices swapped in for aggregateWrites — the same gadget (trace_open,
 // --paths for the symlink-resolved fpath), the same stderr-drain + ringbuf-loss
 // accounting; only the classifier differs (isDeviceOpen vs IsWrite/isRootfsWrite).
-func ObserveDevices(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*DeviceObservation, error) {
-	obs, lost, err := ig.RunGadget(ctx, igBin, ig.TraceOpenGadget, []string{"--paths", "--output", "json"}, stderrSink,
+func ObserveDevices(ctx context.Context, igBin string, filterArgs []string, opts attrib.Opts, stderrSink io.Writer) (*DeviceObservation, error) {
+	args := append(append([]string{}, filterArgs...), "--paths", "--output", "json")
+	obs, lost, err := ig.RunGadget(ctx, igBin, ig.TraceOpenGadget, args, stderrSink,
 		func(stdout io.Reader) (*DeviceObservation, error) { return AggregateDevices(stdout, opts) })
 	if err != nil {
 		return nil, err

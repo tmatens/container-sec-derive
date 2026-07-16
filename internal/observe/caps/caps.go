@@ -133,6 +133,11 @@ type PipelineOpts struct {
 	RuntimeBin     string // container CLI for inspect/history (internal/runtime); empty → docker
 	Duration       time.Duration
 	Workload       string
+	// GadgetFilter pushes an in-gadget --containername filter for a
+	// --container target (see observe.GadgetContainerFilter). Opt-in: on
+	// some runtime/ig combinations the filter matches nothing and the run
+	// observes zero events.
+	GadgetFilter bool
 }
 
 // ProduceObservation runs the fixture-or-live observe path end-to-end
@@ -178,11 +183,17 @@ func ProduceObservation(opts PipelineOpts, stderr io.Writer) (*sidecar.Sidecar, 
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
+		// Resolve the in-gadget filter BEFORE the observation window opens:
+		// the runtime inspect must not spend the caller's --duration.
+		var filter []string
+		if opts.GadgetFilter {
+			filter = observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
 		defer timeoutCancel()
-		s, err = Observe(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+		s, err = Observe(ctx, opts.IGBin, filter, opts.AggregateOpts, stderr)
 		if s != nil {
 			s.DurationSeconds = int(opts.Duration.Seconds())
 		}
@@ -214,8 +225,11 @@ func ProduceObservation(opts PipelineOpts, stderr io.Writer) (*sidecar.Sidecar, 
 // internal/ig signal seam and aggregates events for the lifetime of ctx.
 // RunGadget drains ig's stderr so the ringbuf-loss counter (v0.51.0 emits these
 // as stderr warnings, not typed stdout events) lands on the sidecar.
-func Observe(ctx context.Context, igBin string, opts attrib.Opts, stderrSink io.Writer) (*sidecar.Sidecar, error) {
-	s, lost, err := ig.RunGadget(ctx, igBin, ig.TraceCapabilitiesGadget, []string{"--output", "json"}, stderrSink,
+// filterArgs is the in-gadget container filter (observe.GadgetContainerFilter);
+// nil observes host-wide.
+func Observe(ctx context.Context, igBin string, filterArgs []string, opts attrib.Opts, stderrSink io.Writer) (*sidecar.Sidecar, error) {
+	args := append(append([]string{}, filterArgs...), "--output", "json")
+	s, lost, err := ig.RunGadget(ctx, igBin, ig.TraceCapabilitiesGadget, args, stderrSink,
 		func(stdout io.Reader) (*sidecar.Sidecar, error) { return Aggregate(stdout, opts) })
 	if err != nil {
 		return nil, err

@@ -443,7 +443,7 @@ func TestObserveCapadd_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := obstest.FakeIGRun(t, nd, "level=info msg=starting\nlost 4 samples\n")
 
-	obs, err := observeCapadd(context.Background(), ig, attrib.Opts{}, DangerousCaps, io.Discard)
+	obs, err := observeCapadd(context.Background(), ig, nil, attrib.Opts{}, DangerousCaps, io.Discard)
 	if err != nil {
 		t.Fatalf("observeCapadd: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestObserveCapadd_FakeIG(t *testing.T) {
 
 // TestObserveCapadd_IGMissing is TG3: a missing ig binary maps to exit.IGMissing.
 func TestObserveCapadd_IGMissing(t *testing.T) {
-	_, err := observeCapadd(context.Background(), "/nonexistent/csd-ig-capadd-test", attrib.Opts{}, DangerousCaps, io.Discard)
+	_, err := observeCapadd(context.Background(), "/nonexistent/csd-ig-capadd-test", nil, attrib.Opts{}, DangerousCaps, io.Discard)
 	if exit.CodeFor(err) != exit.IGMissing {
 		t.Errorf("exit = %d, want exit.IGMissing (%d); err=%v", exit.CodeFor(err), exit.IGMissing, err)
 	}

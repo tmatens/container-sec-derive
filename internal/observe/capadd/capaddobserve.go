@@ -32,7 +32,12 @@ type CapaddPipelineOpts struct {
 	IGBin         string
 	Duration      time.Duration
 	Workload      string
-	RuntimeBin    string // container CLI for the image-digest lookup (internal/runtime); empty → docker
+	// GadgetFilter pushes an in-gadget --containername filter for a
+	// --container target (see observe.GadgetContainerFilter). Opt-in: on
+	// some runtime/ig combinations the filter matches nothing and the run
+	// observes zero events.
+	GadgetFilter bool
+	RuntimeBin   string // container CLI for the image-digest lookup (internal/runtime); empty → docker
 }
 
 // ProduceCapaddObservation runs the fixture-or-live capadd observe path
@@ -58,11 +63,17 @@ func ProduceCapaddObservation(opts CapaddPipelineOpts, stderr io.Writer) (*sidec
 		if verr := ig.CheckIGVersion(opts.IGBin, stderr); verr != nil {
 			return nil, verr
 		}
+		// Resolve the in-gadget filter BEFORE the observation window opens:
+		// the runtime inspect must not spend the caller's --duration.
+		var filter []string
+		if opts.GadgetFilter {
+			filter = observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
+		}
 		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer cancel()
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
 		defer timeoutCancel()
-		obs, err = observeCapadd(ctx, opts.IGBin, opts.AggregateOpts, opts.ActiveSet, stderr)
+		obs, err = observeCapadd(ctx, opts.IGBin, filter, opts.AggregateOpts, opts.ActiveSet, stderr)
 	}
 	if err != nil {
 		var amb *exit.AmbiguousSelectionError
@@ -147,8 +158,9 @@ func capaddToSidecar(obs *capaddObservation, opts CapaddPipelineOpts) *sidecar.S
 // AggregateCapadd swapped in for aggregate() — the same gadget and the same
 // stderr-drain + ringbuf-loss accounting; only the aggregation differs (keyed on
 // syscall-per-cap rather than deduped to a cap set).
-func observeCapadd(ctx context.Context, igBin string, opts attrib.Opts, activeSet map[string]struct{}, stderrSink io.Writer) (*capaddObservation, error) {
-	obs, lost, err := ig.RunGadget(ctx, igBin, ig.TraceCapabilitiesGadget, []string{"--output", "json"}, stderrSink,
+func observeCapadd(ctx context.Context, igBin string, filterArgs []string, opts attrib.Opts, activeSet map[string]struct{}, stderrSink io.Writer) (*capaddObservation, error) {
+	args := append(append([]string{}, filterArgs...), "--output", "json")
+	obs, lost, err := ig.RunGadget(ctx, igBin, ig.TraceCapabilitiesGadget, args, stderrSink,
 		func(stdout io.Reader) (*capaddObservation, error) { return AggregateCapadd(stdout, opts, activeSet) })
 	if err != nil {
 		return nil, err

@@ -19,7 +19,7 @@ func TestObserveDevices_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := obstest.FakeIGRun(t, nd, "lost 2 samples\n")
 
-	obs, err := ObserveDevices(context.Background(), ig, attrib.Opts{}, io.Discard)
+	obs, err := ObserveDevices(context.Background(), ig, nil, attrib.Opts{}, io.Discard)
 	if err != nil {
 		t.Fatalf("observeDevices: %v", err)
 	}

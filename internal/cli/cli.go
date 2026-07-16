@@ -211,6 +211,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		formatMode       = flags.String("format", FormatCompose, "output format for stdout (compose, compose-patch, compose-lint-profile, docker-run, json, k8s, oci; egress-only: nftables, k8s-networkpolicy)")
 		allowExploratory = flags.Bool("allow-exploratory", false, "compose-lint-profile only: emit under exploratory: even when the acceptance contract is not met")
 		workload         = flags.String("workload", "", "path to the user-supplied workload script that exercised the container; recorded on the sidecar and required by the compose-lint-profile gate")
+		gadgetFilter     = flags.Bool("gadget-filter", false, "--container targets only: push a --containername filter into the gadget so other workloads' events never enter the perf buffer (dramatically lowers the drop rate on busy hosts). Off by default: on some runtime/ig combinations (e.g. Docker 29's containerd image store) the in-gadget filter matches nothing and the run observes ZERO events — enable only on hosts where a filtered run has been verified to record events")
 		composeIn        = flags.String("compose-in", "", "compose-patch only: path to the user's compose file to diff against")
 		composeService   = flags.String("service", "", "compose-patch only: name of the service under services: whose cap_drop/cap_add to rewrite")
 	)
@@ -371,6 +372,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			IGBin:         *igBin,
 			Duration:      *duration,
 			Workload:      *workload,
+			GadgetFilter:  *gadgetFilter,
 		}, stderr)
 		if err != nil {
 			return err
@@ -415,11 +417,12 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				Image:       *image,
 				AllMatching: *allMatching,
 			},
-			Fixture:    *fixture,
-			IGBin:      *igBin,
-			Duration:   *duration,
-			Workload:   *workload,
-			RuntimeBin: runtimeBin,
+			Fixture:      *fixture,
+			IGBin:        *igBin,
+			Duration:     *duration,
+			Workload:     *workload,
+			GadgetFilter: *gadgetFilter,
+			RuntimeBin:   runtimeBin,
 		}, stderr)
 		if err != nil {
 			return err
@@ -472,6 +475,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			IGBin:          *igBin,
 			Duration:       *duration,
 			Workload:       *workload,
+			GadgetFilter:   *gadgetFilter,
 		}, stderr)
 		if err != nil {
 			return err
@@ -523,13 +527,14 @@ func Run(args []string, stdout, stderr io.Writer) error {
 				Image:       *image,
 				AllMatching: *allMatching,
 			},
-			ActiveSet:  activeSet,
-			Granted:    hasGranted,
-			Fixture:    *fixture,
-			IGBin:      *igBin,
-			Duration:   *duration,
-			Workload:   *workload,
-			RuntimeBin: runtimeBin,
+			ActiveSet:    activeSet,
+			Granted:      hasGranted,
+			Fixture:      *fixture,
+			IGBin:        *igBin,
+			Duration:     *duration,
+			Workload:     *workload,
+			GadgetFilter: *gadgetFilter,
+			RuntimeBin:   runtimeBin,
 		}, stderr)
 		if err != nil {
 			return err
@@ -575,6 +580,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		IGBin:          *igBin,
 		Duration:       *duration,
 		Workload:       *workload,
+		GadgetFilter:   *gadgetFilter,
 	}, stderr)
 	if err != nil {
 		return err

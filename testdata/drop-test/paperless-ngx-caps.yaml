@@ -1,0 +1,37 @@
+# drop-test spec: paperless-ngx minimum Linux capabilities, in-stack
+# invocation against a redis broker. Baseline is cap_drop:ALL + the full
+# Docker default cap set. The image declares consume/data/export/media
+# VOLUMEs; each trial gets fresh anonymous volumes.
+#
+# Shape: an s6-overlay init starts as root, provisions/chowns the data +
+# media + consume dirs, and drops every worker (granian web, celery worker,
+# celery beat) to the default PUID 1000 — expect the CHOWN-class provisioning
+# caps plus the SETGID/SETUID drop. Unprivileged :8000. The drop-test decides
+# the exact set.
+#
+# The redis `broker` dep persists across trials; only the paperless target is
+# recreated per trial, so every trial re-runs the full s6 provisioning + the
+# document consume pipeline under the trial's cap posture.
+#
+# Correctness = the real document lifecycle: token auth, POST a document to
+# the consume API, and poll until it is fully consumed (web -> redis task
+# queue -> celery worker -> media write) — the whole stack-backed pipeline.
+# A plain-text document skips OCR, keeping trials fast (~seconds), so the
+# queue's "slow OCR" caveat is sidestepped without losing pipeline coverage.
+image: ghcr.io/paperless-ngx/paperless-ngx
+tag: "2.18"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+deps:
+  - name: broker
+    image: docker.io/library/redis
+    tag: "8.2.7"
+    ready: redis-cli ping
+run:
+  env: [PAPERLESS_REDIS=redis://broker:6379, PAPERLESS_SECRET_KEY=csdprobe,
+        PAPERLESS_ADMIN_USER=csdadmin, PAPERLESS_ADMIN_PASSWORD=CsdProbe-Pw-12345]
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/paperless-ngx.sh

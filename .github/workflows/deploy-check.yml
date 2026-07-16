@@ -95,3 +95,12 @@ jobs:
           else:
               req("POST", f"/repos/{repo}/issues/{pr}/comments", {"body": body}); print("created comment on PR", pr)
           PY
+      # Same runner-disk hygiene as derive-profiles.yml: superseded digests,
+      # per-trial volumes, and compose build cache accumulate on the VM's 40G
+      # disk. always(): a red verdict must still clean up.
+      - name: prune docker (runner disk hygiene)
+        if: always()
+        run: |
+          docker image prune -af
+          docker volume prune -f
+          docker builder prune -af

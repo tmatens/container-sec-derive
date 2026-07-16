@@ -1,0 +1,16 @@
+# drop-test spec: syncthing read-only-filesystem tmpfs minimum. syncthing's
+# state lives in /var/syncthing — a declared VOLUME, so docker auto-mounts a
+# writable anonymous volume there even under --read-only (in production a named
+# volume: config, keys, and index DB must survive restarts, NEVER tmpfs). Under a
+# read-only rootfs syncthing starts and serves its API with no tmpfs. /tmp is
+# drop-tested and comes out NOT required. Minimum: read_only:true, tmpfs:[].
+#
+# Derived under the default docker cap set. Correctness reuses syncthing.sh.
+image: docker.io/syncthing/syncthing
+tag: "2.0"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run: {}
+correctness: testdata/drop-test/correctness/syncthing.sh

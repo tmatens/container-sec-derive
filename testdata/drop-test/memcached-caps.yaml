@@ -1,0 +1,22 @@
+# drop-test spec: memcached minimum Linux capabilities, default invocation.
+# Baseline is cap_drop:ALL + the full Docker default cap set.
+#
+# The image runs as USER memcache (uid 11211) from the first instruction — no
+# root phase, no privilege drop, no low-port bind (:11211), no persistence.
+# Expected minimum: [] — the zero-cap story, prometheus's sibling.
+#
+# Correctness mirrors the official docker-library memcached-basics test: a
+# set/get round-trip asserting STORED and the value read back, driven over
+# the in-image bash /dev/tcp (the image ships bash but no client tool), plus
+# the non-root uid assert. docker exec inherits USER memcache, so the probe
+# cannot pollute the minimum.
+image: docker.io/library/memcached
+tag: "1.6"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/memcached.sh

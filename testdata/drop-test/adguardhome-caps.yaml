@@ -1,0 +1,26 @@
+# drop-test spec: adguardhome minimum Linux capabilities, DNS-only scope
+# (pihole's alternative; DHCP/NET_ADMIN out of scope, matching the pihole
+# boundary). Baseline is cap_drop:ALL + the full Docker default cap set. No
+# volumes declared — fresh rootfs cold start every trial.
+#
+# Shape: a single Go binary running AS ROOT with no privilege drop, binding
+# the PRIVILEGED :53 (DNS) and (per the install config) :80 (web) — so
+# NET_BIND_SERVICE is expected load-bearing under the pinned
+# ip_unprivileged_port_start=1024 posture. The interesting contrast with
+# pihole: AdGuard stays root (no FTL-style file-cap/user drop), so no SETFCAP
+# and nnp stays compatible.
+#
+# Correctness = the REST install/configure (embeds the admin + wires the DNS
+# and web listeners in one call — a real persistent config write) followed by
+# real resolution: nslookup a name against 127.0.0.1:53 answered by AGH.
+image: docker.io/adguard/adguardhome
+tag: "v0.107.78"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]
+correctness: testdata/drop-test/correctness/adguardhome.sh

@@ -1,0 +1,26 @@
+# drop-test spec: keycloak minimum Linux capabilities, start-dev invocation
+# (embedded H2 dev database, bootstrap admin via env — the queue's chosen
+# first scope; the postgres-dep production variant is a follow-up). Baseline
+# is cap_drop:ALL + the full Docker default cap set. quay.io-hosted (the
+# staleness checker covers it since catalog#40).
+#
+# Shape: the image is USER 1000 — non-root by construction — on the
+# unprivileged :8080. Expected minimum: [] (the prometheus/memcached/haproxy
+# class).
+#
+# Correctness = real IdP function: ready, obtain an admin token via the
+# OpenID password grant (admin-cli), CREATE A REALM through the admin API
+# and read it back — an authenticated write through the full JAX-RS + store
+# stack.
+image: quay.io/keycloak/keycloak
+tag: "26.4"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  command: ["start-dev"]
+  env: [KC_BOOTSTRAP_ADMIN_USERNAME=csdadmin, KC_BOOTSTRAP_ADMIN_PASSWORD=CsdProbe-Pw-12345]
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/keycloak.sh

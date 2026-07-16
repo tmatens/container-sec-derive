@@ -1,0 +1,27 @@
+# drop-test spec: grafana minimum Linux capabilities. Added 2026-07-16
+# (container-security-profiles#63) so the catalog answers the CAPABILITY
+# question for grafana, not only the filesystem one: a user running the stock
+# image has Docker's DEFAULT 14 caps and has not dropped anything, so "you can
+# cap_drop:ALL, cap_add:[]" is a real reduction (14 -> 0), even though the
+# hardened reference compose already drops them.
+#
+# grafana is a non-root service (uid 472) on the unprivileged :3000 writing
+# only to its /var/lib/grafana data store — no capability is load-bearing.
+# Expected minimum: []. Derived UNDER the filesystem dimension's recommendation
+# (read_only:true + the /var/lib/grafana volume stand-in) so the caps are
+# correct in the combined posture, per the multi-dimension rule.
+image: docker.io/grafana/grafana
+tag: "13.0.2"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  read_only: true
+  tmpfs: ["/var/lib/grafana"]
+  security_opt: ["no-new-privileges:true"]
+  env:
+    - GF_SECURITY_ADMIN_PASSWORD=csdprobe-pw-12345
+    - GF_ANALYTICS_REPORTING_ENABLED=false
+correctness: testdata/drop-test/correctness/grafana.sh

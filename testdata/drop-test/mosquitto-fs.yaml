@@ -1,0 +1,18 @@
+# drop-test spec: eclipse-mosquitto read-only-filesystem tmpfs minimum,
+# default invocation (the image's bundled config). The image declares
+# /mosquitto/data and /mosquitto/log VOLUMEs — docker mounts them writable
+# even under --read-only, and both are persistent in real deployments (never
+# tmpfs), so neither is a candidate nor counted in the minimum. The bundled
+# config logs to stdout and enables persistence into the data volume.
+#
+# /tmp is the candidate; expected NOT required — the broker's serve path
+# touches no temp files. Expected minimum: read_only:true, tmpfs:[].
+image: docker.io/library/eclipse-mosquitto
+tag: "2.0"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/mosquitto.sh

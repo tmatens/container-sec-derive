@@ -106,8 +106,13 @@ jobs:
                      {"title":"Re-validate catalog profiles against current digests",
                       "head":branch, "base":"main", "body":log})
               print("opened PR", pr.get("html_url"))
-          # A CHANGED recommendation (driver rc!=0) is a review signal, not a digest bump.
-          if rc != "0":
+          # A CHANGED recommendation (driver rc==12) is a review signal, not a digest
+          # bump. An advisory rc (10 — a WARN/MISS coverage gap, e.g. a transient
+          # registry pull failure) is log-only: it must never masquerade as CHANGED
+          # (that noise opened container-security-profiles#45).
+          if rc == "10":
+              print("advisory rc=10 (coverage gap, no recommendation change); log-only")
+          if rc == "12":
               title="Profile recommendation changed on re-derivation — review"
               issues=req("GET", f"/repos/{repo}/issues?state=open&per_page=100")
               num=next((i["number"] for i in issues

@@ -20,6 +20,13 @@
 #                 (with APPLY=1, bumped in place — preserves validated_via/ci-smoke).
 #   CHANGED     — recommendation differs; left for human review (never auto-applied).
 #
+# Exit codes — so the caller can tell "couldn't check" from a review signal
+# (mirrors deploy_check.sh; a transient WARN must never masquerade as CHANGED):
+#   0  — every entry FRESH or REVALIDATE.
+#   10 — advisory: ≥1 entry could not be checked (WARN/MISS/unknown method) but
+#        no recommendation changed — a coverage gap, not a review signal.
+#   12 — ≥1 CHANGED recommendation — human review needed. Dominates 10.
+#
 # A drop-test entry is matched to its csd spec (testdata/drop-test/*.yaml) by
 # image + dimension — no filename coupling, and the spec (candidates, correctness check,
 # representative run config) stays authoritative in csd.
@@ -122,14 +129,14 @@ apply_bump() {
   sed -i -E "s#(validated_date: )\"[0-9-]+\"#\1\"${today}\"#" "${committed}"
 }
 
-overall=0
+advisory=0; changed=0
 for line in "${ENTRIES[@]}"; do
   IFS=$'\t' read -r method profile image tag dimension workload <<<"${line}"
   committed="${CATALOG}/${profile}"
-  [ -f "${committed}" ] || { echo "MISS  ${profile}: committed profile not found"; overall=1; continue; }
+  [ -f "${committed}" ] || { echo "MISS  ${profile}: committed profile not found"; advisory=10; continue; }
 
   cur="$(current_digest "${image}" "${tag}")"
-  [ -n "${cur}" ] || { echo "WARN  ${profile}: could not resolve ${image}:${tag}"; overall=1; continue; }
+  [ -n "${cur}" ] || { echo "WARN  ${profile}: could not resolve ${image}:${tag}"; advisory=10; continue; }
   pinned="$(pinned_digest "${committed}")"
   if [ "${cur}" = "${pinned}" ] && [ "${FORCE}" != "1" ]; then
     echo "FRESH ${profile}: ${image}:${tag} still ${cur:0:19}…"
@@ -141,22 +148,22 @@ for line in "${ENTRIES[@]}"; do
   case "${method}" in
     drop-test)
       spec="$(find_spec "${image}" "${dimension}")" || {
-        echo "WARN  ${profile}: no csd drop-test spec matches ${image} (${dimension})"; overall=1; continue; }
+        echo "WARN  ${profile}: no csd drop-test spec matches ${image} (${dimension})"; advisory=10; continue; }
       if ! PY="${PY}" bash "${REPO}/scripts/drop_test.sh" "${spec}" \
              >"${WORKDIR}/dt.json" 2>"${WORKDIR}/dt.err"; then
-        echo "WARN  ${profile}: drop_test.sh failed — $(tail -1 "${WORKDIR}/dt.err" 2>/dev/null)"; overall=1; continue
+        echo "WARN  ${profile}: drop_test.sh failed — $(tail -1 "${WORKDIR}/dt.err" 2>/dev/null)"; advisory=10; continue
       fi
       got="$(derived_reco "${WORKDIR}/dt.json" "${spec}" "${dimension}")"
       ;;
     bpf-observation)
-      [ -x "${CSD}" ] || { echo "WARN  ${profile}: csd not executable at ${CSD} (needed for bpf-observation)"; overall=1; continue; }
+      [ -x "${CSD}" ] || { echo "WARN  ${profile}: csd not executable at ${CSD} (needed for bpf-observation)"; advisory=10; continue; }
       if [ "${dimension}" != "filesystem" ]; then
         echo "SKIP  ${profile}: bpf-observation for '${dimension}' not wired — no such catalog entry yet"; continue
       fi
       cont="csd-derive-$(echo "${image}" | tr '/:' '__')"
       docker rm -f "${cont}" >/dev/null 2>&1
       if ! docker run -d --name "${cont}" "${image}:${tag}" >/dev/null 2>&1; then
-        echo "WARN  ${profile}: docker run failed"; overall=1; continue
+        echo "WARN  ${profile}: docker run failed"; advisory=10; continue
       fi
       ( cd "${CATALOG}" && sudo -n "${CSD}" --observe fs --container "${cont}" --duration 310s \
           --workload "${workload}" --format compose-lint-profile --allow-exploratory \
@@ -167,12 +174,12 @@ for line in "${ENTRIES[@]}"; do
       wait "${csd_pid}"; rc=$?
       docker rm -f "${cont}" >/dev/null 2>&1
       if [ "${rc}" != "0" ] || [ ! -s "${WORKDIR}/derived.yaml" ]; then
-        echo "WARN  ${profile}: csd derive failed (rc=${rc}); $(head -1 "${WORKDIR}/csd.err" 2>/dev/null)"; overall=1; continue
+        echo "WARN  ${profile}: csd derive failed (rc=${rc}); $(head -1 "${WORKDIR}/csd.err" 2>/dev/null)"; advisory=10; continue
       fi
       got="$(committed_reco "${WORKDIR}/derived.yaml" "${dimension}")"
       ;;
     *)
-      echo "WARN  ${profile}: unknown method '${method}'"; overall=1; continue
+      echo "WARN  ${profile}: unknown method '${method}'"; advisory=10; continue
       ;;
   esac
 
@@ -184,8 +191,11 @@ for line in "${ENTRIES[@]}"; do
     fi
   else
     echo "CHANGED ${profile}: recommendation differs — committed [${want}] vs derived [${got}] — HUMAN REVIEW [${method}]"
-    overall=1
+    changed=12
   fi
 done
 
-exit "${overall}"
+# CHANGED (12) dominates advisory (10); both are distinct from a clean 0 so the
+# workflow can open the review issue ONLY for a real recommendation change.
+[ "${changed}" -ne 0 ] && exit "${changed}"
+exit "${advisory}"

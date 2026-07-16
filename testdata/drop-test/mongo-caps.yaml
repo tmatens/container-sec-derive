@@ -1,0 +1,30 @@
+# drop-test spec: mongo (MongoDB) minimum Linux capabilities, default
+# (root-then-drop) invocation. Baseline is cap_drop:ALL + the full Docker
+# default cap set on fresh docker-managed data volumes (the image declares
+# /data/db and /data/configdb VOLUMEs, so each trial gets fresh anonymous
+# volumes).
+#
+# Same startup-cap shape as mysql/mariadb, confirmed from the upstream
+# entrypoint (docker-library/mongo docker-entrypoint.sh): as root it
+# `find`-chowns /data/db + /data/configdb (a no-op — the image ships both
+# pre-owned by the mongodb user, uid 999), best-effort chowns its stdio fds
+# (`|| :`, so no cap is load-bearing there), then `exec gosu mongodb` re-execs.
+# Expected minimum: SETGID+SETUID only. The official image test adds
+# `--cap-add SYS_NICE` for NUMA hosts (a mongod 3.6-era note); SYS_NICE is not
+# in the Docker default set and modern mongod treats a failed setpriority as a
+# warning — the drop-test proves whether anything beyond the gosu drop is
+# load-bearing.
+#
+# Correctness mirrors the official docker-library mongo-basics test shape
+# (mongosh write + countDocuments + read-back, unauthenticated default
+# invocation) plus the non-root uid assert on mongod.
+image: docker.io/library/mongo
+tag: "8.0"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/mongo.sh

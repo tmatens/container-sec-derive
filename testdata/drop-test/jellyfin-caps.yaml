@@ -1,0 +1,28 @@
+# drop-test spec: jellyfin minimum Linux capabilities, default invocation.
+# Baseline is cap_drop:ALL + the full Docker default cap set on fresh
+# docker-managed /config + /cache volumes (both declared VOLUMEs), so the
+# first-run setup wizard executes in every trial — self-contained, no deps.
+#
+# jellyfin's shape: the server runs AS ROOT with no privilege drop (the
+# image's default; hardened deployments set user:) and binds only the
+# unprivileged :8096 — so the expected minimum is [], the zero-cap story for
+# a root process (contrast prometheus/memcached, which are zero-cap because
+# they are non-root by construction; here root simply never exercises a
+# capability on the serve path).
+#
+# GPU/VAAPI transcoding (the /dev/dri devices dimension) is explicitly OUT of
+# scope — same deferral as immich GPU (csd#266).
+#
+# Correctness = the REAL first-run flow over the sidecar: health, the setup
+# wizard REST sequence (Startup/Configuration -> User -> Complete), token
+# auth as the created admin, and an authorized System/Info readback.
+image: docker.io/jellyfin/jellyfin
+tag: "10.11"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/jellyfin.sh

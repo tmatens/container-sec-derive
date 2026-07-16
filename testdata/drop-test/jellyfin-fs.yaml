@@ -1,0 +1,18 @@
+# drop-test spec: jellyfin read-only-filesystem tmpfs minimum, default
+# invocation. jellyfin writes its state under /config and its transcode/image
+# cache under /cache — both declared VOLUMEs (persistent in real deployments;
+# docker mounts them writable under --read-only), so neither is a candidate
+# nor counted in the minimum.
+#
+# /tmp is the candidate; the drop-test decides whether the server touches it
+# on the wizard + auth + info path. Expected minimum: read_only:true with at
+# most tmpfs:[/tmp].
+image: docker.io/jellyfin/jellyfin
+tag: "10.11"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/jellyfin.sh

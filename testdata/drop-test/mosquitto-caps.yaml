@@ -1,0 +1,25 @@
+# drop-test spec: eclipse-mosquitto minimum Linux capabilities, default
+# invocation (the image's bundled config: listener 1883, anonymous local use).
+# Baseline is cap_drop:ALL + the full Docker default cap set.
+#
+# A third privilege-drop shape: the container starts as root and the mosquitto
+# BROKER ITSELF setuid/setgids to its mosquitto user (in-process drop — not a
+# gosu re-exec like mysql/mongo/rabbitmq, not a master/worker fork like
+# httpd). Expected minimum: SETGID+SETUID. The listener is the unprivileged
+# :1883, so no NET_BIND_SERVICE regardless of sysctl posture.
+#
+# Correctness = a real publish/subscribe round-trip via the in-image
+# mosquitto_sub/mosquitto_pub clients (run --user mosquitto so the probe
+# cannot pollute the minimum — the rabbitmq lesson), plus the non-root uid
+# assert on the broker (the drop is the broker's own; if it cannot drop it
+# must not silently serve as root).
+image: docker.io/library/eclipse-mosquitto
+tag: "2.0"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/mosquitto.sh

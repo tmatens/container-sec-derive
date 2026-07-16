@@ -104,7 +104,7 @@ func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer)
 		defer timeoutCancel()
 
 		// Resolved once and shared: both gadgets filter to the same target.
-		filter := observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, stderr)
+		filter := observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, opts.IGBin, stderr)
 		var (
 			wg             sync.WaitGroup
 			capErr, devErr error

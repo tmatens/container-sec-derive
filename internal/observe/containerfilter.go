@@ -15,6 +15,7 @@ package observe
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -24,13 +25,19 @@ import (
 // GadgetContainerFilter returns the extra `ig run` args that filter the gadget
 // to the targeted container, or nil when the run must stay host-wide.
 //
-// The gadget flag matches the runtime-assigned container NAME, while csd's
-// --container accepts an id or id-prefix too, so the name is resolved via
-// `<runtime> inspect` first. Resolution failure is non-fatal: the run falls
-// back to unfiltered observation (the pre-filter behavior — correct, just
-// drop-prone) with a stderr note. --image selection stays unfiltered because
-// its replicas are discovered per-event during attribution.
-func GadgetContainerFilter(container, runtimeBin string, stderrSink io.Writer) []string {
+// The filter value must be the name IG itself attributes to the container,
+// which can diverge from the runtime CLI's view (under Docker 29's containerd
+// image store the hosted-runner smoke saw ig attribute a name the docker-side
+// name filter never matched, yielding a zero-event observation). So the
+// target's container ID is resolved via `<runtime> inspect` (csd's
+// --container accepts a name or id/prefix) and then looked up in
+// `ig list-containers`; the filter uses IG's own containerName for that ID.
+// Any miss — inspect failure, ig lookup failure, ID absent from ig's view,
+// empty name — is non-fatal: the run falls back to unfiltered observation
+// (the pre-filter behavior — correct, just drop-prone) with a stderr note.
+// --image selection stays unfiltered because its replicas are discovered
+// per-event during attribution.
+func GadgetContainerFilter(container, runtimeBin, igBin string, stderrSink io.Writer) []string {
 	if container == "" {
 		return nil
 	}
@@ -39,17 +46,50 @@ func GadgetContainerFilter(container, runtimeBin string, stderrSink io.Writer) [
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), InspectDefaultTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, runtimeBin, "inspect", "--format", "{{.Name}}", "--", container).Output()
-	if err != nil {
+	hostWide := func(why string) []string {
 		if stderrSink != nil {
-			fmt.Fprintf(stderrSink, "csd: container-name lookup for the gadget filter unavailable (%v); observing host-wide\n", err)
+			fmt.Fprintf(stderrSink, "csd: gadget container filter unavailable (%s); observing host-wide\n", why)
 		}
 		return nil
 	}
-	// docker/podman report the name with a leading slash.
-	name := strings.TrimPrefix(strings.TrimSpace(string(out)), "/")
+	out, err := exec.CommandContext(ctx, runtimeBin, "inspect", "--format", "{{.Id}}", "--", container).Output()
+	if err != nil {
+		return hostWide(fmt.Sprintf("%s inspect %s: %v", runtimeBin, container, err))
+	}
+	id := strings.TrimSpace(string(out))
+	if id == "" {
+		return hostWide("container id resolved empty")
+	}
+	name, err := igContainerName(ctx, igBin, id)
+	if err != nil {
+		return hostWide(fmt.Sprintf("ig list-containers: %v", err))
+	}
 	if name == "" {
-		return nil
+		return hostWide(fmt.Sprintf("target %.12s not in ig's container view", id))
 	}
 	return []string{"--containername", name}
+}
+
+// igContainerName returns IG's containerName for the container with the given
+// full ID, or "" when IG's view does not include it.
+func igContainerName(ctx context.Context, igBin string, id string) (string, error) {
+	out, err := exec.CommandContext(ctx, igBin, "list-containers", "-o", "json").Output()
+	if err != nil {
+		return "", err
+	}
+	var containers []struct {
+		Runtime struct {
+			ContainerName string `json:"containerName"`
+			ContainerID   string `json:"containerId"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(out, &containers); err != nil {
+		return "", fmt.Errorf("parse: %w", err)
+	}
+	for _, c := range containers {
+		if c.Runtime.ContainerID == id {
+			return c.Runtime.ContainerName, nil
+		}
+	}
+	return "", nil
 }

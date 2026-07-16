@@ -1,0 +1,42 @@
+# drop-test spec: traefik minimum Linux capabilities, reverse-proxy invocation
+# (file provider -> one upstream), the common non-docker-socket deployment
+# shape. Baseline is cap_drop:ALL + the full Docker default cap set.
+#
+# traefik runs as ROOT with no privilege drop and serves :80 — so the expected
+# minimum is NET_BIND_SERVICE alone, and ONLY under the hardened kernel
+# posture: docker defaults net.ipv4.ip_unprivileged_port_start to 0 (all ports
+# unprivileged), where the cap reads falsely-removable. run.sysctls pins the
+# hardened posture (csd#340 item 5), and the profile is valid only under it.
+#
+# Static config is passed entirely via command flags (compose-representative);
+# the DYNAMIC file-provider config cannot ride in a committed spec (run.mounts
+# needs absolute host paths), so the correctness check docker-cp's it in and
+# the file provider's watch picks it up — see correctness/traefik.sh. The
+# in-stack dep (a pinned caddy) is the routed upstream, so the check drives
+# traefik's REAL function: entrypoint -> router -> service -> proxied response
+# from the backend.
+#
+# SCOPE (the queue's B+ caveat): this profile deliberately covers the FILE
+# provider shape only. The docker-provider variant mounts /var/run/docker.sock,
+# and its real risk IS the socket (csd#110 socket-scope territory) — a caps
+# minimum cannot address it and must not imply it does.
+image: docker.io/library/traefik
+tag: "v3.7"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+deps:
+  - name: backend
+    image: docker.io/library/caddy
+    tag: "2"
+    ready: wget -qO- http://localhost:80
+run:
+  command: ["--entrypoints.web.address=:80",
+            "--providers.file.directory=/tmp",
+            "--providers.file.watch=true",
+            "--api=false", "--log.level=INFO"]
+  security_opt: ["no-new-privileges:true"]
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]
+correctness: testdata/drop-test/correctness/traefik.sh

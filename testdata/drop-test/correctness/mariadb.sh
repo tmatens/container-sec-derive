@@ -12,15 +12,17 @@ set -uo pipefail
 
 # Wait until the configured app user can connect (proves the real server is up and
 # init created the user — not the transient bootstrap server that answers a ping).
+# Probes exec as the mysql user, never root (a root probe's own needs would
+# pollute the minimum — the rabbitmq lesson).
 deadline=$((SECONDS+45))
-until docker exec "$C" sh -c 'MYSQL_PWD=$MARIADB_PASSWORD mariadb -u"$MARIADB_USER" -e "SELECT 1" >/dev/null 2>&1'; do
+until docker exec --user mysql "$C" sh -c 'MYSQL_PWD=$MARIADB_PASSWORD mariadb -u"$MARIADB_USER" -e "SELECT 1" >/dev/null 2>&1'; do
   (( SECONDS >= deadline )) && { echo "mariadb never accepted an app-user connection"; exit 1; }
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 1
 done
 
 # Real round-trip in the configured database.
-out="$(docker exec "$C" sh -c 'MYSQL_PWD=$MARIADB_PASSWORD mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE" -N -e "CREATE TABLE IF NOT EXISTS csd_probe(id INT); INSERT INTO csd_probe VALUES(42); SELECT id FROM csd_probe LIMIT 1; DROP TABLE csd_probe;"' 2>&1)"
+out="$(docker exec --user mysql "$C" sh -c 'MYSQL_PWD=$MARIADB_PASSWORD mariadb -u"$MARIADB_USER" "$MARIADB_DATABASE" -N -e "CREATE TABLE IF NOT EXISTS csd_probe(id INT); INSERT INTO csd_probe VALUES(42); SELECT id FROM csd_probe LIMIT 1; DROP TABLE csd_probe;"' 2>&1)"
 [ "$out" = 42 ] || { echo "workload round-trip failed (got: ${out##*$'\n'})"; exit 1; }
 
 # Server dropped to a non-root uid (the gosu root->mysql drop).

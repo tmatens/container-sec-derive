@@ -1,0 +1,34 @@
+# drop-test spec: redis minimum Linux capabilities, default root-then-drop
+# invocation with NO data volume — the exact scope of the published catalog
+# profile (catalog/docker.io/library/redis.yaml run_config: no mounts, no env,
+# no-new-privileges). Baseline is cap_drop:ALL + the full Docker default cap set.
+#
+# The entrypoint (docker-entrypoint.sh) starts as root and re-execs the server as
+# the redis user (uid 999) via `gosu` — SETUID/SETGID are STARTUP caps; dropping
+# either fails the drop and, per the SHARP EDGE below, redis keeps serving
+# correctly AS ROOT. With no data volume, redis uses the image's own pre-owned
+# anonymous /data, so nothing is chowned and CHOWN comes out NOT required. That is
+# a documented invocation dependence, not an error: a foreign-owned data bind (or
+# immich's read_only + fresh root-owned tmpfs /data) re-introduces CHOWN — that
+# invocation is deploy-check's scope, never this spec's. Keep the two distinct.
+#
+# SHARP EDGE (why the correctness check MUST assert a non-root server uid): with
+# SETUID or SETGID dropped, gosu cannot re-exec as redis and the server keeps
+# running AS ROOT — still answering PING/SET/GET/SAVE correctly. A round-trip-only
+# check would falsely derive both as removable. correctness/redis.sh asserts pid 1
+# is non-root, which is the load-bearing signal.
+#
+# security_opt no-new-privileges:true matches the catalog convention (valkey and
+# the rest); verified: redis derives the same [SETGID, SETUID] under it (gosu's
+# drop is a capability-gated setuid syscall, not a setuid-bit escalation, so
+# no-new-privileges does not block it).
+image: docker.io/library/redis
+tag: "8.2.7"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/redis.sh

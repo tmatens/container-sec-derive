@@ -1,0 +1,24 @@
+# drop-test spec: ntfy minimum Linux capabilities, default invocation
+# (`serve`, no config — in-memory message store). Baseline is cap_drop:ALL +
+# the full Docker default cap set. The image declares no volumes; every trial
+# is a fresh cold start.
+#
+# ntfy's shape: a single Go binary running AS ROOT with no privilege drop,
+# but its default listener is :80 — PRIVILEGED — so unlike the
+# jellyfin/minio zero-cap-as-root class, NET_BIND_SERVICE is expected
+# load-bearing under the pinned ip_unprivileged_port_start=1024 posture.
+#
+# Correctness = a real publish -> poll round-trip over the curl sidecar: POST
+# a message to a topic, poll it back (since=all) and match the payload.
+image: docker.io/binwiederhier/ntfy
+tag: "v2.14.0"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  command: ["serve"]
+  security_opt: ["no-new-privileges:true"]
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]
+correctness: testdata/drop-test/correctness/ntfy.sh

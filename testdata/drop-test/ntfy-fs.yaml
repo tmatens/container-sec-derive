@@ -1,0 +1,16 @@
+# drop-test spec: ntfy read-only-filesystem tmpfs minimum, default invocation
+# (`serve`, no config = in-memory store, no cache file, no attachment cache).
+# Expected minimum: read_only:true, tmpfs:[] — the serve/publish/poll path
+# writes nothing. A deployment enabling cache-file/attachment-cache adds a
+# data volume, not tmpfs.
+image: docker.io/binwiederhier/ntfy
+tag: "v2.14.0"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  command: ["serve"]
+  security_opt: ["no-new-privileges:true"]
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]
+correctness: testdata/drop-test/correctness/ntfy.sh

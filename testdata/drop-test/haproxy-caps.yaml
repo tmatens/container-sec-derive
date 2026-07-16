@@ -1,0 +1,31 @@
+# drop-test spec: haproxy minimum Linux capabilities, reverse-proxy
+# invocation (one frontend :8080 -> one backend, the in-stack caddy dep).
+# Baseline is cap_drop:ALL + the full Docker default cap set.
+#
+# haproxy's teaching (the queue's fit note): the image runs as USER haproxy —
+# NON-root — since 2.4, and a non-root process in docker gets NO effective
+# caps from cap_add (no ambient caps), so a privileged :80 bind is simply
+# impossible in this image without user-0 tricks; the supported pattern is an
+# unprivileged frontend port (:8080 here) behind a port mapping. Expected
+# minimum: [] — zero-cap, non-root by construction.
+#
+# The image has no default config and run.mounts cannot carry one in a
+# committed spec, so the command writes the minimal config to /tmp and execs
+# haproxy on it — recorded honestly in run_config.command.
+image: docker.io/library/haproxy
+tag: "3.2"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+deps:
+  - name: backend
+    image: docker.io/library/caddy
+    tag: "2"
+    ready: wget -qO- http://localhost:80
+run:
+  entrypoint: "sh"
+  command: ["-c", "printf 'defaults\\n  mode http\\n  timeout connect 5s\\n  timeout client 30s\\n  timeout server 30s\\nfrontend f\\n  bind :8080\\n  default_backend b\\nbackend b\\n  server s1 backend:80\\n' > /tmp/h.cfg && exec haproxy -f /tmp/h.cfg"]
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/haproxy.sh

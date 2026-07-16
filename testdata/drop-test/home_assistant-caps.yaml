@@ -17,7 +17,11 @@
 # are documented as extensions in the criteria doc. The faithful per-deployment
 # re-derivation (against the real ./config) is a deploy-check follow-up.
 image: ghcr.io/home-assistant/home-assistant
-tag: stable
+# Immutable pin matching the published profile (catalog applies_to + manifest).
+# The re-derive automation matches manifest -> spec by image + dimension + tag, so
+# a mutable `stable` here would diverge from the pinned profile (the valkey
+# spec-tag lesson).
+tag: "2026.7.1"
 dimension: capabilities
 fixed: []
 candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",

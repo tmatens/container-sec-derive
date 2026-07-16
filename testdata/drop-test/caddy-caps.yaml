@@ -1,7 +1,18 @@
 # drop-test spec: caddy minimum Linux capabilities, default file server.
 # Baseline is cap_drop:ALL + the full Docker default cap set; each is dropped in
-# turn and the file server re-verified. Only NET_BIND_SERVICE (bind :80) survives
-# — matching the bisected ground truth in testdata/caddy/ground_truth.json.
+# turn and the file server re-verified. Only NET_BIND_SERVICE survives — matching
+# the bisected ground truth in testdata/caddy/ground_truth.json.
+#
+# NOTE — run:{} (no sysctl pin) is correct here, unlike httpd/traefik/nextcloud.
+# caddy's NET_BIND_SERVICE requirement is EXEC-TIME and POSTURE-INDEPENDENT, not a
+# runtime port bind: /usr/bin/caddy carries the file capability
+# cap_net_bind_service=ep (getcap confirms), so under cap_drop:ALL the bounding set
+# lacks it and execve fails EPERM ("operation not permitted") BEFORE caddy listens.
+# Verified: cap_drop:ALL fails at BOTH ip_unprivileged_port_start=0 (Docker default)
+# AND =1024 — so no net.ipv4.ip_unprivileged_port_start pin is needed or meaningful
+# (a pin would only matter for a process that binds a low port at runtime; caddy
+# never reaches that point without the cap). The run-time binders (httpd/traefik)
+# DO pin the hardened posture in their specs — caddy deliberately does not.
 image: docker.io/library/caddy
 tag: "2"
 dimension: capabilities

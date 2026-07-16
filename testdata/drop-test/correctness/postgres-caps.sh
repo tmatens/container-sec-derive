@@ -15,9 +15,11 @@ REPO="$(cd "$(dirname "$0")/../../.." && pwd)"
 PGCONTAINER="$C" bash "${REPO}/testdata/postgres/workload.sh" || { echo "workload failed / not ready"; exit 1; }
 
 # Privilege drop: the postgres server (PID 1) must not be running as root.
-uid="$(docker exec "$C" awk '/^Uid:/{print $2}' /proc/1/status 2>/dev/null)"
-if [ "${uid:-0}" = "0" ]; then
-  echo "postgres running as ROOT (privilege drop failed)"
+# /proc parsed tool-free (no awk/cut — not guaranteed on a minimal base).
+uid=""
+while read -r k v _; do [ "$k" = "Uid:" ] && { uid="$v"; break; }; done < <(docker exec "$C" cat /proc/1/status 2>/dev/null)
+if [ "${uid:-0}" = "0" ] || [ -z "$uid" ]; then
+  echo "postgres running as ROOT (privilege drop failed; uid='${uid}')"
   exit 1
 fi
 echo "correct: workload passed, server uid=${uid} (non-root)"

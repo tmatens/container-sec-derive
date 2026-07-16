@@ -29,7 +29,7 @@ func TestObserveWrites_FakeIG(t *testing.T) {
 	}, "\n")
 	ig := obstest.FakeIGRun(t, nd, "level=info msg=starting\nlost 3 samples\n")
 
-	obs, err := observeWrites(context.Background(), ig, attrib.Opts{}, io.Discard)
+	obs, err := observeWrites(context.Background(), ig, nil, attrib.Opts{}, io.Discard)
 	if err != nil {
 		t.Fatalf("observeWrites: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestObserveWrites_FakeIG(t *testing.T) {
 // TestObserveWrites_IGMissing: a missing ig binary maps to exit.IGMissing,
 // matching the capability observe() contract.
 func TestObserveWrites_IGMissing(t *testing.T) {
-	_, err := observeWrites(context.Background(), "/nonexistent/csd-ig-fs-test", attrib.Opts{}, io.Discard)
+	_, err := observeWrites(context.Background(), "/nonexistent/csd-ig-fs-test", nil, attrib.Opts{}, io.Discard)
 	if err == nil {
 		t.Fatal("expected missing-binary error")
 	}

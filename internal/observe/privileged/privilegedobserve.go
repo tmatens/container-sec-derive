@@ -103,6 +103,8 @@ func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer)
 		ctx, timeoutCancel := context.WithTimeout(ctx, opts.Duration)
 		defer timeoutCancel()
 
+		// Resolved once and shared: both gadgets filter to the same target.
+		filter := observe.GadgetContainerFilter(opts.AggregateOpts.Container, opts.RuntimeBin, stderr)
 		var (
 			wg             sync.WaitGroup
 			capErr, devErr error
@@ -110,11 +112,11 @@ func ProducePrivilegedObservation(opts PrivilegedPipelineOpts, stderr io.Writer)
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			capS, capErr = caps.Observe(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+			capS, capErr = caps.Observe(ctx, opts.IGBin, filter, opts.AggregateOpts, stderr)
 		}()
 		go func() {
 			defer wg.Done()
-			dev, devErr = devices.ObserveDevices(ctx, opts.IGBin, opts.AggregateOpts, stderr)
+			dev, devErr = devices.ObserveDevices(ctx, opts.IGBin, filter, opts.AggregateOpts, stderr)
 		}()
 		wg.Wait()
 		switch {

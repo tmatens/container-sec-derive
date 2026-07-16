@@ -25,10 +25,38 @@ func TestPickRepoDigest_MatchesByRepo(t *testing.T) {
 			name:     "registry-qualified ref matches its qualified digest entry",
 			imageRef: "docker.io/library/postgres:16",
 			digests: []string{
-				"postgres@sha256:bbbbbbbbbbbb",
+				"redis@sha256:bbbbbbbbbbbb",
 				"docker.io/library/postgres@sha256:cccccccccccc",
 			},
 			want: "sha256:cccccccccccc",
+		},
+		{
+			// Regression: docker reports RepoDigests with the docker.io
+			// default elided, while the attributed image name may carry it.
+			// A literal repo comparison left every registry-qualified target
+			// un-pinned (the netdata capadd derivation shipped no digest).
+			name:     "registry-qualified ref matches an unqualified digest entry",
+			imageRef: "docker.io/netdata/netdata:v2.10.3",
+			digests:  []string{"netdata/netdata@sha256:bbbbbbbbbbbb"},
+			want:     "sha256:bbbbbbbbbbbb",
+		},
+		{
+			name:     "bare library ref matches an unqualified digest entry",
+			imageRef: "docker.io/library/postgres:16",
+			digests:  []string{"postgres@sha256:cccccccccccc"},
+			want:     "sha256:cccccccccccc",
+		},
+		{
+			name:     "explicit non-default registry must still match exactly",
+			imageRef: "lscr.io/linuxserver/radarr:latest",
+			digests:  []string{"linuxserver/radarr@sha256:bbbbbbbbbbbb"},
+			want:     "",
+		},
+		{
+			name:     "registry port is not mistaken for a tag",
+			imageRef: "localhost:5000/foo",
+			digests:  []string{"localhost:5000/foo@sha256:abcdefabcdef"},
+			want:     "sha256:abcdefabcdef",
 		},
 		{
 			name:     "ref already pinned by digest still matches by repo",

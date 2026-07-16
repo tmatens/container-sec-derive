@@ -1,0 +1,26 @@
+# drop-test spec: nextcloud read-only-filesystem tmpfs minimum. nextcloud (Apache
+# + PHP) rsyncs its source into /var/www/html on first run and stores config +
+# data there — a declared VOLUME, auto-mounted writable (persistent, never tmpfs).
+# Under --read-only the Apache runtime needs its pid/lock dir writable;
+# /var/log/apache2 and /tmp are drop-tested too. Minimum derived below.
+#
+# Derived under the default docker cap set, with the in-stack mariadb `db` dep.
+# Correctness reuses nextcloud.sh.
+image: docker.io/library/nextcloud
+tag: "32"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/var/run/apache2", "/var/log/apache2", "/tmp"]
+deps:
+  - name: db
+    image: docker.io/library/mariadb
+    tag: "11.4"
+    env: [MARIADB_ROOT_PASSWORD=csdprobe-root-pw-12345, MARIADB_DATABASE=nextcloud,
+          MARIADB_USER=nextcloud, MARIADB_PASSWORD=csdprobe-pw-12345]
+    ready: MYSQL_PWD=$MARIADB_PASSWORD mariadb -u$MARIADB_USER $MARIADB_DATABASE -e "SELECT 1"
+run:
+  env: [MYSQL_HOST=db, MYSQL_DATABASE=nextcloud, MYSQL_USER=nextcloud,
+        MYSQL_PASSWORD=csdprobe-pw-12345, NEXTCLOUD_ADMIN_USER=csdadmin,
+        NEXTCLOUD_ADMIN_PASSWORD=CsdProbe-Pw-12345, NEXTCLOUD_TRUSTED_DOMAINS=localhost]
+correctness: testdata/drop-test/correctness/nextcloud.sh

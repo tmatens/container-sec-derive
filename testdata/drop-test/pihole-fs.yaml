@@ -1,0 +1,25 @@
+# drop-test spec: pihole read-only-filesystem — DOCUMENTS A read_only:false
+# FINDING (the reproducer for the catalog's filesystem dimension), NOT a tmpfs
+# derivation. pihole is genuinely read-only-INCAPABLE as shipped: its entrypoint
+# chowns /macvendor.db and sed-rewrites /crontab.txt at the FILESYSTEM ROOT, and
+# the FTL auto-update mechanism writes /usr/bin/pihole-FTL — none of these is
+# relocatable to a tmpfs or a volume (you cannot tmpfs `/` or `/usr/bin`). Even
+# with generous tmpfs on the config/runtime dirs (/etc/pihole, /etc/dnsmasq.d,
+# /run, /tmp, /var/log), the baseline still fails at the rootfs-root writes.
+#
+# Running this exits 3 (baseline FAILED), confirming read-only is infeasible — it
+# is the committed reproducer for filesystem: read_only:false. (Under the default
+# docker cap set the first blocker surfaced can vary — e.g. a dnsmasq-user config
+# error; the DEFINITIVE rootfs-root writes above are observed when run under
+# pihole's own published cap set, and are the load-bearing evidence in the
+# criteria doc.)
+image: docker.io/pihole/pihole
+tag: "2026.07.2"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/etc/pihole", "/etc/dnsmasq.d", "/run", "/tmp", "/var/log"]
+run:
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]
+  env: ["FTLCONF_webserver_api_password=csdprobe-pw-12345"]
+correctness: testdata/drop-test/correctness/pihole.sh

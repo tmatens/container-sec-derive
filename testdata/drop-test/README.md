@@ -140,11 +140,11 @@ the seven rules below then keep that check honest.
 
 ## Correctness-check authoring rules
 
-Seven rules a correctness check must follow, each learned from a real false
+Eight rules a correctness check must follow, each learned from a real false
 result during the container-security-profiles top-20 coverage build-out
-(container-security-profiles#36). Ignore one and the derivation silently
-mis-derives — a false-required cap, a false-removable cap, or a hang to
-timeout.
+(container-security-profiles#36) and the later privilege-audit work. Ignore one
+and the derivation silently mis-derives — a false-required cap, a false-removable
+cap, or a hang to timeout.
 
 1. **Capture-then-match — never `curl … | grep -q` under `set -o pipefail`.**
    `grep -q` exits at the first match, the producer (curl/wget/`docker logs`)
@@ -192,3 +192,20 @@ timeout.
    Docker defaults it to 0 (all ports unprivileged), where a low-port bind
    reads falsely-removable (#340 item 5). The pinned posture is recorded in
    `run_config` so the profile is known valid only under it.
+
+8. **Test the FEATURE, not the mechanism — software degrades gracefully.** A
+   syscall returning EPERM under a dropped cap does NOT prove the feature that
+   *usually* uses it is broken: production software often has a privilege-free
+   fallback. So when you suspect a cap is load-bearing for some feature, drive
+   the **feature** and check the observable OUTPUT (the chart collects, the
+   round-trip completes) — do not conclude "needed" from an isolated mechanism
+   test. The worked example is netdata's `SYS_ADMIN`: its `cgroup-network` helper
+   *prefers* `setns(CLONE_NEWNET)` into each container's netns, which needs
+   `SYS_ADMIN` and fails without it — an isolated `nsenter -n` test says "needed."
+   But the feature (per-container network charts) still collects, via a host-side
+   `veth` fallback, so `SYS_ADMIN` is genuinely removable. The isolated primitive
+   said "needed"; the running deployment said "removable" — and **the running
+   deployment is the authority.** (This rule cost two wrong published claims —
+   first the un-caveated "removable", then an over-eager "you need it back" — before
+   the live check settled it. Verify against the real deployment before publishing
+   a privilege verdict.)

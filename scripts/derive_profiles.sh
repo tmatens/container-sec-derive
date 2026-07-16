@@ -8,9 +8,22 @@
 #       container lifetime, so it derives the minimum that startup-only behavior
 #       makes invisible to runtime observation (a socket dir's tmpfs, a
 #       root->user privilege drop's SETUID/SETGID). No eBPF, needs only docker.
+#       Derives capabilities and filesystem only (the candidate kinds
+#       drop_test.sh knows how to drop).
 #   method: bpf-observation -> csd --observe (the OBSERVATION layer):
 #       the ig gadgets, for dimensions whose requirements are purely runtime.
-#       Needs root + CAP_BPF/CAP_PERFMON + the pinned `ig`.
+#       Needs root + CAP_BPF/CAP_PERFMON + the pinned `ig`. Handles all five
+#       catalog dimensions (capabilities, filesystem, devices,
+#       cap_add_validation, privileged_decomposition). A conditional dimension
+#       is only meaningful under its grant, so the manifest entry supplies:
+#         run_args: extra `docker run` flags for the representative run
+#                   (e.g. "--device /dev/dri", "--cap-add SYS_ADMIN",
+#                   "--privileged"); whitespace-split, no quoting.
+#         csd_args: extra csd flags for the observer
+#                   (e.g. "--cap-add SYS_ADMIN,NET_RAW" for capadd).
+#       Note capabilities-via-observation is attach-window-blind to startup
+#       caps — the catalog derives caps by drop-test for exactly that reason;
+#       the dispatch supports it but the manifest chooses the method.
 #
 # For each entry: resolve the tag's current digest; if it differs from the
 # profile's pinned digest (or FORCE=1), re-derive and compare to the committed
@@ -50,12 +63,16 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 
 [ -f "${MANIFEST}" ] || { echo "no manifest at ${MANIFEST}" >&2; exit 2; }
 
-# --- manifest -> one TSV line per entry: method, profile, image, tag, dimension, workload
+# --- manifest -> one TSV line per entry:
+#     method, profile, image, tag, dimension, workload, run_args, csd_args
+# (run_args/csd_args are optional and empty for the caps/fs entries; values may
+# contain spaces but never tabs, so TSV stays unambiguous)
 readarray -t ENTRIES < <("${PY}" - "${MANIFEST}" <<'PYEOF'
 import sys, yaml
 for e in (yaml.safe_load(open(sys.argv[1])) or {}).get("images", []):
     print("\t".join(str(e.get(k, "")) for k in
-          ("method", "profile", "image", "tag", "dimension", "workload")))
+          ("method", "profile", "image", "tag", "dimension", "workload",
+           "run_args", "csd_args")))
 PYEOF
 )
 
@@ -87,7 +104,16 @@ PYEOF
 }
 
 # committed_reco <committed-profile> <dimension>  -> canonical recommendation string
-#   capabilities: "CAP,CAP,..."   filesystem: "read_only|tmpfs,tmpfs,..."
+#   capabilities:             "CAP,CAP,..."
+#   filesystem:               "read_only|tmpfs,tmpfs,..."
+#   devices:                  "dev,dev,...|derivedcap,derivedcap,..."
+#   cap_add_validation:       "CAP,CAP,..." (recommended_cap_add; validated_caps
+#                             is evidence, not a recommendation)
+#   privileged_decomposition: "CAP,...|dev,...|partial=true/false"
+# Works on both a committed catalog profile and csd's own compose-lint-profile
+# output (same schema), so the bpf-observation path compares like with like.
+# The else branch is unreachable — the loop rejects unknown dimensions up front
+# so a typo can never canonicalize to "" on both sides and silently REVALIDATE.
 committed_reco() {
   "${PY}" - "$1" "$2" <<'PYEOF'
 import sys, yaml
@@ -98,6 +124,15 @@ if sys.argv[2] == "capabilities":
 elif sys.argv[2] == "filesystem":
     print("%s|%s" % (str(bool(dim.get("read_only"))).lower(),
                      ",".join(sorted(dim.get("tmpfs") or []))))
+elif sys.argv[2] == "devices":
+    print("%s|%s" % (",".join(sorted(dim.get("devices") or [])),
+                     ",".join(sorted(dim.get("derived_caps") or []))))
+elif sys.argv[2] == "cap_add_validation":
+    print(",".join(sorted(dim.get("recommended_cap_add") or [])))
+elif sys.argv[2] == "privileged_decomposition":
+    print("%s|%s|partial=%s" % (",".join(sorted(dim.get("cap_add") or [])),
+                                ",".join(sorted(dim.get("devices") or [])),
+                                str(bool(dim.get("partial"))).lower()))
 else:
     print("")
 PYEOF
@@ -131,9 +166,21 @@ apply_bump() {
 
 advisory=0; changed=0
 for line in "${ENTRIES[@]}"; do
-  IFS=$'\t' read -r method profile image tag dimension workload <<<"${line}"
+  IFS=$'\t' read -r method profile image tag dimension workload run_args csd_args <<<"${line}"
   committed="${CATALOG}/${profile}"
   [ -f "${committed}" ] || { echo "MISS  ${profile}: committed profile not found"; advisory=10; continue; }
+
+  # Map the catalog dimension to its csd observer, rejecting unknowns before
+  # any docker work. This guard is load-bearing: an unknown dimension would
+  # canonicalize to "" on both sides and silently REVALIDATE.
+  case "${dimension}" in
+    capabilities)             observer="caps" ;;
+    filesystem)               observer="fs" ;;
+    devices)                  observer="devices" ;;
+    cap_add_validation)       observer="capadd" ;;
+    privileged_decomposition) observer="privileged" ;;
+    *) echo "WARN  ${profile}: unknown dimension '${dimension}'"; advisory=10; continue ;;
+  esac
 
   cur="$(current_digest "${image}" "${tag}")"
   [ -n "${cur}" ] || { echo "WARN  ${profile}: could not resolve ${image}:${tag}"; advisory=10; continue; }
@@ -147,6 +194,10 @@ for line in "${ENTRIES[@]}"; do
   got=""
   case "${method}" in
     drop-test)
+      case "${dimension}" in
+        capabilities|filesystem) ;;
+        *) echo "WARN  ${profile}: drop-test cannot derive '${dimension}' (capabilities/filesystem only)"; advisory=10; continue ;;
+      esac
       spec="$(find_spec "${image}" "${dimension}")" || {
         echo "WARN  ${profile}: no csd drop-test spec matches ${image} (${dimension})"; advisory=10; continue; }
       if ! PY="${PY}" bash "${REPO}/scripts/drop_test.sh" "${spec}" \
@@ -157,15 +208,19 @@ for line in "${ENTRIES[@]}"; do
       ;;
     bpf-observation)
       [ -x "${CSD}" ] || { echo "WARN  ${profile}: csd not executable at ${CSD} (needed for bpf-observation)"; advisory=10; continue; }
-      if [ "${dimension}" != "filesystem" ]; then
-        echo "SKIP  ${profile}: bpf-observation for '${dimension}' not wired — no such catalog entry yet"; continue
-      fi
+      # run_args carries the representative grant a conditional dimension is
+      # derived under (--device/--cap-add/--privileged); csd_args carries
+      # observer flags (capadd's --cap-add list). Whitespace-split — manifest
+      # values must not need shell quoting.
+      read -r -a run_flags <<<"${run_args}"
+      read -r -a csd_flags <<<"${csd_args}"
       cont="csd-derive-$(echo "${image}" | tr '/:' '__')"
       docker rm -f "${cont}" >/dev/null 2>&1
-      if ! docker run -d --name "${cont}" "${image}:${tag}" >/dev/null 2>&1; then
+      if ! docker run -d --name "${cont}" "${run_flags[@]}" "${image}:${tag}" >/dev/null 2>&1; then
         echo "WARN  ${profile}: docker run failed"; advisory=10; continue
       fi
-      ( cd "${CATALOG}" && sudo -n "${CSD}" --observe fs --container "${cont}" --duration 310s \
+      ( cd "${CATALOG}" && sudo -n "${CSD}" --observe "${observer}" --container "${cont}" --duration 310s \
+          "${csd_flags[@]}" \
           --workload "${workload}" --format compose-lint-profile --allow-exploratory \
           --out "${WORKDIR}/sidecar.json" > "${WORKDIR}/derived.yaml" 2>"${WORKDIR}/csd.err" ) &
       csd_pid=$!

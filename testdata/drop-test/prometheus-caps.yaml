@@ -1,0 +1,25 @@
+# drop-test spec: prometheus minimum Linux capabilities, default invocation.
+# Baseline is cap_drop:ALL + the full Docker default cap set on a fresh
+# docker-managed data volume (the image declares /prometheus a VOLUME, shipped
+# nobody-owned).
+#
+# The interesting contrast to the DB shapes: the image runs as USER nobody
+# (uid 65534) from the first instruction — there is NO root phase, no
+# entrypoint chown, no privilege drop to perform. Expected minimum: [] — the
+# catalog's zero-cap story for a well-built non-root image.
+#
+# Correctness drives real function: readiness, then the query API asserting
+# the default config's self-scrape actually produced samples (up == 1 for the
+# localhost:9090 target). Probes run via the in-image busybox wget; docker
+# exec inherits USER nobody, so the probe cannot pollute the minimum with
+# root-probe cap needs (the rabbitmq lesson).
+image: docker.io/prom/prometheus
+tag: "v3.13.1"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/prometheus.sh

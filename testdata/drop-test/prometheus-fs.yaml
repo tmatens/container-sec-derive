@@ -1,0 +1,23 @@
+# drop-test spec: prometheus read-only-filesystem tmpfs minimum, default
+# invocation. prometheus writes ONLY under --storage.tsdb.path=/prometheus
+# (TSDB blocks, WAL, queries.active) — a declared VOLUME, shipped nobody-owned,
+# and a PERSISTENT volume in real deployments (never tmpfs). Docker mounts the
+# anonymous volume writable even under --read-only, so no stand-in tmpfs is
+# needed and the volume is never counted in the derived minimum.
+#
+# /tmp is the candidate; expected NOT required (no temp-file use in the serve
+# path), so the minimum should be read_only:true, tmpfs:[] — the same clean
+# story as the grafana/loki/alloy stack it completes.
+#
+# Correctness is the same real-function check as the caps spec: readiness +
+# the query API asserting the self-scrape produced samples, via the in-image
+# busybox wget as USER nobody.
+image: docker.io/prom/prometheus
+tag: "v3.13.1"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/prometheus.sh

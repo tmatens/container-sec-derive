@@ -1,0 +1,21 @@
+# drop-test spec: adguardhome read-only-filesystem tmpfs minimum. AdGuard Home
+# writes its config to /opt/adguardhome/conf and its data (query log, stats,
+# filter lists) to /opt/adguardhome/work — neither is a declared VOLUME, so in a
+# real deployment they are bind-mounts / named volumes (persistent, NEVER tmpfs).
+# They are supplied here via run.tmpfs as writable stand-ins, NOT part of the
+# derived tmpfs minimum. Under a read-only rootfs with those two writable, AdGuard
+# serves DNS with no additional tmpfs. /tmp is drop-tested and comes out NOT
+# required. Minimum: read_only:true, tmpfs:[].
+#
+# Derived under the default docker cap set (so it can bind :53/:80 and write the
+# config/work dirs). Correctness reuses adguardhome.sh (REST install + a local
+# DNS rewrite + nslookup).
+image: docker.io/adguard/adguardhome
+tag: "v0.107.78"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  tmpfs: ["/opt/adguardhome/work", "/opt/adguardhome/conf"]
+correctness: testdata/drop-test/correctness/adguardhome.sh

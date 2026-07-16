@@ -1,0 +1,20 @@
+# drop-test spec: uptime-kuma read-only-filesystem tmpfs minimum. uptime-kuma
+# writes its SQLite DB + config to /app/data — not a declared VOLUME, so in a
+# real deployment it is a bind-mount / named volume (persistent, NEVER tmpfs).
+# Supplied here via run.tmpfs as a writable stand-in, NOT part of the derived
+# tmpfs minimum. Under a read-only rootfs with /app/data writable, uptime-kuma
+# additionally REQUIRES /tmp writable — its Node.js runtime writes temp files
+# there and the server does not come up after DB setup without it (drop-tested
+# required). Minimum: read_only:true, tmpfs:[/tmp].
+#
+# Derived under the default docker cap set. Correctness reuses uptime-kuma.sh
+# (a running HTTP monitor driven over socket.io from a sidecar).
+image: docker.io/louislam/uptime-kuma
+tag: "2"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp"]
+run:
+  tmpfs: ["/app/data"]
+correctness: testdata/drop-test/correctness/uptime-kuma.sh

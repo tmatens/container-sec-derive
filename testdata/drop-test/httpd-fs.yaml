@@ -1,0 +1,19 @@
+# drop-test spec: httpd read-only-filesystem tmpfs minimum, default config.
+# httpd writes its pid + logs to /usr/local/apache2/logs at startup; under
+# --read-only it fails to start ("(30)Read-only file system: AH00099: could not
+# create /usr/local/apache2/logs/httpd.pid") without that dir writable. /tmp is
+# drop-tested and comes out NOT required. Minimum: read_only:true,
+# tmpfs:[/usr/local/apache2/logs].
+#
+# Derived under the default docker cap set (the fs axis is orthogonal to the caps
+# minimum here — the pid/log write does not depend on a capability). Correctness
+# reuses httpd.sh: default page served + a non-root worker (so a read-only rootfs
+# that silently broke the worker drop would still fail).
+image: docker.io/library/httpd
+tag: "2.4"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/usr/local/apache2/logs", "/tmp"]
+run: {}
+correctness: testdata/drop-test/correctness/httpd.sh

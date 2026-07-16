@@ -368,6 +368,11 @@ jobs:
       # the ephemeral, scoped GITHUB_TOKEN, which is never printed.
       - name: Post diagnostic report (allowlisted, no secrets)
         if: always()
+        # Best-effort reporting must never fail the job: a transient GitHub
+        # API 503 on the comment POST turned three otherwise-green smoke runs
+        # red on 2026-07-16 (#408). The smoke's own exit code is captured by
+        # its matrix step, so nothing real is masked.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

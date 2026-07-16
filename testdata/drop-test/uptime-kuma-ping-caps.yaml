@@ -1,0 +1,20 @@
+# drop-test spec: uptime-kuma with a PING monitor — the supplementary
+# derivation that MEASURES what the base profile's HTTP-monitor derivation
+# leaves out (container-security-profiles#63). Same image/invocation as
+# uptime-kuma-caps.yaml; the only difference is CSD_UK_MONITOR=ping, so the
+# socket.io probe adds a ping (raw-ICMP) monitor instead of an HTTP one.
+#
+# The NET_RAW DELTA between this run and the HTTP-monitor base run isolates the
+# raw-socket requirement to ping monitors: uptime-kuma runs as root, so with
+# NET_RAW dropped a raw ICMP socket fails and the ping monitor goes DOWN.
+image: docker.io/louislam/uptime-kuma
+tag: "2"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  env: ["CSD_UK_MONITOR=ping"]
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/uptime-kuma.sh

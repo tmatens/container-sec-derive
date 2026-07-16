@@ -1,0 +1,20 @@
+# drop-test spec: loki minimum Linux capabilities. Added 2026-07-16
+# (container-security-profiles#63) so the catalog answers the CAPABILITY
+# question for loki alongside its filesystem profile.
+#
+# loki is a non-root distroless service (uid 10001) on the unprivileged :3100
+# writing only to its /loki data store — no capability is load-bearing.
+# Expected minimum: []. Derived under the filesystem recommendation
+# (read_only:true + the /loki stand-in at mode=1777 for uid 10001).
+image: docker.io/grafana/loki
+tag: "3.7.2"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  read_only: true
+  tmpfs: ["/loki:mode=1777"]
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/loki.sh

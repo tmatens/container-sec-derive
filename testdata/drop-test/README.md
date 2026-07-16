@@ -104,3 +104,58 @@ postgres is the worked example: caps derived on a writable rootfs give
 must be chowned → the real minimum is `[CHOWN, DAC_OVERRIDE, SETGID, SETUID]`.
 Always finish by **verifying the combination**: run the workload under the union
 of every derived dimension at once.
+
+## Correctness-check authoring rules
+
+Seven rules a correctness check must follow, each learned from a real false
+result during the container-security-profiles top-20 coverage build-out
+(container-security-profiles#36). Ignore one and the derivation silently
+mis-derives — a false-required cap, a false-removable cap, or a hang to
+timeout.
+
+1. **Capture-then-match — never `curl … | grep -q` under `set -o pipefail`.**
+   `grep -q` exits at the first match, the producer (curl/wget/`docker logs`)
+   then takes SIGPIPE (exit 141), and pipefail makes the pipeline report
+   *failure on a body that MATCHED*. It is masked whenever the output fits the
+   pipe buffer, so small-response checks pass with the latent bug — it bites
+   once the body outgrows the buffer (wordpress's 60 KB homepage; `docker logs`
+   of any long-running container). Capture into a variable and match via a
+   herestring (`grep -qE 'pat' <<<"$out"`) or a `case`. (A pipe *inside*
+   `docker exec … sh -c '…'` is exempt — that nested shell has no pipefail, so
+   its pipeline takes grep's exit — but don't rely on it at the outer level.)
+
+2. **Exec probes as the service's user (`--user <u>`), never root.** An exec'd
+   process runs in the target's bounding cap set, so a *root* probe's own needs
+   pollute the minimum: rabbitmq derived a false DAC_OVERRIDE (reading the 0600
+   `.erlang.cookie`) and FOWNER (rewriting `enabled_plugins`) until the probes
+   ran as `rabbitmq`. Also its boot race — an exec'd root Erlang client races
+   the entrypoint for `.erlang.cookie` creation and crashes the broker; gate on
+   the service's own "ready" log line before the first exec.
+
+3. **Write nothing inside the target.** A probe temp file (e.g. capturing a
+   subscriber into `/tmp`) false-requires the filesystem dimension's `/tmp`
+   candidate (mosquitto). Keep round-trips on stdout / in the service's own
+   store.
+
+4. **No external dependence in the trial loop.** Resolve/serve a
+   *locally-answered* target, never one needing an upstream: pihole digs
+   `pi.hole` (answered by FTL itself), adguard adds a rewrite
+   `csd.test→127.0.0.1` first. An upstream in the loop turns a network blip
+   into a false-broken verdict. Match the answer line, not the `:53` server
+   line.
+
+5. **Read `/proc` tool-free on minimal bases.** The uid assert must not assume
+   `awk`/`cut`/`grep` exist — keycloak's UBI-micro base has no `awk`, which
+   silently returned an empty uid and false-flagged root. Parse
+   `/proc/1/status` in pure shell (`while read k v _; do [ "$k" = Uid: ] && …`).
+
+6. **Assert the privilege drop, not just the response.** For master/worker
+   images a dropped SETGID keeps *serving with root workers*; only a non-root
+   worker-uid assert catches it (httpd, wordpress, nextcloud). A content check
+   alone blesses silently-broken privilege separation.
+
+7. **Pin the kernel posture for port-dependent caps.** NET_BIND_SERVICE only
+   derives under `run.sysctls: [net.ipv4.ip_unprivileged_port_start=1024]` —
+   Docker defaults it to 0 (all ports unprivileged), where a low-port bind
+   reads falsely-removable (#340 item 5). The pinned posture is recorded in
+   `run_config` so the profile is known valid only under it.

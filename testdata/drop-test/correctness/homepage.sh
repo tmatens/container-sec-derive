@@ -34,7 +34,7 @@ done
 docker exec "$C" wget -qO- "http://localhost:3000/_next/image?url=%2Ficon.png&w=64&q=75" >/dev/null 2>&1
 sleep 2
 
-if docker logs "$C" 2>&1 | grep -qiE "mkdir '/app/.next/cache'|EROFS|read-only file system"; then
+if grep -qiE "mkdir '/app/.next/cache'|EROFS|read-only file system" <<<"$(docker logs "$C" 2>&1)"; then
   echo "homepage cannot write /app/.next/cache (read-only, no tmpfs)"
   exit 1
 fi

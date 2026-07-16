@@ -12,8 +12,11 @@
 set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"; C="$DROP_TEST_CONTAINER"
 
+# capture-then-match via a herestring throughout — never `wget | grep -q`
+# under pipefail (grep -q's early exit SIGPIPEs wget → the loop condition
+# can false-negative on a matching body once it outgrows the pipe buffer).
 deadline=$((SECONDS+45))
-until docker exec "$C" wget -qO- http://localhost:9090/-/ready 2>/dev/null | grep -qi ready; do
+until grep -qi ready <<<"$(docker exec "$C" wget -qO- http://localhost:9090/-/ready 2>/dev/null)"; do
   (( SECONDS >= deadline )) && { echo "prometheus never ready"; exit 1; }
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 1
@@ -21,7 +24,7 @@ done
 
 # Wait for the first self-scrape to land: up{job="prometheus"} == 1.
 deadline=$((SECONDS+45))
-until docker exec "$C" wget -qO- 'http://localhost:9090/api/v1/query?query=up' 2>/dev/null | grep -q '"value":\[[0-9.]*,"1"\]'; do
+until grep -q '"value":\[[0-9.]*,"1"\]' <<<"$(docker exec "$C" wget -qO- 'http://localhost:9090/api/v1/query?query=up' 2>/dev/null)"; do
   (( SECONDS >= deadline )) && { echo "self-scrape never produced up==1"; exit 1; }
   sleep 2
 done
@@ -30,7 +33,7 @@ done
 # counter reads 0 on the scrape that first reports it (appends land after the
 # scrape), so poll until a later scrape shows a non-zero value.
 deadline=$((SECONDS+60))
-until docker exec "$C" wget -qO- 'http://localhost:9090/api/v1/query?query=prometheus_tsdb_head_samples_appended_total' 2>/dev/null | grep -qE '"value":\[[0-9.]*,"[1-9][0-9]*"'; do
+until grep -qE '"value":\[[0-9.]*,"[1-9][0-9]*"' <<<"$(docker exec "$C" wget -qO- 'http://localhost:9090/api/v1/query?query=prometheus_tsdb_head_samples_appended_total' 2>/dev/null)"; do
   (( SECONDS >= deadline )) && { echo "TSDB never appended samples"; exit 1; }
   sleep 2
 done

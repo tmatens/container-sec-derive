@@ -9,7 +9,7 @@ set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"; C="$DROP_TEST_CONTAINER"
 
 deadline=$((SECONDS+90))
-until docker logs "$C" 2>&1 | grep -q "listening on .* port 53"; do
+until grep -q "listening on .* port 53" <<<"$(docker logs "$C" 2>&1)"; do
   (( SECONDS >= deadline )) && { echo "FTL never listened on 53: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 2

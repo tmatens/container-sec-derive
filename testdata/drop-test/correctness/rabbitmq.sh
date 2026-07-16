@@ -29,7 +29,7 @@ set -uo pipefail
 # "Server startup complete" log line first — reading docker logs touches
 # nothing inside the container.
 deadline=$((SECONDS+90))
-until docker logs "$C" 2>&1 | grep -q "Server startup complete"; do
+until grep -q "Server startup complete" <<<"$(docker logs "$C" 2>&1)"; do
   (( SECONDS >= deadline )) && { echo "rabbitmq never reached startup complete"; exit 1; }
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 2

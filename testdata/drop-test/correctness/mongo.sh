@@ -14,7 +14,7 @@ set -uo pipefail
 
 # Wait for mongod to accept mongosh commands.
 deadline=$((SECONDS+60))
-until docker exec "$C" mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null | grep -q 1; do
+until grep -q 1 <<<"$(docker exec "$C" mongosh --quiet --eval 'db.runCommand({ping:1}).ok' 2>/dev/null)"; do
   (( SECONDS >= deadline )) && { echo "mongod never answered ping"; exit 1; }
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 1

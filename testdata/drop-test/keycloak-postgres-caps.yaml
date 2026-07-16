@@ -1,0 +1,33 @@
+# drop-test spec: keycloak minimum Linux capabilities, PRODUCTION invocation
+# (`start` against an external postgres, vs the start-dev/H2 sibling). The
+# follow-up promised by the start-dev profile's criteria doc
+# (container-security-profiles#62). Baseline is cap_drop:ALL + the full Docker
+# default cap set.
+#
+# Expected: same [] as start-dev — keycloak stays USER 1000 on the
+# unprivileged :8080, and the postgres backend is reached as a plain TCP
+# CLIENT (no capability). The drop-test confirms or corrects that.
+#
+# In-stack: deps the cataloged postgres:16 as `db`. Correctness reuses the
+# invocation-agnostic keycloak check (admin token via the OpenID password
+# grant -> realm create/readback).
+image: quay.io/keycloak/keycloak
+tag: "26.4"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+deps:
+  - name: db
+    image: docker.io/library/postgres
+    tag: "16"
+    env: [POSTGRES_DB=keycloak, POSTGRES_USER=keycloak, POSTGRES_PASSWORD=csdprobe-pw-12345]
+    ready: pg_isready -U keycloak
+run:
+  command: ["start", "--http-enabled=true", "--hostname-strict=false"]
+  env: [KC_DB=postgres, KC_DB_URL=jdbc:postgresql://db:5432/keycloak,
+        KC_DB_USERNAME=keycloak, KC_DB_PASSWORD=csdprobe-pw-12345,
+        KC_BOOTSTRAP_ADMIN_USERNAME=csdadmin, KC_BOOTSTRAP_ADMIN_PASSWORD=CsdProbe-Pw-12345]
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/keycloak.sh

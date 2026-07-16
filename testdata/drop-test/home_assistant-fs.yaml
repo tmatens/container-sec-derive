@@ -1,0 +1,22 @@
+# drop-test spec: home-assistant read-only-filesystem tmpfs minimum. HA's config,
+# SQLite DB, and .storage live in /config — not a declared VOLUME, so a persistent
+# bind/named volume in production (supplied here via run.tmpfs as a writable
+# stand-in, NOT part of the tmpfs minimum). Under --read-only its s6-overlay
+# supervision tree needs /run writable AND EXECUTABLE — s6 writes then execs
+# /run/s6/.../init, so a default (noexec) tmpfs fails "Permission denied"; the
+# minimum is the exec-mounted tmpfs `/run:exec` (docker/compose short syntax).
+# /tmp is drop-tested and comes out NOT required. Minimum: read_only:true,
+# tmpfs:[/run:exec].
+#
+# Derived under the default docker cap set. Correctness reuses home_assistant.sh
+# (onboarding API ready + owner-create, which drives the real /config write path).
+image: ghcr.io/home-assistant/home-assistant
+tag: "2026.7.1"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/run:exec", "/tmp"]
+run:
+  env: [TZ=America/Chicago]
+  tmpfs: ["/config"]
+correctness: testdata/drop-test/correctness/home_assistant.sh

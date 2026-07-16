@@ -1,0 +1,25 @@
+# drop-test spec: uptime-kuma minimum Linux capabilities, default invocation
+# (v2, embedded sqlite chosen via the REST setup call). Baseline is
+# cap_drop:ALL + the full Docker default cap set. No volumes declared —
+# fresh rootfs cold start every trial (data lands in /app/data).
+#
+# Shape: node runs AS ROOT with no drop, unprivileged :3001 — expected
+# minimum [] (the jellyfin/minio class).
+#
+# WORKLOAD-COVERAGE LIMIT (drives the profile's MODERATE confidence): after
+# database setup, uptime-kuma's admin creation and monitor CRUD are
+# socket.io-only — no REST surface a curl probe can drive. The correctness
+# check exercises boot -> REST database-setup (a real persistent sqlite
+# write) -> self-restart -> serving + auth layer, but cannot add/run a
+# monitor. Ping-type monitors use raw sockets (NET_RAW) — a deployment using
+# them needs a grant this derivation cannot measure; documented in criteria.
+image: docker.io/louislam/uptime-kuma
+tag: "2"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/uptime-kuma.sh

@@ -35,8 +35,10 @@ rcode="$(sidecar_curl -s -o /dev/null -w '%{http_code}' --max-time 10 -u csdadmi
 # Real resolution against AGH on :53 — the rewrite answers locally with 127.0.0.1.
 deadline=$((SECONDS+20))
 # Match the ANSWER line ("Address: 127.0.0.1", no :port) not the server line
-# ("Address: 127.0.0.1:53").
-until docker exec "$C" nslookup csd.test 127.0.0.1 2>/dev/null | grep -qE "Address:[[:space:]]*127\.0\.0\.1$"; do
+# ("Address: 127.0.0.1:53"). Capture-then-match via herestring — never
+# `nslookup | grep -q` under pipefail (SIGPIPE false-negative once the body
+# outgrows the pipe buffer).
+until grep -qE "Address:[[:space:]]*127\.0\.0\.1$" <<<"$(docker exec "$C" nslookup csd.test 127.0.0.1 2>/dev/null)"; do
   (( SECONDS >= deadline )) && { echo "AGH never resolved the local rewrite csd.test"; exit 1; }
   [ "$(docker inspect -f '{{.State.Running}}' "$C" 2>/dev/null)" = true ] || { echo "container exited: $(docker logs "$C" 2>&1 | tail -1)"; exit 1; }
   sleep 2

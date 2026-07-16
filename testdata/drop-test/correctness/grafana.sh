@@ -19,6 +19,11 @@ set -uo pipefail
 : "${DROP_TEST_CONTAINER:?}"; C="$DROP_TEST_CONTAINER"
 B='http://admin:$GF_SECURITY_ADMIN_PASSWORD@localhost:3000'
 
+# The curl|grep-q pipe here runs INSIDE `docker exec … sh -c`, a nested shell
+# with no `pipefail`, so the inner pipeline's exit is grep's — a curl SIGPIPE
+# cannot false-negative it (unlike an outer-level `curl | grep -q` under this
+# script's `set -o pipefail`). Left as-is deliberately; do not "fix" it into a
+# herestring, which the container's POSIX sh may not support.
 deadline=$((SECONDS+45))
 until docker exec "$C" sh -c "curl -sf \"$B/api/health\" 2>/dev/null | grep -q '\"database\": \"ok\"'"; do
   (( SECONDS >= deadline )) && { echo "grafana /api/health never reported database ok"; exit 1; }

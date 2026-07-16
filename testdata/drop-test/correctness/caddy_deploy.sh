@@ -16,9 +16,13 @@ C="$DROP_TEST_CONTAINER"
 # In /proc/net/tcp{,6} a listening socket has state 0A; ports are hex — 80=0050,
 # 443=01BB. Any privileged listener proves the bind (and the exec) succeeded.
 listening_priv() {
-  docker exec "$C" sh -c 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null' \
-    | awk '$4=="0A"{split($2,a,":"); print a[2]}' \
-    | grep -qiE '^(0050|01BB)$'
+  # capture-then-match via herestring — never end an outer pipe in `grep -q`
+  # under pipefail (grep -q's early exit SIGPIPEs the upstream awk/cat → a
+  # matching result can false-negative once the output outgrows the pipe buffer).
+  local ports
+  ports="$(docker exec "$C" sh -c 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null' \
+    | awk '$4=="0A"{split($2,a,":"); print a[2]}')"
+  grep -qiE '^(0050|01BB)$' <<<"$ports"
 }
 
 deadline=$((SECONDS + 30))

@@ -23,7 +23,7 @@ pw="$(printf '%s\n' "$argv" | awk '/^--requirepass$/{if(getline v)print v; exit}
 authflag=(); [ -n "$pw" ] && authflag=(-a "$pw" --no-auth-warning)
 
 deadline=$((SECONDS+30))
-until docker exec "$C" redis-cli "${authflag[@]}" ping 2>/dev/null | grep -qi PONG; do
+until grep -qi PONG <<<"$(docker exec "$C" redis-cli "${authflag[@]}" ping 2>/dev/null)"; do
   if (( SECONDS >= deadline )); then
     # Rich diagnostics so a residual failure is legible, not another guess.
     echo "redis not responding to PING (auth=$([ -n "$pw" ] && echo yes || echo no))"

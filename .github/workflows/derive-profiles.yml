@@ -124,3 +124,13 @@ jobs:
                   iss=req("POST", f"/repos/{repo}/issues", {"title":title, "body":log})
                   print("opened issue", iss.get("html_url"))
           PY
+      # The runner VM's 40G disk accumulates ~2GB/week of superseded image
+      # digests, per-trial anonymous volumes, and build cache (it hit 17GB of
+      # cruft on 2026-07-16). Prune after every run; the next run re-pulls only
+      # what it needs. always(): a failed derive must still clean up.
+      - name: prune docker (runner disk hygiene)
+        if: always()
+        run: |
+          docker image prune -af
+          docker volume prune -f
+          docker builder prune -af

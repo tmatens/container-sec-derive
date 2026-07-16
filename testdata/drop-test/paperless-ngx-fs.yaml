@@ -1,0 +1,24 @@
+# drop-test spec: paperless-ngx read-only-filesystem tmpfs minimum. paperless
+# stores its data/media/consume/export under declared VOLUMEs (auto-mounted
+# writable, persistent). Its s6-overlay supervisor needs /run writable AND
+# EXECUTABLE (writes then execs /run/s6/.../init), and it writes scratch to /tmp.
+# Both drop-tested. Minimum derived below.
+#
+# Derived under the default docker cap set, with the in-stack redis `broker` dep
+# (default SQLite DB in the data volume, so no postgres dep). Correctness reuses
+# paperless-ngx.sh.
+image: ghcr.io/paperless-ngx/paperless-ngx
+tag: "2.18"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/run:exec", "/tmp"]
+deps:
+  - name: broker
+    image: docker.io/library/redis
+    tag: "8.2.7"
+    ready: redis-cli ping
+run:
+  env: [PAPERLESS_REDIS=redis://broker:6379, PAPERLESS_SECRET_KEY=csdprobe,
+        PAPERLESS_ADMIN_USER=csdadmin, PAPERLESS_ADMIN_PASSWORD=CsdProbe-Pw-12345]
+correctness: testdata/drop-test/correctness/paperless-ngx.sh

@@ -1,0 +1,37 @@
+# drop-test spec: wordpress minimum Linux capabilities, default invocation —
+# the first PUBLIC-catalog use of the in-stack dependent-tier model (deps:).
+# Baseline is cap_drop:ALL + the full Docker default cap set.
+#
+# wordpress cannot serve alone: the entrypoint waits for its database. The
+# `db` dep (the already-cataloged mysql:8.4) comes up ONCE on the shared
+# network and persists across trials; only the wordpress target is recreated
+# per trial. That means trial 1 performs the real HTTP install flow (writes
+# the schema through php->mysql) and later trials serve the installed site
+# from the DB — the correctness check handles both paths, and both exercise
+# the full copy-sources -> apache workers -> php -> mysql pipeline.
+#
+# Expected shape: apache master/worker (httpd's shape: NET_BIND_SERVICE under
+# the pinned sysctl posture + SETGID/SETUID for the www-data workers) PLUS
+# whatever the entrypoint's source-copy into the fresh /var/www/html VOLUME
+# needs (tar --owner as root = chown syscalls -> likely CHOWN). The drop-test
+# decides.
+image: docker.io/library/wordpress
+tag: "6.9"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+deps:
+  - name: db
+    image: docker.io/library/mysql
+    tag: "8.4"
+    env: [MYSQL_ROOT_PASSWORD=csdprobe-root-pw-12345, MYSQL_DATABASE=wordpress,
+          MYSQL_USER=wordpress, MYSQL_PASSWORD=csdprobe-pw-12345]
+    ready: MYSQL_PWD=$MYSQL_PASSWORD mysql -u$MYSQL_USER $MYSQL_DATABASE -e "SELECT 1"
+run:
+  env: [WORDPRESS_DB_HOST=db, WORDPRESS_DB_USER=wordpress,
+        WORDPRESS_DB_PASSWORD=csdprobe-pw-12345, WORDPRESS_DB_NAME=wordpress]
+  security_opt: ["no-new-privileges:true"]
+  sysctls: ["net.ipv4.ip_unprivileged_port_start=1024"]
+correctness: testdata/drop-test/correctness/wordpress.sh

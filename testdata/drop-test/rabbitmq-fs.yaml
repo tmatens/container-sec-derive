@@ -1,0 +1,25 @@
+# drop-test spec: rabbitmq read-only-filesystem tmpfs minimum. Data dir
+# /var/lib/rabbitmq is a declared VOLUME (auto-mounted). /etc/rabbitmq is a
+# MULTI-FILE config dir (enabled_plugins + conf.d/*) that rabbitmq REWRITES when
+# a plugin is enabled at runtime (rabbitmq-plugins enable, which the workload
+# does) — a tmpfs there shadows the shipped config and crashes the broker, and a
+# read-only /etc/rabbitmq fails the plugin-enable write. So it is supplied as a
+# WRITABLE COPY of the image's own /etc/rabbitmq via a from_image seed_mount
+# (owner rabbitmq). NOT part of the tmpfs minimum — the criteria records it needs
+# a writable copy (a config volume init'd from the image), not an empty tmpfs.
+# With that, /tmp and /var/log/rabbitmq drop-test NOT required. Minimum: [].
+#
+# Derived under the default docker cap set. Correctness reuses rabbitmq.sh.
+image: docker.io/library/rabbitmq
+tag: "4.3"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/tmp", "/var/log/rabbitmq:mode=1777"]
+run:
+  seed_mounts:
+    - target: /etc/rabbitmq
+      from_image: true
+      owner: "999:999"
+      dir_mode: "1777"
+correctness: testdata/drop-test/correctness/rabbitmq.sh

@@ -13,6 +13,17 @@ the relevant entry.
 
 ### Added
 
+- **drop-test `run.seed_mounts[].from_image` — writable-copy-of-an-image-dir
+  fixtures.** A `seed_mount` can now be seeded with a WRITABLE COPY of the
+  image's own content at `target` (all files, preserving the tree), then mounted
+  writable. This is the primitive for a **filesystem** derivation of a service
+  that REWRITES FILES IN ITS OWN MULTI-FILE CONFIG/LIB DIR at startup — where a
+  plain tmpfs shadows the shipped content and a single seeded `file` can't
+  preserve a tree. Validated on rabbitmq: with a from_image `/etc/rabbitmq`
+  (so the runtime `rabbitmq-plugins enable` write succeeds) it derives
+  `tmpfs:[]`, where a read-only or tmpfs-shadowed `/etc/rabbitmq` crashed the
+  broker. Additive; existing seed_mounts specs are unaffected (`drop_test_selftest`
+  + the seed-fidelity specs pass unchanged).
 - **drop-test `run.seed_mounts[].read_only` — read-only config fixtures.** A
   `seed_mount` can now be mounted `:ro`, and its seeded `file`/`content` may be
   multi-line (base64 over the internal spec protocol). Together these turn

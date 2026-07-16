@@ -122,6 +122,17 @@
 #         dir_mode: "0755"       # optional; mount dir mode (default 0755)
 #         file_mode: "0600"      # optional; seeded file mode (default 0600)
 #         read_only: true        # optional; mount the fixture :ro (default false)
+#         from_image: true       # optional; seed a WRITABLE COPY of the image's
+#                                # existing content at `target` (default false)
+#
+# from_image seed_mounts are the primitive for a filesystem derivation of a
+# service that REWRITES FILES IN ITS OWN MULTI-FILE CONFIG/LIB DIR at startup
+# (forgejo's s6 scandir /etc/s6, rabbitmq's /etc/rabbitmq/conf.d, keycloak's
+# quarkus lib): a plain tmpfs there SHADOWS the shipped content and a single
+# seeded `file` can't preserve a tree, so a writable COPY of the image dir (with
+# `owner` set to the service user) is the only faithful way. The derived tmpfs
+# entry names the dir; the criteria doc notes it needs a writable copy, not an
+# empty tmpfs.
 #
 # read_only seed_mounts double as a READ-ONLY CONFIG FIXTURE: seed the config
 # file (file:/content:) at the path the service reads, mount it :ro, and the
@@ -238,6 +249,16 @@ for i, sd in enumerate(seeds):
     # not have to write the config to a writable /tmp, which would falsely require
     # a /tmp tmpfs a read-only config mount in production would not.
     line(f"SEED_{i}_RO", "true" if sd.get("read_only") else "")
+    # from_image: seed the staging with a WRITABLE COPY of the image's existing
+    # content at `target` (all files, preserving structure), then mount it
+    # writable. This is the primitive for filesystem derivation of a service that
+    # REWRITES FILES IN ITS OWN MULTI-FILE CONFIG/LIB DIR at startup (forgejo's
+    # s6 scandir /etc/s6, rabbitmq's /etc/rabbitmq/conf.d, keycloak's quarkus
+    # lib): a plain tmpfs there SHADOWS the shipped content (breaking the service)
+    # and a single seeded `file` cannot preserve a multi-file tree, so read-only
+    # was previously infeasible. A from_image seed gives the service a writable
+    # copy of its own config dir with the content intact.
+    line(f"SEED_{i}_FROMIMAGE", "true" if sd.get("from_image") else "")
 # Dependencies to bring up before the drop-test. Emit each field on its OWN key
 # (DEP_<i>_*), not one packed record: bash `read` treats \v as whitespace and would
 # collapse an empty field (e.g. no command override), shifting every later field.
@@ -431,11 +452,19 @@ run_and_test() {
     local starget="${F[SEED_${si}_TARGET]}" sowner="${F[SEED_${si}_OWNER]}"
     local sdirmode="${F[SEED_${si}_DIRMODE]}" sfile="${F[SEED_${si}_FILE]}"
     local sfilemode="${F[SEED_${si}_FILEMODE]}" scontent_b64="${F[SEED_${si}_CONTENT_B64]}"
-    local sro="${F[SEED_${si}_RO]:-}"
+    local sro="${F[SEED_${si}_RO]:-}" sfromimg="${F[SEED_${si}_FROMIMAGE]:-}"
     local sdir="$stageroot/seed.$si"
     mkdir -p "$sdir"
-    [ -n "$sfile" ] && printf '%s' "$scontent_b64" | base64 -d > "$sdir/$sfile"
     STAGED_ANY=1
+    # from_image: copy the image's existing content at $starget into the staging
+    # (so a service that rewrites its own multi-file config/lib dir gets a
+    # WRITABLE copy with the shipped content intact, instead of a shadowing tmpfs).
+    if [ -n "$sfromimg" ]; then
+      docker run --rm --user 0:0 --entrypoint sh -v "$sdir:/csd-seed" "${IMAGE}:${TAG}" -c \
+        "cp -a ${starget}/. /csd-seed/ 2>/dev/null || true" >/dev/null 2>&1 \
+        || echo "drop_test: could not copy image dir ${starget} into the writable seed (image lacks sh/cp?)" >&2
+    fi
+    [ -n "$sfile" ] && printf '%s' "$scontent_b64" | base64 -d > "$sdir/$sfile"
     if ! docker run --rm --user 0:0 --entrypoint sh -v "$sdir:/csd-seed" "${IMAGE}:${TAG}" -c \
           "chown -R ${sowner} /csd-seed && chmod ${sdirmode} /csd-seed${sfile:+ && chmod ${sfilemode} /csd-seed/${sfile}}" >/dev/null 2>&1; then
       echo "drop_test: could not seed foreign-owned content for ${starget} (image lacks sh/chown?); using it un-owned" >&2

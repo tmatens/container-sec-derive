@@ -7,7 +7,7 @@
 # v0.1 ground truth; this target regenerates them when an image digest
 # is bumped.
 
-.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-adversarial-perf smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-deploy-check smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest parity image image-local verify-ig-pin ig-provenance
+.PHONY: ground-truth ground-truth-postgres ground-truth-caddy ground-truth-tailscale synthetic-build smoke-wsl2 smoke-fs smoke-device smoke-capadd smoke-adversarial-dac smoke-adversarial-perf smoke-egress smoke-drop-seed smoke-drop-mode smoke-drop-namedvol smoke-drop-rootfs smoke-drop-netbind smoke-deploy-check smoke-podman apptier-immich closed-loop missrate release-prep build test vet bisect-selftest drop-test-selftest compose-derive-selftest derive-profiles-selftest parity image image-local verify-ig-pin ig-provenance
 
 # IG_VERSION is extracted from internal/ig/ig.go's PinnedIGVersion so the image
 # build, the runtime schema check, and the committed ig-pin/ files
@@ -197,6 +197,13 @@ drop-test-selftest:
 # exercised and its caps derive faithfully (#337). Hermetic: python+yaml, no docker.
 compose-derive-selftest:
 	./scripts/compose_derive_selftest.sh
+
+# derive-profiles-selftest exercises the manifest re-derivation loop with
+# stubbed docker/sudo/csd: dimension->observer dispatch across all five catalog
+# dimensions, canonicalizers, run_args/csd_args pass-through, and the
+# FRESH/REVALIDATE/CHANGED/WARN exit-code contract. Hermetic, no docker.
+derive-profiles-selftest:
+	./scripts/derive_profiles_selftest.sh
 
 # parity runs the v1 compose-lint parity cross-check gate (#294): the set
 # difference between each testdata/<image>/ground_truth.json and the pinned

@@ -90,6 +90,12 @@ jobs:
       # faithfully (#337). Pure python+yaml, no docker.
       - name: compose->spec transform self-test
         run: ./scripts/compose_derive_selftest.sh
+      # Hermetic loop test: derive_profiles.sh's dimension->observer dispatch,
+      # per-dimension canonicalizers, run_args/csd_args pass-through, and the
+      # FRESH/REVALIDATE/CHANGED/WARN exit-code contract, with docker/sudo/csd
+      # stubbed on PATH — no Docker, so it belongs in the fast gate.
+      - name: derive-profiles loop self-test
+        run: ./scripts/derive_profiles_selftest.sh
 
   # Deep static analysis beyond `go vet` (#292): errcheck / staticcheck /
   # ineffassign / unused, configured in .golangci.yml. A separate job so it runs

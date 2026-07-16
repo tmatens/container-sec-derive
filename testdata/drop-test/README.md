@@ -105,6 +105,39 @@ must be chowned → the real minimum is `[CHOWN, DAC_OVERRIDE, SETGID, SETUID]`.
 Always finish by **verifying the combination**: run the workload under the union
 of every derived dimension at once.
 
+## Research first — source the workload from upstream, don't invent it
+
+Before writing a spec or a correctness check, spend a few minutes learning the
+image from its own sources. A hand-guessed workload is the top cause of a wrong
+derivation (the reverted mc-backup / minecraft profiles were hand-authored and
+wrong; the faithful path is deriving from the image's real behavior). Three
+places, each answering a different question:
+
+1. **The image's entrypoint** — `docker-library/<image>/docker-entrypoint.sh`,
+   or the project's own. This *predicts the capability candidates* before you
+   run anything: it shows the privilege-drop shape (a `gosu`/`su-exec` re-exec
+   → SETUID/SETGID; a master/worker fork; an in-process drop; a `setcap` +
+   file-capability bridge → SETFCAP) and which directories it chowns → CHOWN /
+   DAC_OVERRIDE / FOWNER. (mysql's DAC_OVERRIDE came straight from reading that
+   its root-phase `find` must traverse a group-denied `/var/lib/mysql-files`.)
+
+2. **The upstream's own tests** — `docker-library/official-images`
+   `test/tests/<image>-basics/run.sh`, or the project's integration suite — for
+   the *canonical* "prove it works" round-trip. Model the correctness check on
+   that, not on a guess: it is the exercise the maintainers themselves trust
+   (mysql's CREATE/INSERT/SELECT, rabbitmq's publish/consume, mongo's
+   insertOne/countDocuments, memcached's set/get all came from there).
+
+3. **The image, empirically** — `docker inspect` for `User` / `Volumes` /
+   `Cmd`, then run it and check `/proc/1/status` uid, which ports it binds, and
+   where it writes. This distinguishes *non-root by construction* (memcached,
+   keycloak → zero-cap) from *root that still needs nothing* (jellyfin, minio)
+   from *root that needs caps* — a distinction you cannot make from the tag
+   name.
+
+Only after this should you pick candidates and write the correctness check;
+the seven rules below then keep that check honest.
+
 ## Correctness-check authoring rules
 
 Seven rules a correctness check must follow, each learned from a real false

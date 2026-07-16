@@ -1,0 +1,20 @@
+# drop-test spec: mysql read-only-filesystem tmpfs minimum. Its data dir
+# /var/lib/mysql is a declared VOLUME (auto-mounted writable). Under --read-only
+# mysqld additionally needs /var/run/mysqld writable — its unix socket + pid dir.
+# /tmp is drop-tested and comes out NOT required. Minimum: read_only:true,
+# tmpfs:[/var/run/mysqld].
+#
+# Derived under the default docker cap set. Correctness reuses mysql.sh.
+image: docker.io/library/mysql
+tag: "8.4"
+dimension: filesystem
+base_fs: read_only
+fixed: []
+candidates: ["/var/run/mysqld", "/tmp"]
+run:
+  env:
+    - MYSQL_ROOT_PASSWORD=csdprobe-pw-12345
+    - MYSQL_DATABASE=probe
+    - MYSQL_USER=csd
+    - MYSQL_PASSWORD=csdprobe-pw-12345
+correctness: testdata/drop-test/correctness/mysql.sh

@@ -1,0 +1,29 @@
+# drop-test spec: rabbitmq minimum Linux capabilities, default (root-then-drop)
+# invocation. Baseline is cap_drop:ALL + the full Docker default cap set on a
+# fresh docker-managed data volume (the image declares /var/lib/rabbitmq a
+# VOLUME).
+#
+# Same startup-cap shape as mysql/mongo, confirmed from the upstream entrypoint
+# (docker-library/rabbitmq docker-entrypoint.sh): as root it `find`-chowns
+# /var/lib/rabbitmq (a no-op on the image's pre-owned volume), then
+# `exec gosu rabbitmq` re-execs. Expected minimum: SETGID+SETUID.
+#
+# Correctness = a REAL publish/consume round-trip over the management API. The
+# plain image ships no AMQP client and no curl (only rabbitmqctl /
+# rabbitmq-diagnostics), so the check enables the bundled rabbitmq_management
+# plugin at runtime (`rabbitmq-plugins enable --online`, the same plugin the
+# -management tag pre-enables and most deployments run) and drives declare ->
+# publish -> get from the curl sidecar (lib/sidecar.sh). The sidecar shares the
+# target's netns, so the default guest user's loopback-only restriction is
+# satisfied without config changes. Erlang boot is slow-ish — the readiness
+# gate allows 90s (the queue's fit note).
+image: docker.io/library/rabbitmq
+tag: "4.3"
+dimension: capabilities
+fixed: []
+candidates: ["CHOWN", "DAC_OVERRIDE", "FSETID", "FOWNER", "MKNOD", "NET_RAW",
+             "SETGID", "SETUID", "SETFCAP", "SETPCAP", "NET_BIND_SERVICE",
+             "SYS_CHROOT", "KILL", "AUDIT_WRITE"]
+run:
+  security_opt: ["no-new-privileges:true"]
+correctness: testdata/drop-test/correctness/rabbitmq.sh

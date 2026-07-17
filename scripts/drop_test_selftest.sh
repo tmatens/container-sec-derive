@@ -51,6 +51,23 @@ assert_contains "$ERR" "fixed" "rejection message names 'fixed'"
 run_spec '["SYS_PTRACE", "DAC_OVERRIDE"]'
 assert_eq "$RC" "5" "multiple fixed caps -> exit 5"
 
+# --- 3. run.cap_add on a capabilities spec is rejected (exit 5): the sibling-
+# dimension grant is for NON-caps derivations only — a caps spec must drop-test
+# every granted cap as a candidate, not hold some constant via run.cap_add.
+cat > "$WORK/spec.yaml" <<EOF
+image: example.invalid/no-such-image
+tag: latest
+dimension: capabilities
+fixed: []
+candidates: ["SETUID", "SETGID"]
+run:
+  cap_add: ["SYS_PTRACE"]
+correctness: testdata/drop-test/correctness/compose_generic.sh
+EOF
+ERR="$(PY=python3 bash "$DROP_TEST" "$WORK/spec.yaml" 2>&1 >/dev/null)"; RC=$?
+assert_eq "$RC" "5" "run.cap_add on a capabilities spec -> exit 5"
+assert_contains "$ERR" "cap_add" "rejection message names 'cap_add'"
+
 # NOTE: the accepted path (fixed: []) is exercised by every real spec and the live
 # smoke suite; it isn't asserted here because passing the guard proceeds to
 # `docker pull`, which this hermetic test deliberately avoids.

@@ -13,6 +13,15 @@ the relevant entry.
 
 ### Added
 
+- **drop-test `features:` — the feature ledger (#206 slice 3b).** An optional
+  spec-level list recording which of the image's privilege-relevant features the
+  correctness check did (`driven: true` + evidence) and did not (`driven: false`
+  + the honest reason) drive, passed through verbatim into the evidence JSON
+  (`features`) for the catalog profile's `derivation.features` (compose-lint
+  profile schema 1.6). Authored from the privileges ("what is each requested
+  grant FOR?"), not an open-ended feature enumeration. First users:
+  `netdata-caps.yaml` and `netdata-fs.yaml`.
+
 - **drop-test `run.cap_add` — derive a non-caps dimension under the capabilities
   dimension's recommendation.** The caps mirror of `run.read_only`/`run.tmpfs`:
   when set, every trial runs `--cap-drop ALL` plus exactly these `--cap-add`s, so

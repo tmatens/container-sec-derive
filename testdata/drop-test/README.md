@@ -218,3 +218,33 @@ cap, or a hang to timeout.
    first the un-caveated "removable", then an over-eager "you need it back" — before
    the live check settled it. Verify against the real deployment before publishing
    a privilege verdict.)
+
+## The feature ledger (`features:`) — what the check did and didn't drive
+
+A drop-test proves the minimum for **what the correctness check exercises**
+(rule 8); a feature nothing triggers is invisible to leave-one-out elimination
+by construction. The optional spec-level `features:` list records that boundary
+as structured data instead of criteria-doc prose:
+
+```yaml
+features:
+  - name: "per-container network-interface metrics (cgroup-network)"
+    driven: true
+    why: "verified live: collects via the host-side veth fallback under the derived set"
+  - name: "eBPF collectors (ebpf.plugin)"
+    driven: false
+    why: "the image ships no ebpf.plugin, so nothing gates on it"
+```
+
+Author it **from the privileges, not the features**: for each grant the image
+requests (or is commonly given), ask *"what feature is this privilege FOR?"* —
+typically 1–3 entries per image. Features that need no extra privilege can
+never change the profile and don't belong in the ledger. `driven: true` carries
+its evidence; `driven: false` carries the honest reason.
+
+`drop_test.sh` passes the ledger through verbatim into the evidence JSON
+(`features`); the catalog profile carries it as `derivation.features`
+(compose-lint profile schema 1.6, ADR-017 §13), where it is **opt-in evidence,
+not a tax** — a profile with no ledger simply cannot claim workload coverage
+better than `partial`. Validation happens at the catalog's pinned contract, not
+here.

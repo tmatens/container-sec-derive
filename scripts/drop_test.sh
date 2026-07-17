@@ -174,7 +174,7 @@ trap cleanup EXIT
 # --- parse spec (TSV; arrays are space/newline-joined, safe for caps/paths) ----
 declare -A F
 while IFS=$'\t' read -r k v; do F["$k"]="$v"; done < <("$PY" - "$SPEC" <<'PYEOF'
-import sys, yaml, base64
+import sys, yaml, base64, json
 s = yaml.safe_load(open(sys.argv[1])) or {}
 run = s.get("run", {}) or {}
 def line(k, v): print(f"{k}\t{v}")
@@ -220,6 +220,13 @@ line("RUN_TMPFS", "\v".join(run.get("tmpfs", [])))
 # a grant the profile itself does not recommend. Rejected for
 # dimension=capabilities (a caps trial owns its cap set via candidates).
 line("RUN_CAPADD", "\v".join(run.get("cap_add", [])))
+# features: the per-dimension feature LEDGER (#206 slice 3b; compose-lint profile
+# schema 1.6 / ADR-017 §13) — which privilege-relevant features the workload did
+# (driven: true + evidence) and did not (driven: false + the honest reason)
+# drive. Human-authored in the spec; passed through VERBATIM into the evidence
+# JSON (the catalog's pinned contract is the validation gate). base64-JSON over
+# the TSV protocol so free-text `why` strings survive.
+line("FEATURES_B64", base64.b64encode(json.dumps(s.get("features", []) or []).encode()).decode())
 # command may be a YAML list or a bare string (compose accepts both).
 cmd = run.get("command", [])
 line("CMD", "\v".join(cmd if isinstance(cmd, list) else [cmd]))
@@ -626,8 +633,9 @@ IMAGE="$IMAGE" TAG="$TAG" DIGEST="$DIGEST" DIM="$DIM" MINIMUM="$MINIMUM" \
   RUN_SECOPT="${F[SECOPT]}" RUN_MOUNTS="${F[MOUNTS]}" RUN_ENV="${F[ENV]}" \
   RUN_SYSCTLS="${F[SYSCTLS]}" RUN_UNGUARANTEED="$UNGUARANTEED_CSV" \
   RUN_DEPS="$DEPS_CSV" RUN_VOLUMES_FROM="${F[VOLUMES_FROM]}" \
+  FEATURES_B64="${F[FEATURES_B64]}" \
   "$PY" - "$WORK/checks.tsv" <<'PYEOF'
-import os, sys, json
+import os, sys, json, base64
 checks = []
 for ln in open(sys.argv[1]):
     parts = ln.rstrip("\n").split("\t")
@@ -676,6 +684,13 @@ out = {
     "run_config": run_config,
     "checks": checks,
 }
+# The feature ledger (spec `features:`, passed through verbatim): which
+# privilege-relevant features the workload did and did not drive — data for the
+# catalog profile's derivation.features (schema 1.6). Omitted when the spec
+# declares none.
+feats = json.loads(base64.b64decode(os.environ.get("FEATURES_B64", "") or "W10=").decode())
+if feats:
+    out["features"] = feats
 # Confidence-guard input (csd#340 capstone): the mounts whose worst-case initial
 # state the drop-test could NOT guarantee (a ${VAR} fresh-vol or a passed-through
 # named volume — see the bash classification). A chown-class cap derived removable

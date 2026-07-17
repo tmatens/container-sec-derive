@@ -27,3 +27,23 @@ run:
     - "/etc/passwd:/host/etc/passwd:ro"
     - "/etc/group:/host/etc/group:ro"
 correctness: testdata/drop-test/correctness/netdata.sh
+# The feature ledger (#206 slice 3b): which privilege-relevant features this
+# spec's correctness check does and does not drive. Generated from the grants
+# netdata requests (SYS_PTRACE, SYS_ADMIN, the docker.sock mount), not from an
+# open-ended feature enumeration.
+features:
+  - name: "host + per-process monitoring (apps.plugin /proc io/fd metrics)"
+    driven: true
+    why: "the correctness check requires a per-process fds_open chart to be NON-ZERO (dropping SYS_PTRACE zeroes it)"
+  - name: "per-container network-interface metrics (cgroup-network)"
+    driven: true
+    why: "verified on the live deploy: collects via the host-side veth fallback under the derived set (SYS_ADMIN's setns path fails once, non-fatally)"
+  - name: "eBPF collectors (ebpf.plugin)"
+    driven: false
+    why: "the image ships no ebpf.plugin, so nothing gates on it (ebpf=yes is a no-op); a custom build with the plugin would need re-derivation"
+  - name: "docker.sock-based collectors (container names/state)"
+    driven: false
+    why: "socket access is a group grant, not a capability, so it cannot move this dimension; per-process docker metrics come via /proc + SYS_PTRACE"
+  - name: "remaining optional collector surface"
+    driven: false
+    why: "not exhaustively driven — the reason this dimension's coverage grades partial (ADR-018); no known collector requires a cap outside the derived set"

@@ -1,0 +1,53 @@
+# drop-test spec: netdata read-only-filesystem tmpfs minimum, run as a host
+# monitor — the same representative invocation as netdata-caps.yaml, and derived
+# UNDER that dimension's recommendation via run.cap_add (cap_drop:ALL +
+# [DAC_OVERRIDE, SETGID, SETUID, SYS_PTRACE]): the correctness check requires
+# per-process metrics, which require SYS_PTRACE granted, so docker's default cap
+# set would derive the fs minimum under a grant the profile doesn't recommend.
+#
+# Persistent state lives in /etc/netdata (config), /var/lib/netdata (GUID,
+# registry, dyncfg), /var/cache/netdata (dbengine) — none are declared VOLUMEs,
+# so production mounts them as named volumes (the official compose shape). They
+# are supplied here via run.tmpfs as writable stand-ins, NOT part of the tmpfs
+# minimum. The uid=201,gid=201 mount options mirror a prior deploy's
+# service-owned volumes: the caps minimum has no CHOWN, so a fresh root-owned
+# tmpfs would break on ownership — a staging artifact (the valkey lesson), not a
+# read-only finding. (/etc/netdata needs no stand-in: absent user config falls
+# back to stock config in /usr/lib/netdata — read-only clean.)
+#
+# Candidates: /var/log/netdata (the entrypoint tries to chown + write it; in
+# containers the actual log method is stdout/stderr, so it may derive
+# removable) and /tmp (the runtime-dir fallback when /run isn't writable, plus
+# collector scratch). Plain strings — a probe showed netdata stays correct with
+# these root-owned (no uid= option needed), so the published minimum is the
+# least-specified form.
+#
+# READ-ONLY CONSEQUENCE recorded in the criteria doc: the entrypoint's
+# PGID-based `groupadd docker` needs a writable /etc/group, so under read_only
+# the docker.sock grant must come from `group_add:` in compose instead of the
+# PGID env var.
+image: docker.io/netdata/netdata
+tag: v2.10.3
+dimension: filesystem
+base_fs: read_only
+health_port: 19999   # network: host → refuse to run if :19999 is already held
+fixed: []
+candidates: ["/var/log/netdata", "/tmp"]
+run:
+  pid: host
+  network: host
+  security_opt: ["apparmor=unconfined"]
+  cap_add: ["DAC_OVERRIDE", "SETGID", "SETUID", "SYS_PTRACE"]
+  env: ["PGID=__DOCKER_GID__"]
+  tmpfs:
+    - "/var/lib/netdata:uid=201,gid=201"
+    - "/var/cache/netdata:uid=201,gid=201"
+  mounts:
+    - "/proc:/host/proc:ro"
+    - "/sys:/host/sys:ro"
+    - "/etc/os-release:/host/etc/os-release:ro"
+    - "/var/log:/host/var/log:ro"
+    - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    - "/etc/passwd:/host/etc/passwd:ro"
+    - "/etc/group:/host/etc/group:ro"
+correctness: testdata/drop-test/correctness/netdata.sh

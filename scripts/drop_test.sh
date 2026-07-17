@@ -211,6 +211,15 @@ line("DEVICES", "\v".join(run.get("devices", [])))
 # must be chowned — invisible when caps are derived on a writable fs).
 line("RUN_READONLY", "true" if run.get("read_only") else "")
 line("RUN_TMPFS", "\v".join(run.get("tmpfs", [])))
+# Sibling-dimension context, capabilities direction: run.cap_add derives a
+# NON-caps dimension under the capabilities dimension's RECOMMENDATION
+# (cap_drop: ALL + exactly these cap_adds) — the caps mirror of
+# run.read_only/run.tmpfs. netdata's fs derivation is the motivating case: its
+# correctness check requires per-process metrics, which require SYS_PTRACE
+# granted; under docker's default cap set the fs minimum would be derived under
+# a grant the profile itself does not recommend. Rejected for
+# dimension=capabilities (a caps trial owns its cap set via candidates).
+line("RUN_CAPADD", "\v".join(run.get("cap_add", [])))
 # command may be a YAML list or a bare string (compose accepts both).
 cmd = run.get("command", [])
 line("CMD", "\v".join(cmd if isinstance(cmd, list) else [cmd]))
@@ -294,6 +303,22 @@ if [ -n "$_fixed_nonempty" ]; then
     echo "  becomes a testable candidate; if it truly can't be exercised in the"
     echo "  observation window, record it as a criteria-doc caveat + low confidence,"
     echo "  not a fixed (untested) minimum entry."
+  } >&2
+  exit 5
+fi
+IFS=$'\v' read -ra RUN_CAPADD <<<"${F[RUN_CAPADD]}"
+# run.cap_add is sibling-dimension context for NON-caps dimensions only: a
+# capabilities spec expresses its grant via candidates (drop-tested), so a
+# run.cap_add there would be an untested grant — the same laundering `fixed`
+# is rejected for. Fail fast, before any docker work.
+_capadd_nonempty=""
+for _c in "${RUN_CAPADD[@]}"; do [ -n "$_c" ] && _capadd_nonempty=1; done
+if [ -n "$_capadd_nonempty" ] && [ "${F[DIM]}" = capabilities ]; then
+  {
+    echo "drop_test: spec has run.cap_add [${RUN_CAPADD[*]}] with dimension=capabilities — not allowed."
+    echo "  run.cap_add carries the capabilities dimension's recommendation into a"
+    echo "  NON-caps derivation (cap_drop:ALL + these adds). A capabilities spec"
+    echo "  must express every granted cap as a 'candidate' so it is drop-tested."
   } >&2
   exit 5
 fi
@@ -491,6 +516,13 @@ run_and_test() {
   # recommendation; the fs dimension supplies its own --read-only via base_fs.
   if [ "$DIM" != filesystem ]; then
     [ "${F[RUN_READONLY]}" = true ] && args+=(--read-only)
+  fi
+  # run.cap_add: derive a NON-caps dimension under the capabilities dimension's
+  # recommendation (cap_drop:ALL + exactly these adds) — the caps mirror of
+  # run.read_only above. Guarded to non-caps dims at parse time.
+  if [ "$DIM" != capabilities ] && [ -n "$_capadd_nonempty" ]; then
+    args+=(--cap-drop ALL)
+    local rc; for rc in "${RUN_CAPADD[@]}"; do [ -n "$rc" ] && args+=(--cap-add "$rc"); done
   fi
   if [ "$DIM" = capabilities ]; then
     args+=(--cap-drop ALL); local c; for c in "$@"; do args+=(--cap-add "$c"); done

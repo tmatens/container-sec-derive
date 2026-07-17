@@ -105,6 +105,15 @@ must be chowned → the real minimum is `[CHOWN, DAC_OVERRIDE, SETGID, SETUID]`.
 Always finish by **verifying the combination**: run the workload under the union
 of every derived dimension at once.
 
+The capabilities direction is `run.cap_add`: every trial runs `--cap-drop ALL`
+plus exactly these adds, so a non-caps dimension derives under the caps
+dimension's recommendation. netdata is the worked example
+(`netdata-fs.yaml`): its correctness check requires per-process metrics, which
+require `SYS_PTRACE` granted — under docker's default cap set the fs minimum
+would be derived under a grant the profile doesn't recommend. Rejected on a
+`dimension: capabilities` spec (a caps spec drop-tests every granted cap as a
+candidate).
+
 ## Research first — source the workload from upstream, don't invent it
 
 Before writing a spec or a correctness check, spend a few minutes learning the

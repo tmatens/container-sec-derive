@@ -13,6 +13,17 @@ the relevant entry.
 
 ### Added
 
+- **drop-test `run.cap_add` — derive a non-caps dimension under the capabilities
+  dimension's recommendation.** The caps mirror of `run.read_only`/`run.tmpfs`:
+  when set, every trial runs `--cap-drop ALL` plus exactly these `--cap-add`s, so
+  a filesystem derivation whose correctness check needs a granted cap (netdata:
+  per-process metrics need `SYS_PTRACE`) derives under the profile's own
+  recommendation instead of docker's default cap set. Rejected (exit 5) on a
+  `dimension: capabilities` spec — a caps spec must drop-test every granted cap
+  as a candidate (`drop_test_selftest.sh` covers the guard). First user:
+  `testdata/drop-test/netdata-fs.yaml` (read_only:true + tmpfs:[/tmp], persistent
+  dirs as service-owned named-volume stand-ins).
+
 - **drop-test `run.seed_mounts[].from_image` — writable-copy-of-an-image-dir
   fixtures.** A `seed_mount` can now be seeded with a WRITABLE COPY of the
   image's own content at `target` (all files, preserving the tree), then mounted

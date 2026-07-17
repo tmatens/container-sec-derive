@@ -51,3 +51,14 @@ run:
     - "/etc/passwd:/host/etc/passwd:ro"
     - "/etc/group:/host/etc/group:ro"
 correctness: testdata/drop-test/correctness/netdata.sh
+# Feature ledger (#206 slice 3b) — the fs dimension's write-path features.
+features:
+  - name: "host + per-process monitoring under read-only rootfs"
+    driven: true
+    why: "same correctness predicate as the caps derivation, healthy end-to-end with rootfs read-only"
+  - name: "file-based logging ([logs] method = file)"
+    driven: false
+    why: "the container default logs to stdout (why /var/log/netdata derives removable); a file-logging config diverges and needs a writable log path"
+  - name: "cloud claiming / dyncfg persistent writes"
+    driven: false
+    why: "land in /var/lib/netdata, which is a named volume in production (a stand-in here), so they cannot move the tmpfs minimum"

@@ -3,7 +3,7 @@
 # auto-downloads the go.mod toolchain, so csd's Go 1.26 is fine). Digest-pinned
 # per CLAUDE.md §Dependency pinning; Renovate manages the bump (the :v1 tag in the
 # comment tracks which base-builder-go line it maps to).
-FROM gcr.io/oss-fuzz-base/base-builder-go:v1@sha256:0d53f59908d49f9038f5256b12b831a6ce68efb109775cfe87d1ef0a118ff4d8
+FROM gcr.io/oss-fuzz-base/base-builder-go:v1@sha256:841c49fbf9f67c7a19607b98315028b5e02a696c7eeb85e5ad93dd4ae2391096
 
 COPY . $SRC/container-sec-derive
 WORKDIR $SRC/container-sec-derive

@@ -5,7 +5,9 @@ container images on a live BPF host. Each entry is reproducible from the image
 reference alone. These are the worked examples behind the capability/hardening
 narrative — written up for a general audience in
 [articles/finding-minimum-capabilities.md](articles/finding-minimum-capabilities.md)
-— and the first candidates for the compose-lint profile catalog.
+— and the first candidates for the compose-lint profile catalog. The
+*causal* organization of these results — which configuration knob moves which
+requirement, and why — is [invocation-map.md](invocation-map.md).
 
 Two derivation signals are used, and the netdata case shows why **both** are
 needed:

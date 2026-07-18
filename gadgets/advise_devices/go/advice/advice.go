@@ -76,7 +76,7 @@ func Render(containerName string, devicePaths []string) string {
 
 	var b strings.Builder
 	if containerName != "" {
-		fmt.Fprintf(&b, "# %s\n", containerName)
+		fmt.Fprintf(&b, "# %s\n", commentText(containerName))
 	}
 	if len(devs) == 0 {
 		b.WriteString("# no non-default device nodes opened; no device grant required\n")
@@ -86,7 +86,18 @@ func Render(containerName string, devicePaths []string) string {
 	b.WriteString("# to compose devices: / docker --device (k8s requires a device plugin):\n")
 	b.WriteString("device_nodes:\n")
 	for _, d := range devs {
-		fmt.Fprintf(&b, "  - %s\n", d)
+		fmt.Fprintf(&b, "  - %s\n", yamlScalar(d))
 	}
 	return b.String()
+}
+
+// OverflowWarning renders a YAML-comment warning for n dropped observations
+// (0 → ""). Non-empty means an eBPF map filled up during the run, so the
+// recommendation may be missing entries the workload needs — treat it as
+// incomplete rather than enforcing it.
+func OverflowWarning(n uint64) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("# WARNING: %d observation(s) dropped (eBPF map full); recommendation may be incomplete\n", n)
 }

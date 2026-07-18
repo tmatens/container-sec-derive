@@ -63,7 +63,7 @@ func Render(containerName string, bitmap uint64) string {
 
 	var b strings.Builder
 	if containerName != "" {
-		fmt.Fprintf(&b, "# %s\n", containerName)
+		fmt.Fprintf(&b, "# %s\n", commentText(containerName))
 	}
 	b.WriteString("securityContext:\n  capabilities:\n    drop:\n      - ALL\n")
 	if len(held) == 0 {
@@ -75,4 +75,15 @@ func Render(containerName string, bitmap uint64) string {
 		fmt.Fprintf(&b, "      - %s\n", c)
 	}
 	return b.String()
+}
+
+// OverflowWarning renders a YAML-comment warning for n dropped observations
+// (0 → ""). Non-empty means an eBPF map filled up during the run, so the
+// recommendation may be missing entries the workload needs — treat it as
+// incomplete rather than enforcing it.
+func OverflowWarning(n uint64) string {
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("# WARNING: %d observation(s) dropped (eBPF map full); recommendation may be incomplete\n", n)
 }

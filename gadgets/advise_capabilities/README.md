@@ -93,3 +93,9 @@ appetite (it is `priority/P4` and went stale).
 - Dynamic-observation floor: only what the workload exercises in the window is
   seen. This is a *signal*, not a correctness proof — the front-end grades
   confidence and surfaces coverage caveats.
+- If an eBPF map fills during the run, dropped observations are counted and a
+  `# WARNING` comment is appended to the advice (plus an operator warning) —
+  treat such a result as incomplete.
+- Output safety: the container name (rendered in a `# comment`) is stripped of
+  control characters so a hostile name cannot inject a YAML line. The capability
+  list itself comes from a fixed internal table and is never workload-controlled.

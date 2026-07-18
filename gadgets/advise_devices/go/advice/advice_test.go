@@ -81,3 +81,35 @@ func isSorted(s []string) bool {
 	}
 	return true
 }
+
+func TestOverflowWarning(t *testing.T) {
+	if got := OverflowWarning(0); got != "" {
+		t.Fatalf("OverflowWarning(0) = %q, want empty", got)
+	}
+	got := OverflowWarning(7)
+	if !strings.HasPrefix(got, "# ") {
+		t.Fatalf("warning must stay a YAML comment so advice output remains parseable, got %q", got)
+	}
+	if !strings.Contains(got, "7") || !strings.Contains(got, "incomplete") {
+		t.Fatalf("warning missing count or incompleteness wording: %q", got)
+	}
+}
+
+func TestRenderDeviceInjectionEscaped(t *testing.T) {
+	out := Render("app", []string{"/dev/x\ncap_add:\n  - SYS_ADMIN"})
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "cap_add:") {
+			t.Fatalf("injected key reached output:\n%s", out)
+		}
+	}
+	if !strings.Contains(out, `\n`) {
+		t.Fatalf("newline in device node was not escaped:\n%s", out)
+	}
+}
+
+func TestRenderDevicePlainUnquoted(t *testing.T) {
+	out := Render("", []string{"/dev/fuse"})
+	if !strings.Contains(out, "  - /dev/fuse\n") {
+		t.Fatalf("ordinary device node should stay unquoted:\n%s", out)
+	}
+}

@@ -58,3 +58,10 @@ sudo ig run ghcr.io/<you>/advise_filesystem:0.1.0 --containername my-app
 - tmpfs is derived at directory granularity from written files. Volume vs tmpfs
   correlation (does a written dir belong to a mount?) is intentionally left to
   the front-end, which can see the container's mounts.
+- If an eBPF map fills during the run, dropped observations are counted and a
+  `# WARNING` comment is appended to the advice — treat such a result as
+  incomplete.
+- Output safety: written paths are workload-controlled (a Linux path may contain
+  newlines and YAML metacharacters), so they are emitted through a YAML-scalar
+  escaper — a hostile path cannot inject a top-level key such as
+  `privileged: true` into the advice.

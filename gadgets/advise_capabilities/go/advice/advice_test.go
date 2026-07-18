@@ -145,3 +145,25 @@ func isSorted(s []string) bool {
 	}
 	return true
 }
+
+func TestOverflowWarning(t *testing.T) {
+	if got := OverflowWarning(0); got != "" {
+		t.Fatalf("OverflowWarning(0) = %q, want empty", got)
+	}
+	got := OverflowWarning(7)
+	if !strings.HasPrefix(got, "# ") {
+		t.Fatalf("warning must stay a YAML comment so advice output remains parseable, got %q", got)
+	}
+	if !strings.Contains(got, "7") || !strings.Contains(got, "incomplete") {
+		t.Fatalf("warning missing count or incompleteness wording: %q", got)
+	}
+}
+
+func TestRenderCommentInjectionSanitized(t *testing.T) {
+	out := Render("app\nprivileged: true", 0)
+	for _, line := range strings.Split(out, "\n") {
+		if line == "privileged: true" {
+			t.Fatalf("newline in container name broke out of the comment:\n%s", out)
+		}
+	}
+}

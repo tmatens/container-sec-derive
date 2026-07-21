@@ -155,7 +155,7 @@ jobs:
       SMOKE_DURATION_CL: ${{ github.event.inputs.duration || (github.event_name == 'pull_request' && '15s' || '30s') }}
       SMOKE_ONLY: ${{ (matrix.runner == 'ubuntu-24.04-arm' || github.event_name == 'pull_request') && 'synthetic' || 'postgres,caddy,tailscale,synthetic' }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -435,7 +435,7 @@ jobs:
     timeout-minutes: 25
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.run_missrate == 'true'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -505,7 +505,7 @@ jobs:
     timeout-minutes: 45
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.bisect_image != 'none'
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 

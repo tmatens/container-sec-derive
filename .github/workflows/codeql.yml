@@ -75,7 +75,7 @@ jobs:
           # and made the Go analysis ~56% slower (~470s → ~740s). The real win is
           # the security-extended query suite below; the cache change is dropped.
           cache: false
-      - uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+      - uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -84,7 +84,7 @@ jobs:
           # review) — the bulk of the per-run query-eval time. Faster scans on a
           # root-equivalent tool without losing security coverage.
           queries: security-extended
-      - uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
+      - uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           category: "/language:${{ matrix.language }}"
           # Private repo, no GHAS — see the header. `upload` is an enum

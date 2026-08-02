@@ -24,8 +24,11 @@ name: deploy-check
 #   - a repo secret FORGEJO_RO_TOKEN: a READ-ONLY Forgejo token that can read the
 #     in-scope dad/* service repos on git.matens.xyz.
 on:
-  schedule:
-    - cron: "43 4 * * 1"   # Mondays 04:43 UTC
+  # PAUSED 2026-08-02 — csd development is paused; the weekly schedule is disabled
+  # to stop Actions runs on a dormant repo. workflow_dispatch covers on-demand
+  # runs. Re-enable this schedule when development resumes.
+  # schedule:
+  #   - cron: "43 4 * * 1"   # Mondays 04:43 UTC
   workflow_dispatch:
 permissions:
   contents: read

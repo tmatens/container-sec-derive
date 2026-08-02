@@ -25,8 +25,11 @@ name: derive-profiles
 # online at cron time. (A prior run cancelled on 2026-07-13 only because the VM's
 # autostart was disabled and it was powered off; that is fixed.)
 on:
-  schedule:
-    - cron: "23 4 * * 1"   # Mondays 04:23 UTC (after the catalog staleness check)
+  # PAUSED 2026-08-02 — csd development is paused; the weekly schedule is disabled
+  # to stop Actions runs on a dormant repo. workflow_dispatch covers on-demand
+  # runs. Re-enable this schedule when development resumes.
+  # schedule:
+  #   - cron: "23 4 * * 1"   # Mondays 04:23 UTC (after the catalog staleness check)
   workflow_dispatch:
     inputs:
       force:

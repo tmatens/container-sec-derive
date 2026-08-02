@@ -1,5 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "PAUSED 2026-08-02 — csd development is paused (maintenance freeze at v0.7.0). Renovate is disabled repo-wide via enabled:false below so no dependency PRs or Dependency Dashboard updates fire while dormant. Set enabled back to true (or remove it) to resume Renovate when development restarts.",
+  "enabled": false,
   "extends": [
     "config:recommended"
   ],

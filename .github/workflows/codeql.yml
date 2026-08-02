@@ -27,8 +27,12 @@ on:
   # reset; weekly — not the prior every-3-days — keeps the cost low while
   # development is still active), and workflow_dispatch covers an on-demand run
   # before a release or after a security-relevant change.
-  schedule:
-    - cron: "27 4 * * 1"
+  # PAUSED 2026-08-02 — csd development is paused; the weekly SAST schedule is
+  # disabled to stop Actions runs on a dormant repo. workflow_dispatch still
+  # covers on-demand (pre-release / post-security-change) runs. Re-enable this
+  # schedule when development resumes (see #165 for the per-PR-vs-weekly history).
+  # schedule:
+  #   - cron: "27 4 * * 1"
   workflow_dispatch:
 
 concurrency:

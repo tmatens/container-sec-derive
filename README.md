@@ -18,9 +18,13 @@
 > not a deprecation. While paused, the weekly scheduled CI (SAST, govulncheck,
 > deploy-check, profile re-derivation, self-hosted integration) is disabled to avoid
 > running on a dormant repo — each stays runnable on demand via *workflow_dispatch*, and
-> per-PR checks are unaffected. Renovate is disabled repo-wide (`renovate.json`), and open
-> issues are labelled `on-hold`. To resume, re-enable the commented-out `schedule:` blocks
-> in `.github/workflows/` and set `enabled: true` in `renovate.json`.
+> per-PR checks are unaffected. The always-on self-hosted runner VM was decommissioned
+> with the pause, so the runner-backed workflows (deploy-check, profile re-derivation,
+> self-hosted integration) additionally need a `csd`-labelled runner registered first
+> (see `docs/self-hosted-runner.md`). Renovate is disabled repo-wide (`renovate.json`),
+> and open issues are labelled `on-hold`. To resume, re-enable the commented-out
+> `schedule:` blocks in `.github/workflows/`, set `enabled: true` in `renovate.json`,
+> and stand up a runner for the scheduled runner-backed workflows.
 
 ```sh
 sudo csd observe --container my-postgres --duration 30s --workload ./exercise.sh

@@ -22,9 +22,12 @@ on:
         description: "Per-observer observation window (Go duration, e.g. 30s)"
         required: false
         default: "30s"
-  schedule:
-    # Weekly (Mon 06:00 UTC). schedule runs on the default branch only.
-    - cron: "0 6 * * 1"
+  # PAUSED 2026-08-02 — csd development is paused; the weekly schedule is disabled
+  # to stop Actions runs on a dormant repo. workflow_dispatch covers on-demand
+  # runs. Re-enable this schedule when development resumes.
+  # schedule:
+  #   # Weekly (Mon 06:00 UTC). schedule runs on the default branch only.
+  #   - cron: "0 6 * * 1"
 
 permissions:
   contents: read

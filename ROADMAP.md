@@ -1,5 +1,10 @@
 # Roadmap
 
+> ⏸️ **Development paused (2026-08-02).** csd is on a maintenance freeze at v0.7.0. The
+> roadmap below is retained as the intended direction; no phases are actively in progress
+> while paused. See the README banner for what the pause changes (scheduled CI disabled,
+> issues labelled `on-hold`).
+
 The architecture in [PLAN.md](PLAN.md) anticipates a multi-observer future. v1 ships exactly one observer (capabilities); each subsequent phase adds an observer to the same framework — same attribution layer, same output schema, additional formatters as needed.
 
 Phases are ordered by *leverage per unit of work*, not by chronology. Real ordering will adapt to user demand and prototype findings.

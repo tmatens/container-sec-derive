@@ -28,9 +28,14 @@ on:
       - 'docs/**'
       - 'renovate.json'
       - 'LICENSE'
-  schedule:
-    # Weekly; offset from codeql.yml so the two don't contend for runners.
-    - cron: "41 4 * * 1"
+  # PAUSED 2026-08-02 — csd development is paused; the weekly schedule is disabled
+  # to stop Actions runs on a dormant repo. The pull_request trigger above still
+  # gates any PR (e.g. Renovate); workflow_dispatch covers on-demand runs.
+  # Re-enable this schedule when development resumes.
+  workflow_dispatch:
+  # schedule:
+  #   # Weekly; offset from codeql.yml so the two don't contend for runners.
+  #   - cron: "41 4 * * 1"
 
 concurrency:
   group: govulncheck-${{ github.ref }}

@@ -139,7 +139,7 @@ jobs:
           # Pin cosign 2.x: 3.x removed --tlog-upload=false / --output-signature
           # (requires a --signing-config instead). Staying on 2.x preserves the
           # no-public-Rekor COI guarantee; Renovate keeps it patched within 2.x.
-          cosign-release: v2.6.3
+          cosign-release: v2.6.4
       - name: cosign sign-blob (key-based, no transparency log)
         working-directory: dist
         env:
@@ -312,7 +312,7 @@ jobs:
         with:
           # Pin cosign 2.x — see the sign-blob job above. 3.x breaks the
           # --tlog-upload=false no-public-Rekor flow used by all sign/attest steps.
-          cosign-release: v2.6.3
+          cosign-release: v2.6.4
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io

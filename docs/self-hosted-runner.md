@@ -109,9 +109,14 @@ Extra prerequisite beyond the smoke suite above: a repo secret **`CATALOG_PAT`**
 `tmatens/container-security-profiles` **only** (it clones the catalog and opens
 the PR/issue). No other secret is needed; git operations against `csd` itself use
 the workflow's `GITHUB_TOKEN`. It triggers on `schedule` + `workflow_dispatch`
-(never on a PR), so it always runs reviewed `main` code. The weekly cron runs
-unattended because the `csd` runner is an **always-on, autostarted** VM (so it is
-online at cron time); it can also be run on demand any time.
+(never on a PR), so it always runs reviewed `main` code. An unattended weekly
+cron requires a runner that is **online at cron time** — historically an
+always-on, autostarted VM on the homelab host, which was **deregistered and
+deleted on 2026-08-02** as part of the development pause (the `schedule:`
+triggers are commented out too). While no runner is registered, running this
+workflow means standing up a `csd`-labelled runner first (ephemeral is fine,
+per the registration sketch above) and using `workflow_dispatch`; restoring the
+weekly cron means bringing back an always-on runner.
 
 ## Matching the target's security posture (for MAC/BPF-class caps)
 

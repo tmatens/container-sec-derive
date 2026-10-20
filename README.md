@@ -445,7 +445,7 @@ cosign verify-attestation \
   ghcr.io/tmatens/container-sec-derive:0.7.0
 ```
 
-> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.7.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. The GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only remaining public act is flipping the GHCR package visibility to public, done after the COI decision.
+> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.7.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. The GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only remaining public act is flipping the GHCR package visibility to public, done when the maintainer decides.
 
 ## License
 

@@ -125,10 +125,10 @@ A drop-test can prove a capability *needed* (removing it broke something) but
 (see `docs/re-derive-at-deploy.md`). So for `SYS_ADMIN` / BPF- / MAC-adjacent
 capabilities to be trustworthy, the derive host must **match the deployment
 target's security posture**. Run it as a **Debian 13 VM on the homelab host**
-(`mini-server1`) — same hardware, isolated from production, and it matches by
+— same hardware, isolated from production, and it matches by
 construction.
 
-### The spec to match (`mini-server1`, the deploy target)
+### The spec to match (the deploy target)
 
 | axis | value | notes |
 |---|---|---|

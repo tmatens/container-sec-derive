@@ -6,7 +6,7 @@
 # a GitHub Release, and (Phase B) builds + signs the GHCR image.
 #
 # SIGNING IS KEY-BASED, NOT KEYLESS. The project is unpublished pending an
-# employer COI decision, and "nothing public" includes the public Rekor
+# publication decision, and "nothing public" includes the public Rekor
 # transparency log. So every cosign call uses --key env://COSIGN_PRIVATE_KEY
 # with --tlog-upload=false and writes NO public log entry. Requires repo
 # secrets COSIGN_PRIVATE_KEY + COSIGN_PASSWORD and a committed cosign.pub
@@ -138,7 +138,7 @@ jobs:
         with:
           # Pin cosign 2.x: 3.x removed --tlog-upload=false / --output-signature
           # (requires a --signing-config instead). Staying on 2.x preserves the
-          # no-public-Rekor COI guarantee; Renovate keeps it patched within 2.x.
+          # no-public-Rekor guarantee; Renovate keeps it patched within 2.x.
           cosign-release: v2.6.4
       - name: cosign sign-blob (key-based, no transparency log)
         working-directory: dist
@@ -146,7 +146,7 @@ jobs:
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         # Key-based + --tlog-upload=false writes NO public Rekor entry
-        # (the project is unpublished pending COI; nothing public). Each
+        # (the package is private; nothing public). Each
         # artifact gets a detached <file>.sig, verified offline with:
         #   cosign verify-blob --key cosign.pub --insecure-ignore-tlog \
         #     --signature f.sig f
@@ -208,12 +208,12 @@ jobs:
   # manifest list, then cosign KEY-BASED (no-tlog) sign + attest (SBOM +
   # OpenVEX). Auth is the ephemeral GITHUB_TOKEN — no Docker Hub secret.
   #
-  # COI posture: per the maintainer's rule, PRIVATE publishing is fine —
+  # Publishing posture: PRIVATE publishing is fine —
   # only PUBLIC exposure is gated. GHCR packages are PRIVATE by default, so
   # these jobs publish a private, collaborator-only image and write NO
   # public Rekor entry (key-based, --tlog-upload=false). THE ONLY PUBLIC /
-  # COI-GATED ACT is flipping the GHCR package visibility to public — a
-  # manual step done only after the COI decision. Keep the package private
+  # PUBLIC ACT is flipping the GHCR package visibility to public — a
+  # manual step done only when the maintainer decides. Keep the package private
   # until then. (No in-workflow approval gate is needed because the push
   # itself exposes nothing publicly.)
   #

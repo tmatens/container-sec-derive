@@ -12,7 +12,7 @@
 # belong here. `compose_path` and `service` locate the service inside the repo.
 services:
   - name: netdata
-    forgejo_repo: dad/netdata
+    forgejo_repo: netdata
     compose_path: docker-compose.yml
     service: netdata
     correctness: testdata/drop-test/correctness/netdata.sh
@@ -26,7 +26,7 @@ services:
   # derivation is faithful. Expected verdict: matches (as its own config owner it
   # needs no caps → minimum [] == the declared cap_drop: ALL).
   - name: homepage
-    forgejo_repo: dad/home
+    forgejo_repo: home
     compose_path: docker-compose.yml
     service: homepage
     correctness: testdata/drop-test/correctness/homepage.sh
@@ -45,7 +45,7 @@ services:
   # (see docs/re-derive-at-deploy.md). Its `${CF_API_TOKEN}` etc. are replaced by a
   # placeholder so the config loads without secrets on the derive host.
   - name: caddy
-    forgejo_repo: dad/caddy_reverse_proxy
+    forgejo_repo: caddy_reverse_proxy
     compose_path: docker-compose.yml
     service: caddy
     correctness: testdata/drop-test/correctness/caddy_deploy.sh
@@ -74,7 +74,7 @@ services:
   # hit that, so the guard is a regression tripwire, proven by the hermetic
   # compose_derive_selftest cases, not a live red.
   - name: immich-db
-    forgejo_repo: dad/immich
+    forgejo_repo: immich
     compose_path: docker-compose.yaml
     service: database
     correctness: testdata/drop-test/correctness/postgres_deploy.sh
@@ -91,7 +91,7 @@ services:
   # live deploy, immich #44). Expected verdict now: matches. The correctness check
   # does an auth-aware PING + SET/GET round-trip and asserts a non-root server uid.
   - name: immich-redis
-    forgejo_repo: dad/immich
+    forgejo_repo: immich
     compose_path: docker-compose.yaml
     service: redis
     correctness: testdata/drop-test/correctness/redis_deploy.sh

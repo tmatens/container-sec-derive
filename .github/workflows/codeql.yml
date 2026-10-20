@@ -10,7 +10,7 @@
 # WHEN THE REPO GOES PUBLIC (or GHAS is enabled): set `upload: always` on the
 # analyze step, add `security-events: write` to the job permissions, drop the
 # upload-artifact step, and CodeQL alerts land in the Security tab and on PRs
-# automatically. (This is the same COI-gated flip as OpenSSF Scorecard and
+# automatically. (This is the same public flip as OpenSSF Scorecard and
 # cosign keyless — see ROADMAP §Maturity.)
 #
 # Pinning (CLAUDE.md §Dependency pinning): every `uses:` is SHA-pinned with a

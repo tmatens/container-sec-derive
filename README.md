@@ -1,15 +1,12 @@
 # container-sec-derive
 
-[![release](https://img.shields.io/badge/release-v0.7.0-blue)](https://github.com/tmatens/container-sec-derive/releases/tag/v0.7.0)
+[![release](https://img.shields.io/github/v/release/tmatens/container-sec-derive)](https://github.com/tmatens/container-sec-derive/releases/latest)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![go](https://img.shields.io/badge/go-1.26%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 [![signed: cosign](https://img.shields.io/badge/signed-cosign%20key--based-orange?logo=sigstore&logoColor=white)](#verifying-release-artifacts)
 [![SBOM](https://img.shields.io/badge/SBOM-SPDX%20%2B%20CycloneDX-informational)](#verifying-release-artifacts)
 
-<!-- Badges are intentionally static: the repo + GHCR package are private while
-     the project is unpublished (COI), so dynamic shields (github/v/release,
-     package pulls) would render broken or leak existence. Swap to dynamic
-     badges when the project goes public. -->
+<!-- Package-pull shields are left out: the GHCR package is private. -->
 
 **`csd` watches a container run (eBPF) and emits the minimum security config it actually needed — with evidence.**
 
@@ -153,7 +150,7 @@ Released images are published to the GitHub Container Registry:
 - **Tags:** `0.7.0` and `0.7` (semver, no `v` prefix); multi-arch (`linux/amd64`, `linux/arm64`).
 
 ```sh
-# The package is private (see the COI note below) — authenticate to GHCR first.
+# The package is private (see the note below) — authenticate to GHCR first.
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <your-github-username> --password-stdin
 
 docker pull ghcr.io/tmatens/container-sec-derive:0.7.0
@@ -161,7 +158,7 @@ docker pull ghcr.io/tmatens/container-sec-derive:0.7.0
 
 The image manifest is cosign-signed (key-based, no public Rekor) and carries an SPDX SBOM + OpenVEX attestation — verify it before use, see [Verifying release artifacts](#verifying-release-artifacts).
 
-> **Private while unpublished (COI).** The image is pushed **private** (collaborator-only) and signed with no public Rekor entry. The only public/COI-gated step is flipping the GHCR package to public, done after the COI decision — so the package link above resolves for authenticated collaborators, not anonymously.
+> **Package is private.** The image is pushed **private** (collaborator-only) and signed with no public Rekor entry. Flipping the GHCR package to public is a separate, manual step — so the package link above resolves for authenticated collaborators, not anonymously.
 
 ## Building from source
 
@@ -448,7 +445,7 @@ cosign verify-attestation \
   ghcr.io/tmatens/container-sec-derive:0.7.0
 ```
 
-> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.7.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. Per the project's COI posture, **private** publishing is fine — the GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only public/COI-gated act is flipping the GHCR package visibility to public, done after the COI decision.
+> **Status:** live since `v0.1.0` (the first signed release); the examples target the current `0.7.0` — substitute the tag you pulled. These commands work against the published image for authenticated collaborators. The GHCR image is pushed **private** (collaborator-only) and signed with no public Rekor entry; the only remaining public act is flipping the GHCR package visibility to public, done after the COI decision.
 
 ## License
 

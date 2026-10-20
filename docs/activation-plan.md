@@ -7,7 +7,7 @@ session can pick it up cold.
 
 ## The one blocker: the derivation host
 
-**Decided: a Debian 13 VM on `mini-server1`.** It matches the deploy target's
+**Decided: a Debian 13 VM on the homelab host.** It matches the deploy target's
 security posture by construction (so `SYS_ADMIN`/BPF/MAC-class caps derive
 truthfully), isolates the privileged, container-churning drop-test from
 production, costs nothing, and keeps private images/secrets in the homelab.
@@ -20,7 +20,7 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
 
 ## Prerequisites (provision once)
 
-1. **Build the VM** — stock Debian 13 (trixie) on `mini-server1` (KVM/libvirt).
+1. **Build the VM** — stock Debian 13 (trixie) on the homelab host (KVM/libvirt).
    Verify it against the checklist in `self-hosted-runner.md` (`unprivileged_bpf_disabled=2`,
    AppArmor `Y`, Docker default seccomp+apparmor, BTF present).
 2. **Install** — Docker (the normal way), passwordless `sudo` for the runner
@@ -44,7 +44,7 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
 ### 2. Build the scheduled deploy-check job — **BUILT**
 - `deploy-check.yml` + `scripts/deploy_check.sh` + `deploy-check/manifest.yaml`
   (csd#240): on the `csd` runner, per manifest entry, clone the service's **live**
-  `dad/*` compose from Forgejo and run `compose_derive.sh` against it → per-service
+  each service's compose from Forgejo and run `compose_derive.sh` against it → per-service
   `deploy_check` verdict in the job summary. **Enforced** (`ENFORCE=1`): fails the
   run on an under_permissioned service; over_permissioned / not_minimized stay
   advisory.
@@ -69,7 +69,7 @@ host with AppArmor *off* (a default Arch box) or a non-matching kernel.
   per-process metric collects as **0 (not null)** — a "has data (non-null)" check
   passed on all-zeros and a 5→3 attempt regressed production. The correctness check
   now requires a per-process `fds_open` to be **non-zero**, so the drop-test detects
-  it. Deployed + verified at `dad/netdata` #32.
+  it. Deployed + verified in the netdata service repo (PR #32).
 - **Tier the library:** curated full-functionality correctness checks for the homelab
   set; the generic floor (`correctness/compose_generic.sh`) + a loud caveat for
   the long tail. Never *enforce* on a generic-tier result.

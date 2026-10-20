@@ -36,7 +36,7 @@ commit/push/tag). It does **not** touch `SchemaVersion` (see below).
   release.
 - Reviewing + merging the prepare-release PR.
 - Creating and pushing the signed tag.
-- Flipping GHCR package visibility to public — **COI-gated**, done out of band
+- Flipping GHCR package visibility to public — a manual step, done out of band
   after the clearance decision (and only then is switching cosign back to
   keyless OIDC + Rekor a deliberate, reviewable change).
 
@@ -83,7 +83,7 @@ there. By release time it is already correct.
    signed artifacts.
 5. **Post-release.** Confirm the GitHub Release lists the binaries, SBOMs,
    `SHA256SUMS`, and `.sig`/bundle files. GHCR visibility stays **private**
-   until the COI decision; no in-pipeline approval gate exists for it.
+   until the maintainer decides to; no in-pipeline approval gate exists for it.
 
 ## If something goes wrong
 

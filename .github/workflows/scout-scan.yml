@@ -6,7 +6,7 @@
 # does not spuriously fail the scan. High-severity stays warning-only.
 #
 # HELD WITH PHASE B: this scans ghcr.io/tmatens/container-sec-derive:latest,
-# which does not exist until the COI-gated image publish runs (and the
+# which does not exist until the public image publish runs (and the
 # GHCR package starts private). Until then the schedule is intentionally
 # OFF (workflow_dispatch only) so it does not fail daily against a
 # missing/private image. Uncomment the `schedule:` block once the first

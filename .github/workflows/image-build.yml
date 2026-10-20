@@ -10,7 +10,7 @@
 #
 # Phase A intentionally does NOT push, log into a registry, or cosign
 # the manifest. Those land in Phase B once the publishing-permission
-# gate clears (employer COI clearance). Keeping the publish jobs out
+# gate clears. Keeping the publish jobs out
 # of this workflow means there is no path to accidentally publish
 # from this workflow even if a workflow_dispatch fires it: there are
 # no registry secrets in scope and no `permissions: packages: write`.

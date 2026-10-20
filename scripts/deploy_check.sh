@@ -19,7 +19,7 @@
 # Clone transport:
 #   FORGEJO_SSH=1                -> git clone forgejo:<repo>.git   (SSH key; local)
 #   else FORGEJO_RO_TOKEN=<tok>  -> HTTPS with an Authorization header (CI)
-#     FORGEJO_BASE default https://git.matens.xyz
+#     FORGEJO_BASE=<Forgejo URL including the owner path, e.g. https://forge.example/org>  (required)
 #
 #   PY=python3 [ENFORCE=1] bash scripts/deploy_check.sh   [> summary.md]
 set -uo pipefail
@@ -27,7 +27,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PY="${PY:-python3}"
 MANIFEST="${MANIFEST:-$REPO/deploy-check/manifest.yaml}"
-FORGEJO_BASE="${FORGEJO_BASE:-https://git.matens.xyz}"
+FORGEJO_BASE="${FORGEJO_BASE:?set FORGEJO_BASE to the Forgejo base URL}"
 ENFORCE="${ENFORCE:-}"   # set to fail (exit 12) on an under_permissioned service
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 [ -f "$MANIFEST" ] || { echo "no manifest at $MANIFEST" >&2; exit 2; }

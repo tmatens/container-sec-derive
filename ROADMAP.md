@@ -364,10 +364,10 @@ but together they are the difference between "works" and "mature."
 - ✅ **CodeQL** (`codeql.yml`) — Go + GitHub-Actions static analysis, gating
   PRs + push + weekly. Runs in **artifact mode** (`upload: false` → SARIF
   artifact) because csd is a **private repo without GitHub Advanced Security**,
-  so code scanning / the Security tab are unavailable. **COI-gated flip:** when
+  so code scanning / the Security tab are unavailable. **Public flip:** when
   the repo goes public (or GHAS is enabled), switch `upload: true` + add
   `security-events: write` and alerts land in the Security tab + PRs.
-- **OpenSSF Scorecard** (`scorecard.yml`) — **deferred, COI-gated.** Its value
+- **OpenSSF Scorecard** (`scorecard.yml`) — **deferred until the package is public.** Its value
   (the published supply-chain score + SARIF in the Security tab) needs a
   **public** repo; `publish_results` on a private repo would also leak the
   repo's existence (same reason the README badges are static). Add it at the

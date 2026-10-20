@@ -17,7 +17,7 @@
   ],
   "packageRules": [
     {
-      "description": "Keep cosign on 2.x: 3.x dropped --tlog-upload=false / --output-signature (needs a --signing-config), which breaks the no-public-Rekor COI signing flow in release.yml. Moving to 3.x is a deliberate, tested migration, not an auto-bump.",
+      "description": "Keep cosign on 2.x: 3.x dropped --tlog-upload=false / --output-signature (needs a --signing-config), which breaks the no-public-Rekor signing flow in release.yml. Moving to 3.x is a deliberate, tested migration, not an auto-bump.",
       "matchDepNames": ["sigstore/cosign"],
       "allowedVersions": "<3.0.0"
     },

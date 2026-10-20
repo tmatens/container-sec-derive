@@ -22,7 +22,8 @@ name: deploy-check
 #     runner user in the docker group. (No Go/ig needed — compose_derive is
 #     docker + python only.)
 #   - a repo secret FORGEJO_RO_TOKEN: a READ-ONLY Forgejo token that can read the
-#     in-scope dad/* service repos on git.matens.xyz.
+#     in-scope service repos on the private Forgejo (base URL in the
+#     FORGEJO_BASE secret).
 on:
   # PAUSED 2026-08-02 — csd development is paused; the weekly schedule is disabled
   # to stop Actions runs on a dormant repo. workflow_dispatch covers on-demand
@@ -41,6 +42,7 @@ jobs:
       - name: deploy-check (enforce — fails on under_permissioned)
         env:
           FORGEJO_RO_TOKEN: ${{ secrets.FORGEJO_RO_TOKEN }}
+          FORGEJO_BASE: ${{ secrets.FORGEJO_BASE }}
           ENFORCE: "1"
         run: |
           # stdout = the verdict table (captured to summary.md for the report step);
